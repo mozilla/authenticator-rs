@@ -1,0 +1,6 @@
+[package]
+name = "u2f-hid"
+version = "0.1.0"
+authors = ["Kyle Machulis <kyle@nonpolynomial.com>"]
+
+[dependencies]
