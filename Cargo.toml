@@ -1,6 +1,10 @@
 [package]
-name = "u2f-hid"
+name = "u2fhid"
 version = "0.1.0"
 authors = ["Kyle Machulis <kyle@nonpolynomial.com>"]
 
-[dependencies]
+[target.x86_64-unknown-linux-gnu.dependencies]
+nix = "^0.7"
+libudev = "^0.2"
+libc = "^0.2"
+clap = {version = "2", features = ["yaml"]}
