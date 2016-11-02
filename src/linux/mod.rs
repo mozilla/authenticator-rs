@@ -4,7 +4,8 @@ use std::fs::{File, OpenOptions};
 use std::os::unix::io::AsRawFd;
 use std::io;
 use std::io::{Read, Write};
-use ::{init_device, CID_BROADCAST, U2FHIDInitResp};
+use ::{init_device, CID_BROADCAST};
+use U2FDevice;
 
 #[allow(non_camel_case_types)]
 #[repr(C)]
@@ -17,11 +18,13 @@ pub struct hidraw_report_descriptor {
 ioctl!(read hidiocgrdescsize with b'H', 0x01; ::libc::c_int);
 ioctl!(read hidiocgrdesc with b'H', 0x02; /*struct*/ hidraw_report_descriptor);
 
+#[derive(Debug)]
 pub struct Device {
+    // TODO: Does this need a lifetime?
     pub device: File,
     pub blocking: bool,
     pub uses_numbered_reports: bool,
-    pub cid: u32,
+    pub cid: [u8; 4],
 }
 
 #[derive(Debug)]
@@ -79,16 +82,15 @@ fn get_bytes(desc: &[u8], num_bytes: usize, cur: usize) -> u32 {
 
 fn get_usage(desc: &[u8]) -> Result<DeviceUsage, ()> {
     let mut du : DeviceUsage = DeviceUsage::new();
-    let mut size_code: u8 = 0;
-    let mut data_len: usize = 0;
-    let mut key_size: i32 = 0;
+    let mut size_code: u8;
+    let mut data_len: usize;
+    let mut key_size: i32;
     let mut usage_found: bool = false;
     let mut usage_page_found: bool = false;
     let mut i: usize = 0;
     while i < desc.len() {
         let key = desc[i];
         let key_cmd = key & 0xfc;
-        data_len = 0;
         if key & 0xf0 == 0xf0 {
             return Err(());
         }
@@ -99,7 +101,7 @@ fn get_usage(desc: &[u8]) -> Result<DeviceUsage, ()> {
             1 => data_len = size_code as usize,
             2 => data_len = size_code as usize,
             3 => data_len = 4,
-            default => data_len = 0
+            _ => data_len = 0
 	      };
         key_size = 1;
         println!("start: {0}, len: {1}", i, data_len);
@@ -195,11 +197,29 @@ pub fn find_keys() -> io::Result<()> {
     Ok(())
 }
 
-pub fn write(dev: &mut Device, bytes: &[u8]) -> io::Result<usize> {
-    println!("writing to device! {:?}", dev.device);
-    dev.device.write(bytes)
+impl Read for Device {
+    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        self.device.read(bytes)
+    }
 }
 
-pub fn read(dev: &mut Device, bytes: &mut [u8]) -> io::Result<usize> {
-    dev.device.read(bytes)
+impl Write for Device {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        println!("writing to device! {:?}", self.device);
+        self.device.write(bytes)
+    }
+
+    // nop
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl U2FDevice for Device {
+    fn get_cid(&self) -> [u8; 4] {
+        return self.cid.clone();
+    }
+    fn set_cid(&mut self, cid: &[u8; 4]) {
+        self.cid.clone_from(cid);
+    }
 }

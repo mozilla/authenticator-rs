@@ -13,9 +13,10 @@ pub mod platform;
 
 use std::mem;
 use std::io;
+use std::io::{Read,Write};
 
 const HID_RPT_SIZE : usize = 64;
-const CID_BROADCAST : u32 = 0xffffffff;
+const CID_BROADCAST : [u8; 4] = [0xff, 0xff, 0xff, 0xff];
 const TYPE_MASK : u8 = 0x80;
 const TYPE_INIT : u8 = 0x80;
 const TYPE_CONT : u8 = 0x80;
@@ -61,15 +62,21 @@ const ERR_LOCK_REQUIRED   : u8 =    0x0a;	// Command requires channel lock
 const ERR_INVALID_CID     : u8 =    0x0b;	// Command not allowed on this cid
 const ERR_OTHER           : u8 =    0x7f;	// Other unspecified error
 
+pub trait U2FDevice {
+    fn get_cid(&self) -> [u8; 4];
+    fn set_cid(&mut self, cid: &[u8; 4]);
+}
+
 #[repr(packed)]
 struct U2FHIDInitReq {
     nonce: [u8; INIT_NONCE_SIZE]
 }
 
 #[repr(packed)]
+#[derive(Debug)]
 struct U2FHIDInitResp {
     nonce: [u8; INIT_NONCE_SIZE],
-    cid: u32,
+    cid: [u8; 4],
     version_interface: u8,
     version_major: u8,
     version_minor: u8,
@@ -79,28 +86,57 @@ struct U2FHIDInitResp {
 
 #[repr(packed)]
 struct U2FHIDInit {
-    cid: u32,
+    cid: [u8; 4],
     cmd: u8,
     bcnth: u8,
     bcntl: u8,
-    data: [u8; HID_RPT_SIZE - 7]
+    pub data: [u8; HID_RPT_SIZE - 7]
 }
 
 #[repr(packed)]
 struct U2FHIDCont {
-    cid: u32,
+    cid: [u8; 4],
     seq: u8,
-    data: [u8; HID_RPT_SIZE - 5]
+    pub data: [u8; HID_RPT_SIZE - 5]
 }
 
-pub fn init_device(dev: &mut platform::Device) {
+fn print_array(arr: &[u8]) {
+    let mut i = 0;
+    while i < arr.len() {
+        print!("0x{:02x}, ", arr[i]);
+        i += 1;
+        if i % 8 == 0 {
+            println!();
+        }
+    }
+}
+
+pub fn init_device<T>(dev: &mut T) -> io::Result<()>
+    where T: U2FDevice + Read + Write
+{
     println!("Initing device!");
+    // TODO This is not a nonce. This is the opposite of a nonce.
     let nonce = vec![0x8, 0x7, 0x6, 0x5, 0x4, 0x3, 0x2, 0x1];
-    let mut recv : Vec<u8> = Vec::new();
-    sendrecv(dev, U2FHID_INIT, &nonce, &mut recv);
+    let r : U2FHIDInitResp;
+    match sendrecv(dev, U2FHID_INIT, &nonce) {
+        Ok(st) => r = st,
+        Err(e) => {
+            return Err(e);
+        }
+    }
+    println!("{:?}", r);
+    if nonce != r.nonce {
+        return Err(io::Error::new(io::ErrorKind::Other, "Nonces do not match!"));
+    }
+    dev.set_cid(&r.cid);
+    Ok(())
 }
 
-pub fn sendrecv(dev: &mut platform::Device, cmd: u8, send: &Vec<u8>, recv: &mut Vec<u8>) -> io::Result<()> {
+pub fn sendrecv<T, R>(dev: &mut T,
+                      cmd: u8,
+                      send: &Vec<u8>) -> io::Result<R>
+    where T: U2FDevice + Read + Write
+{
     let mut data_sent: usize = 0;
     let mut sequence: u8 = 0;
 
@@ -111,36 +147,37 @@ pub fn sendrecv(dev: &mut platform::Device, cmd: u8, send: &Vec<u8>, recv: &mut 
 
         if data_sent == 0 {
             let mut uf = U2FHIDInit {
-                cid: dev.cid,
+                cid: dev.get_cid(),
                 cmd: cmd,
                 bcnth: (send.len() >> 8) as u8,
                 bcntl: send.len() as u8,
                 data: [0; HID_RPT_SIZE - 7]
             };
             // clone_from_slice panics if src/dst sizes don't match.
+            // TODO This isn't subdividing large datasets correctly.
             uf.data[0..send.len()].clone_from_slice(send);
             unsafe {
                 frame = mem::transmute(uf);
             }
         } else {
-            let uf = U2FHIDCont {
-                cid: dev.cid,
+            let mut uf = U2FHIDCont {
+                cid: dev.get_cid(),
                 seq: sequence,
                 data: [0; HID_RPT_SIZE - 5]
-            }
+            };
+            // TODO This isn't subdividing large datasets correctly.
             uf.data[0..send.len()].clone_from_slice(send);
             unsafe {
                 frame = mem::transmute(uf);
             }
         }
-
+        print_array(&frame);
         sequence += 1;
         // TODO Figure out nicer way to prepend record number
         let mut frame_data : [u8; HID_RPT_SIZE + 1] = [0u8; HID_RPT_SIZE + 1];
         frame_data[0] = 0;
         frame_data[1..].clone_from_slice(&frame);
-
-        match platform::write(dev, &frame_data) {
+        match dev.write(&frame_data) {
             Ok(n) => data_sent += n,
             Err(er) => {
                 println!("Write fucked up! {:?}", er);
@@ -157,18 +194,14 @@ pub fn sendrecv(dev: &mut platform::Device, cmd: u8, send: &Vec<u8>, recv: &mut 
     let mut raw_frame : [u8; HID_RPT_SIZE] = [0u8; HID_RPT_SIZE];
 
     // TODO Check the status of the read, figure out how we'll deal with timeouts.
-    let recvlen = platform::read(dev, &mut raw_frame).unwrap();
-    println!("Read! {:?}", recvlen);
-    for x in 0..64 {
-        println!("{:?}", raw_frame[x]);
-    }
+    let recvlen = dev.read(&mut raw_frame).unwrap();
     // We'll get an init packet back from USB, open it to see how much we'll be
     // reading overall. (should unpack to an init struct)
     let mut info_frame : U2FHIDInit;
     unsafe {
         info_frame = mem::transmute(raw_frame);
     }
-
+    print_array(&raw_frame);
     // Read until we've exhausted the total read amount or error out
     let datalen : usize = (info_frame.bcnth as usize) << 8 | (info_frame.bcntl as usize);
     //let recvlen : u16 = 0;
@@ -177,8 +210,8 @@ pub fn sendrecv(dev: &mut platform::Device, cmd: u8, send: &Vec<u8>, recv: &mut 
     println!("Receiving even more data!");
     while recvlen < datalen {
         let mut frame : [u8; HID_RPT_SIZE] = [0u8; HID_RPT_SIZE];
-        println!("Got more data! {:?}", platform::read(dev, &mut frame));
-
+        println!("Got more data! {:?}", dev.read(&mut frame));
+        print_array(&frame);
         let mut cont_frame : U2FHIDCont;
         unsafe {
             cont_frame = mem::transmute(frame);
@@ -186,11 +219,160 @@ pub fn sendrecv(dev: &mut platform::Device, cmd: u8, send: &Vec<u8>, recv: &mut 
         if cont_frame.seq != sequence + 1 {
             println!("Error in sequence number!");
             // TODO: This should be an error.
-            return Ok(());
+            return Err(io::Error::new(io::ErrorKind::Other, "Sequence numbers out of order!"));
         }
         sequence = cont_frame.seq;
     }
     println!("Finished receiving data!");
+    let ret : R;
+    unsafe {
+        // TODO Just make this a bounded transmute with a size check before it.
+        ret = std::mem::transmute_copy(&info_frame.data);
+    }
     // Return the read data buffer.
+    Ok(ret)
+}
+
+// https://en.wikipedia.org/wiki/Smart_card_application_protocol_data_unit
+const U2FAPDUHEADER_SIZE : usize = 7;
+#[repr(packed)]
+    struct U2FAPDUHeader {
+    cla : u8,
+    ins : u8,
+    p1 : u8,
+    p2 : u8,
+    lc : [u8; 3]
+}
+
+pub fn send_apdu<T>(dev: &mut T,
+                    cmd: u8,
+                    p1: u8,
+                    send: &Vec<u8>,
+                    recv: &mut Vec<u8>) -> io::Result<()>
+    where T: U2FDevice + Read + Write
+{
+    // TODO: Check send length to make sure it's < 2^16
+    let mut header = U2FAPDUHeader {
+        cla: 0,
+        ins: cmd,
+        p1: p1,
+        p2: 0,
+        lc: [0; 3]
+    };
+    // lc[0] should always be 0
+    header.lc[1] = (send.len() & 0xff) as u8;
+    header.lc[2] = (send.len() >> 8) as u8;
+    // Size of header, plus data, plus 2 0 bytes at the end for maximum return
+    // size.
+    let mut data_vec : Vec<u8> = vec![0; std::mem::size_of::<U2FAPDUHeader>() + send.len() + 2];
+    let header_raw : [u8; U2FAPDUHEADER_SIZE];
+    unsafe {
+        header_raw = mem::transmute(header);
+    }
+    data_vec[0..U2FAPDUHEADER_SIZE].clone_from_slice(&header_raw);
+    data_vec[U2FAPDUHEADER_SIZE..send.len() + U2FAPDUHEADER_SIZE].clone_from_slice(&send);
+    let mut base_recv = vec![0 as u8; 65536];
+    //sendrecv(dev, U2FHID_MSG, &data_vec, &mut base_recv);
     Ok(())
+}
+
+#[cfg(test)]
+    mod tests {
+    use ::{U2FDevice, init_device};
+    use std::error::Error;
+    mod platform {
+        use ::CID_BROADCAST;
+        use U2FDevice;
+        use std::io;
+        use std::io::{Read, Write};
+
+        pub struct TestDevice {
+            pub cid: [u8; 4],
+            pub expected_reads: Vec<Vec<u8>>,
+            pub expected_writes: Vec<Vec<u8>>,
+        }
+
+        impl TestDevice {
+            pub fn new() -> TestDevice {
+                TestDevice {
+                    cid: CID_BROADCAST,
+                    expected_reads: Vec::new(),
+                    expected_writes: Vec::new()
+                }
+            }
+        }
+
+        impl Write for TestDevice {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                // Pop a vector from the expected writes, check for quality
+                // against bytes array.
+                let check = match self.expected_writes.pop() {
+                    Some(c) => c,
+                    None => panic!("Ran out of expected reads!")
+                };
+                assert_eq!(check.len(), bytes.len());
+                assert_eq!(&check[..], bytes);
+                Ok(bytes.len())
+            }
+            // nop
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        impl Read for TestDevice {
+            fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+                // Pop a vector from the expected writes, check for quality
+                // against bytes array.
+                let check = match self.expected_reads.pop() {
+                    Some(c) => c,
+                    None => panic!("Ran out of expected reads!")
+                };
+                bytes.clone_from_slice(&check[..]);
+                Ok(check.len())
+            }
+        }
+        impl U2FDevice for TestDevice {
+            fn get_cid(&self) -> [u8; 4] {
+                return self.cid.clone();
+            }
+            fn set_cid(&mut self, cid: &[u8; 4]) {
+                self.cid = cid.clone();
+            }
+        }
+    }
+
+    #[test]
+    fn test_init_device() {
+        let mut device = platform::TestDevice::new();
+        device.expected_writes.push(vec![0x00, //record index
+                                         // data
+                                         0xff, 0xff, 0xff, 0xff, 0x86, 0x00, 0x08, 0x08,
+                                         0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01, 0x00,
+                                         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+        device.expected_reads.push(vec![0xff, 0xff, 0xff, 0xff, 0x86, 0x00, 0x11, 0x08,
+                                        0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01, 0x00,
+                                        0x03, 0x00, 0x14, 0x02, 0x04, 0x01, 0x08, 0x01,
+                                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+        if let Err(e) = init_device(&mut device) {
+            assert!(true, format!("Init device returned an error! {:?}", e.description()));
+        }
+        assert_eq!(device.get_cid(), [0x00, 0x03, 0x00, 0x14]);
+    }
+
+    #[test]
+    fn test_sendrecv_multiple() {
+    }
+
+    #[test]
+    fn test_sendapdu() {
+    }
 }
