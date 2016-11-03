@@ -84,20 +84,23 @@ struct U2FHIDInitResp {
     cap_flags: u8
 }
 
+const INIT_DATA_SIZE : usize = HID_RPT_SIZE - 7;
+const CONT_DATA_SIZE : usize = HID_RPT_SIZE - 5;
+
 #[repr(packed)]
 struct U2FHIDInit {
     cid: [u8; 4],
     cmd: u8,
     bcnth: u8,
     bcntl: u8,
-    pub data: [u8; HID_RPT_SIZE - 7]
+    pub data: [u8; INIT_DATA_SIZE]
 }
 
 #[repr(packed)]
 struct U2FHIDCont {
     cid: [u8; 4],
     seq: u8,
-    pub data: [u8; HID_RPT_SIZE - 5]
+    pub data: [u8; CONT_DATA_SIZE]
 }
 
 fn print_array(arr: &[u8]) {
@@ -114,17 +117,19 @@ fn print_array(arr: &[u8]) {
 pub fn init_device<T>(dev: &mut T) -> io::Result<()>
     where T: U2FDevice + Read + Write
 {
-    println!("Initing device!");
     // TODO This is not a nonce. This is the opposite of a nonce.
     let nonce = vec![0x8, 0x7, 0x6, 0x5, 0x4, 0x3, 0x2, 0x1];
-    let r : U2FHIDInitResp;
+    let raw : Vec<u8>;
+
     match sendrecv(dev, U2FHID_INIT, &nonce) {
-        Ok(st) => r = st,
+        Ok(st) => raw = st,
         Err(e) => {
             return Err(e);
         }
     }
-    println!("{:?}", r);
+    let ptr: *const u8 = raw.as_slice().as_ptr();
+    let ptr: *const U2FHIDInitResp = ptr as *const U2FHIDInitResp;
+    let r : &U2FHIDInitResp = unsafe { &*ptr };
     if nonce != r.nonce {
         return Err(io::Error::new(io::ErrorKind::Other, "Nonces do not match!"));
     }
@@ -132,30 +137,39 @@ pub fn init_device<T>(dev: &mut T) -> io::Result<()>
     Ok(())
 }
 
-pub fn sendrecv<T, R>(dev: &mut T,
+// pub fn wink_device<T>(dev: &mut T) -> io::Result<()>
+//     where T: U2FDevice + Read + Write
+// {
+// }
+
+pub fn sendrecv<T>(dev: &mut T,
                       cmd: u8,
-                      send: &Vec<u8>) -> io::Result<R>
+                      send: &Vec<u8>) -> io::Result<Vec<u8>>
     where T: U2FDevice + Read + Write
 {
     let mut data_sent: usize = 0;
     let mut sequence: u8 = 0;
 
-    println!("Sending data!");
     // Write Data.
     while send.len() > data_sent {
         let frame : [u8; HID_RPT_SIZE];
-
         if data_sent == 0 {
             let mut uf = U2FHIDInit {
                 cid: dev.get_cid(),
                 cmd: cmd,
                 bcnth: (send.len() >> 8) as u8,
                 bcntl: send.len() as u8,
-                data: [0; HID_RPT_SIZE - 7]
+                data: [0; INIT_DATA_SIZE]
             };
+            let data_buf_size = INIT_DATA_SIZE;
+            let send_length : usize;
+            if (send.len() - data_sent) > data_buf_size {
+                send_length = data_sent + data_buf_size;
+            } else {
+                send_length = send.len();
+            }
             // clone_from_slice panics if src/dst sizes don't match.
-            // TODO This isn't subdividing large datasets correctly.
-            uf.data[0..send.len()].clone_from_slice(send);
+            uf.data[data_sent..send_length].clone_from_slice(&send[data_sent..send_length]);
             unsafe {
                 frame = mem::transmute(uf);
             }
@@ -163,10 +177,16 @@ pub fn sendrecv<T, R>(dev: &mut T,
             let mut uf = U2FHIDCont {
                 cid: dev.get_cid(),
                 seq: sequence,
-                data: [0; HID_RPT_SIZE - 5]
+                data: [0; CONT_DATA_SIZE]
             };
-            // TODO This isn't subdividing large datasets correctly.
-            uf.data[0..send.len()].clone_from_slice(send);
+            let data_buf_size = CONT_DATA_SIZE;
+            let send_length : usize;
+            if (send.len() - data_sent) > data_buf_size {
+                send_length = data_sent + data_buf_size;
+            } else {
+                send_length = send.len();
+            }
+            uf.data[data_sent..send_length].clone_from_slice(&send[data_sent..send_length]);
             unsafe {
                 frame = mem::transmute(uf);
             }
@@ -179,58 +199,60 @@ pub fn sendrecv<T, R>(dev: &mut T,
         frame_data[1..].clone_from_slice(&frame);
         match dev.write(&frame_data) {
             Ok(n) => data_sent += n,
-            Err(er) => {
-                println!("Write fucked up! {:?}", er);
-                return Err(io::Error::new(io::ErrorKind::Other, "WRITING FUCKED UP"));
-            }
+            Err(er) => return Err(er)
         };
-        println!("Sent data!");
         // TODO Take care of result
     }
-    println!("Receiving data!");
+
     // Now we read. This happens in 2 chunks: The initial packet, which has the
     // size we expect overall, then continuation packets, which will fill in
     // data until we have everything.
     let mut raw_frame : [u8; HID_RPT_SIZE] = [0u8; HID_RPT_SIZE];
 
     // TODO Check the status of the read, figure out how we'll deal with timeouts.
-    let recvlen = dev.read(&mut raw_frame).unwrap();
+    dev.read(&mut raw_frame).unwrap();
+    let mut recvlen = INIT_DATA_SIZE;
     // We'll get an init packet back from USB, open it to see how much we'll be
     // reading overall. (should unpack to an init struct)
     let mut info_frame : U2FHIDInit;
     unsafe {
         info_frame = mem::transmute(raw_frame);
     }
-    print_array(&raw_frame);
     // Read until we've exhausted the total read amount or error out
     let datalen : usize = (info_frame.bcnth as usize) << 8 | (info_frame.bcntl as usize);
-    //let recvlen : u16 = 0;
+    let mut data : Vec<u8> = Vec::with_capacity(datalen);
+
+    let clone_len : usize;
+    if datalen < recvlen {
+        clone_len = datalen;
+    } else {
+        clone_len = recvlen;
+    }
+    data.extend(info_frame.data[0..clone_len].iter().cloned());
+    println!("{:?}", data);
     sequence = 0;
-    println!("Expecting data length: {:?}", datalen);
-    println!("Receiving even more data!");
     while recvlen < datalen {
+        println!("trying to get more data?");
         let mut frame : [u8; HID_RPT_SIZE] = [0u8; HID_RPT_SIZE];
-        println!("Got more data! {:?}", dev.read(&mut frame));
-        print_array(&frame);
         let mut cont_frame : U2FHIDCont;
         unsafe {
             cont_frame = mem::transmute(frame);
         }
         if cont_frame.seq != sequence + 1 {
-            println!("Error in sequence number!");
-            // TODO: This should be an error.
             return Err(io::Error::new(io::ErrorKind::Other, "Sequence numbers out of order!"));
         }
         sequence = cont_frame.seq;
+        if recvlen + CONT_DATA_SIZE > datalen {
+            data[recvlen..datalen].clone_from_slice(&cont_frame.data[0..(datalen-recvlen)]);
+        } else {
+            data[recvlen..(recvlen + CONT_DATA_SIZE)].clone_from_slice(&cont_frame.data);
+        }
+        recvlen += CONT_DATA_SIZE;
     }
-    println!("Finished receiving data!");
-    let ret : R;
     unsafe {
         // TODO Just make this a bounded transmute with a size check before it.
-        ret = std::mem::transmute_copy(&info_frame.data);
+        Ok(data)
     }
-    // Return the read data buffer.
-    Ok(ret)
 }
 
 // https://en.wikipedia.org/wiki/Smart_card_application_protocol_data_unit
@@ -252,16 +274,15 @@ pub fn send_apdu<T>(dev: &mut T,
     where T: U2FDevice + Read + Write
 {
     // TODO: Check send length to make sure it's < 2^16
-    let mut header = U2FAPDUHeader {
+    let header = U2FAPDUHeader {
         cla: 0,
         ins: cmd,
         p1: p1,
         p2: 0,
-        lc: [0; 3]
+        lc: [0, // lc[0] should always be 0
+             (send.len() & 0xff) as u8,
+             (send.len() >> 8) as u8]
     };
-    // lc[0] should always be 0
-    header.lc[1] = (send.len() & 0xff) as u8;
-    header.lc[2] = (send.len() >> 8) as u8;
     // Size of header, plus data, plus 2 0 bytes at the end for maximum return
     // size.
     let mut data_vec : Vec<u8> = vec![0; std::mem::size_of::<U2FAPDUHeader>() + send.len() + 2];
@@ -270,14 +291,14 @@ pub fn send_apdu<T>(dev: &mut T,
         header_raw = mem::transmute(header);
     }
     data_vec[0..U2FAPDUHEADER_SIZE].clone_from_slice(&header_raw);
-    data_vec[U2FAPDUHEADER_SIZE..send.len() + U2FAPDUHEADER_SIZE].clone_from_slice(&send);
+    data_vec[U2FAPDUHEADER_SIZE..(send.len() + U2FAPDUHEADER_SIZE)].clone_from_slice(&send);
     let mut base_recv = vec![0 as u8; 65536];
     //sendrecv(dev, U2FHID_MSG, &data_vec, &mut base_recv);
     Ok(())
 }
 
 #[cfg(test)]
-    mod tests {
+mod tests {
     use ::{U2FDevice, init_device};
     use std::error::Error;
     mod platform {
@@ -336,6 +357,7 @@ pub fn send_apdu<T>(dev: &mut T,
                 return self.cid.clone();
             }
             fn set_cid(&mut self, cid: &[u8; 4]) {
+                println!("Setting CID to {:?}", cid);
                 self.cid = cid.clone();
             }
         }
