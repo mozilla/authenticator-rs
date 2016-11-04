@@ -11,8 +11,7 @@ extern crate libudev;
 #[path="linux/mod.rs"]
 pub mod platform;
 
-use std::mem;
-use std::io;
+use std::{mem, io, slice};
 use std::io::{Read,Write};
 
 const HID_RPT_SIZE : usize = 64;
@@ -96,6 +95,17 @@ struct U2FHIDInit {
     pub data: [u8; INIT_DATA_SIZE]
 }
 
+pub fn to_u8_array<T>(non_ptr: &T) -> &[u8] {
+    unsafe {
+        slice::from_raw_parts(non_ptr as *const T as *const u8,
+                              mem::size_of::<T>())
+    }
+}
+
+pub fn from_u8_array<T>(arr: &[u8]) -> &T {
+    unsafe { &*(arr.as_ptr() as *const T) }
+}
+
 #[repr(packed)]
 struct U2FHIDCont {
     cid: [u8; 4],
@@ -143,8 +153,8 @@ pub fn init_device<T>(dev: &mut T) -> io::Result<()>
 // }
 
 pub fn sendrecv<T>(dev: &mut T,
-                      cmd: u8,
-                      send: &Vec<u8>) -> io::Result<Vec<u8>>
+                   cmd: u8,
+                   send: &Vec<u8>) -> io::Result<Vec<u8>>
     where T: U2FDevice + Read + Write
 {
     let mut data_sent: usize = 0;
@@ -152,7 +162,8 @@ pub fn sendrecv<T>(dev: &mut T,
 
     // Write Data.
     while send.len() > data_sent {
-        let frame : [u8; HID_RPT_SIZE];
+        let mut frame : [u8; HID_RPT_SIZE] = [0; HID_RPT_SIZE];
+        let data_buf_size;
         if data_sent == 0 {
             let mut uf = U2FHIDInit {
                 cid: dev.get_cid(),
@@ -161,7 +172,7 @@ pub fn sendrecv<T>(dev: &mut T,
                 bcntl: send.len() as u8,
                 data: [0; INIT_DATA_SIZE]
             };
-            let data_buf_size = INIT_DATA_SIZE;
+            data_buf_size = INIT_DATA_SIZE;
             let send_length : usize;
             if (send.len() - data_sent) > data_buf_size {
                 send_length = data_sent + data_buf_size;
@@ -170,26 +181,22 @@ pub fn sendrecv<T>(dev: &mut T,
             }
             // clone_from_slice panics if src/dst sizes don't match.
             uf.data[data_sent..send_length].clone_from_slice(&send[data_sent..send_length]);
-            unsafe {
-                frame = mem::transmute(uf);
-            }
+            frame.clone_from_slice(to_u8_array(&uf));
         } else {
             let mut uf = U2FHIDCont {
                 cid: dev.get_cid(),
                 seq: sequence,
                 data: [0; CONT_DATA_SIZE]
             };
-            let data_buf_size = CONT_DATA_SIZE;
+            data_buf_size = CONT_DATA_SIZE;
             let send_length : usize;
             if (send.len() - data_sent) > data_buf_size {
-                send_length = data_sent + data_buf_size;
+                send_length = data_buf_size;
             } else {
-                send_length = send.len();
+                send_length = send.len() - data_sent;
             }
-            uf.data[data_sent..send_length].clone_from_slice(&send[data_sent..send_length]);
-            unsafe {
-                frame = mem::transmute(uf);
-            }
+            uf.data[0..send_length].clone_from_slice(&send[data_sent..send_length + data_sent]);
+            frame.clone_from_slice(to_u8_array(&uf));
         }
         print_array(&frame);
         sequence += 1;
@@ -198,10 +205,9 @@ pub fn sendrecv<T>(dev: &mut T,
         frame_data[0] = 0;
         frame_data[1..].clone_from_slice(&frame);
         match dev.write(&frame_data) {
-            Ok(n) => data_sent += n,
+            Ok(n) => data_sent += data_buf_size,
             Err(er) => return Err(er)
         };
-        // TODO Take care of result
     }
 
     // Now we read. This happens in 2 chunks: The initial packet, which has the
@@ -214,10 +220,8 @@ pub fn sendrecv<T>(dev: &mut T,
     let mut recvlen = INIT_DATA_SIZE;
     // We'll get an init packet back from USB, open it to see how much we'll be
     // reading overall. (should unpack to an init struct)
-    let mut info_frame : U2FHIDInit;
-    unsafe {
-        info_frame = mem::transmute(raw_frame);
-    }
+    let mut info_frame : &U2FHIDInit = from_u8_array(&raw_frame);
+
     // Read until we've exhausted the total read amount or error out
     let datalen : usize = (info_frame.bcnth as usize) << 8 | (info_frame.bcntl as usize);
     let mut data : Vec<u8> = Vec::with_capacity(datalen);
@@ -230,29 +234,32 @@ pub fn sendrecv<T>(dev: &mut T,
     }
     data.extend(info_frame.data[0..clone_len].iter().cloned());
     println!("{:?}", data);
+    println!("{:?}", datalen);
     sequence = 0;
     while recvlen < datalen {
+        println!("{:?}", recvlen);
         println!("trying to get more data?");
         let mut frame : [u8; HID_RPT_SIZE] = [0u8; HID_RPT_SIZE];
-        let mut cont_frame : U2FHIDCont;
-        unsafe {
-            cont_frame = mem::transmute(frame);
+        dev.read(&mut frame).unwrap();
+        let mut cont_frame : &U2FHIDCont;
+        cont_frame = from_u8_array(&frame);
+        if cont_frame.cid != dev.get_cid() {
+            return Err(io::Error::new(io::ErrorKind::Other, "Wrong CID!"));
         }
         if cont_frame.seq != sequence + 1 {
             return Err(io::Error::new(io::ErrorKind::Other, "Sequence numbers out of order!"));
         }
         sequence = cont_frame.seq;
-        if recvlen + CONT_DATA_SIZE > datalen {
-            data[recvlen..datalen].clone_from_slice(&cont_frame.data[0..(datalen-recvlen)]);
+        if (recvlen + CONT_DATA_SIZE) > datalen {
+            println!("Last packet! {}", datalen-recvlen);
+            println!("{:?}", cont_frame.data[0..(datalen-recvlen)].iter());
+            data.extend(cont_frame.data[0..(datalen-recvlen)].iter().cloned());
         } else {
-            data[recvlen..(recvlen + CONT_DATA_SIZE)].clone_from_slice(&cont_frame.data);
+            data.extend(cont_frame.data.iter().cloned());
         }
         recvlen += CONT_DATA_SIZE;
     }
-    unsafe {
-        // TODO Just make this a bounded transmute with a size check before it.
-        Ok(data)
-    }
+    Ok(data)
 }
 
 // https://en.wikipedia.org/wiki/Smart_card_application_protocol_data_unit
@@ -298,11 +305,11 @@ pub fn send_apdu<T>(dev: &mut T,
 }
 
 #[cfg(test)]
-mod tests {
-    use ::{U2FDevice, init_device};
+    mod tests {
+    use ::{U2FDevice, init_device, sendrecv, U2FHID_PING, print_array};
     use std::error::Error;
     mod platform {
-        use ::CID_BROADCAST;
+        use ::{CID_BROADCAST, print_array};
         use U2FDevice;
         use std::io;
         use std::io::{Read, Write};
@@ -327,10 +334,10 @@ mod tests {
             fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
                 // Pop a vector from the expected writes, check for quality
                 // against bytes array.
-                let check = match self.expected_writes.pop() {
-                    Some(c) => c,
-                    None => panic!("Ran out of expected reads!")
-                };
+                assert!(self.expected_writes.len() > 0, "Ran out of expected write values!");
+                let check = self.expected_writes.remove(0);
+                println!("Expecting:");
+                print_array(&bytes[1..]);
                 assert_eq!(check.len(), bytes.len());
                 assert_eq!(&check[..], bytes);
                 Ok(bytes.len())
@@ -344,10 +351,8 @@ mod tests {
             fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
                 // Pop a vector from the expected writes, check for quality
                 // against bytes array.
-                let check = match self.expected_reads.pop() {
-                    Some(c) => c,
-                    None => panic!("Ran out of expected reads!")
-                };
+                assert!(self.expected_reads.len() > 0, "Ran out of expected read values!");
+                let check = self.expected_reads.remove(0);
                 bytes.clone_from_slice(&check[..]);
                 Ok(check.len())
             }
@@ -392,6 +397,86 @@ mod tests {
 
     #[test]
     fn test_sendrecv_multiple() {
+        let mut device = platform::TestDevice::new();
+        device.set_cid(&[1, 2, 3, 4]);
+        device.expected_writes.push(vec![0x00, //record index
+                                         // data
+                                         0x01, 0x02, 0x03, 0x04, U2FHID_PING, 0x00, 0xe4, 0x01,
+                                         0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                         0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                         0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                         0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                         0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                         0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                         0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01]);
+        device.expected_writes.push(vec![0x00, //record index
+                                         // data
+                                         0x01, 0x02, 0x03, 0x04, 0x01, 0x01, 0x01, 0x01,
+                                         0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                         0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                         0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                         0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                         0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                         0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                         0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01]);
+        device.expected_writes.push(vec![0x00, //record index
+                                         // data
+                                         0x01, 0x02, 0x03, 0x04, 0x02, 0x01, 0x01, 0x01,
+                                         0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                         0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                         0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                         0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                         0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                         0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                         0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01]);
+        device.expected_writes.push(vec![0x00,
+                                         0x01, 0x02, 0x03, 0x04, 0x03, 0x01, 0x01, 0x01,
+                                         0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                         0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                         0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                         0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                         0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                         0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                         0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+        device.expected_reads.push(vec![0x01, 0x02, 0x03, 0x04, U2FHID_PING, 0x00, 0xe4, 0x01,
+                                        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01]);
+        device.expected_reads.push(vec![0x01, 0x02, 0x03, 0x04, 0x01, 0x01, 0x01, 0x01,
+                                        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01]);
+        device.expected_reads.push(vec![0x01, 0x02, 0x03, 0x04, 0x02, 0x01, 0x01, 0x01,
+                                        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01]);
+        device.expected_reads.push(vec![0x01, 0x02, 0x03, 0x04, 0x03, 0x01, 0x01, 0x01,
+                                        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+                                        0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+
+        let d = match sendrecv(&mut device, U2FHID_PING, &vec![1 as u8; 0xe4]) {
+            Ok(c) => c,
+            Err(e) => panic!(format!("Init device returned an error! {:?}", e.description()))
+        };
+        assert_eq!(d.len(), 0xe4);
+        assert_eq!(d, vec![1 as u8; 0xe4]);
     }
 
     #[test]
