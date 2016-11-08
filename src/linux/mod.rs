@@ -4,7 +4,8 @@ use std::fs::{File, OpenOptions};
 use std::os::unix::io::AsRawFd;
 use std::io;
 use std::io::{Read, Write};
-use ::{init_device, CID_BROADCAST};
+use ::{init_device};
+use ::consts::CID_BROADCAST;
 use U2FDevice;
 
 #[allow(non_camel_case_types)]
@@ -141,17 +142,17 @@ fn get_usages(dev : &libudev::Device) -> io::Result<()> {
     fd = AsRawFd::as_raw_fd(&f);
     match from_nix_result(unsafe { hidiocgrdescsize(fd, &mut desc_size) }) {
         Ok(_) => println!("Descriptor size: {:?}", desc_size),
-        Err(e) => return Err(io::Error::new(io::ErrorKind::Other, "Can't get descriptor!"))
+        Err(e) => return Err(e)
     }
     println!("{:?} {:?}", dev.devnode(), dev.sysname());
     let mut rpt_desc: hidraw_report_descriptor = hidraw_report_descriptor::new(desc_size as u32);
     match from_nix_result(unsafe { hidiocgrdesc(fd, &mut rpt_desc) }) {
         Ok(_) => println!("Descriptor size: {:?}", desc_size),
-        Err(e) => return Err(io::Error::new(io::ErrorKind::Other, "Can't get descriptor!"))
+        Err(e) => return Err(e)
     }
     match get_usage(&rpt_desc.value[0..(desc_size as usize)]) {
         Ok(_) => Ok(()),
-        Err(er) => return Err(io::Error::new(io::ErrorKind::Other, "Can't get descriptor!"))
+        Err(_) => return Err(io::Error::new(io::ErrorKind::Other, "Can't get descriptor!"))
     }
 }
 

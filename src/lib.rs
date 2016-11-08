@@ -10,65 +10,16 @@ extern crate libudev;
 #[cfg(any(target_os = "linux"))]
 #[path="linux/mod.rs"]
 pub mod platform;
+mod consts;
 
+use consts::*;
 use std::{mem, io, slice};
-use std::io::{Read,Write};
+use std::io::{Read, Write};
 
-const HID_RPT_SIZE : usize = 64;
-const CID_BROADCAST : [u8; 4] = [0xff, 0xff, 0xff, 0xff];
-const TYPE_MASK : u8 = 0x80;
-const TYPE_INIT : u8 = 0x80;
-const TYPE_CONT : u8 = 0x80;
-
-const FIDO_USAGE_PAGE     : u16 =    0xf1d0;	// FIDO alliance HID usage page
-const FIDO_USAGE_U2FHID   : u8  =   0x01;	// U2FHID usage for top-level collection
-const FIDO_USAGE_DATA_IN  : u8  =   0x20;	// Raw IN data report
-const FIDO_USAGE_DATA_OUT : u8  =   0x21;	// Raw OUT data report
-
-// General constants
-
-const U2FHID_IF_VERSION    : u32 =  2;	// Current interface implementation version
-const U2FHID_FRAME_TIMEOUT : u32 =  500;	// Default frame timeout in ms
-const U2FHID_TRANS_TIMEOUT : u32 =  3000;	// Default message timeout in ms
-
-// U2FHID native commands
-
-const U2FHID_PING         : u8 = (TYPE_INIT | 0x01);	// Echo data through local processor only
-const U2FHID_MSG          : u8 = (TYPE_INIT | 0x03);	// Send U2F message frame
-const U2FHID_LOCK         : u8 = (TYPE_INIT | 0x04);	// Send lock channel command
-const U2FHID_INIT         : u8 = (TYPE_INIT | 0x06);	// Channel initialization
-const U2FHID_WINK         : u8 = (TYPE_INIT | 0x08);	// Send device identification wink
-const U2FHID_ERROR        : u8 = (TYPE_INIT | 0x3f);	// Error response
-const U2FHID_VENDOR_FIRST : u8 = (TYPE_INIT | 0x40);	// First vendor defined command
-const U2FHID_VENDOR_LAST  : u8 = (TYPE_INIT | 0x7f);	// Last vendor defined command
-
-// U2FHID_INIT command defines
-
-const INIT_NONCE_SIZE     : usize =    8;	// Size of channel initialization challenge
-const CAPFLAG_WINK        : u8 =    0x01;	// Device supports WINK command
-const CAPFLAG_LOCK        : u8 =    0x02;	// Device supports LOCK command
-
-// Low-level error codes. Return as negatives.
-
-const ERR_NONE            : u8 =    0x00;	// No error
-const ERR_INVALID_CMD     : u8 =    0x01;	// Invalid command
-const ERR_INVALID_PAR     : u8 =    0x02;	// Invalid parameter
-const ERR_INVALID_LEN     : u8 =    0x03;	// Invalid message length
-const ERR_INVALID_SEQ     : u8 =    0x04;	// Invalid message sequencing
-const ERR_MSG_TIMEOUT     : u8 =    0x05;	// Message has timed out
-const ERR_CHANNEL_BUSY    : u8 =    0x06;	// Channel busy
-const ERR_LOCK_REQUIRED   : u8 =    0x0a;	// Command requires channel lock
-const ERR_INVALID_CID     : u8 =    0x0b;	// Command not allowed on this cid
-const ERR_OTHER           : u8 =    0x7f;	// Other unspecified error
 
 pub trait U2FDevice {
     fn get_cid(&self) -> [u8; 4];
     fn set_cid(&mut self, cid: &[u8; 4]);
-}
-
-#[repr(packed)]
-struct U2FHIDInitReq {
-    nonce: [u8; INIT_NONCE_SIZE]
 }
 
 #[repr(packed)]
@@ -87,6 +38,7 @@ const INIT_DATA_SIZE : usize = HID_RPT_SIZE - 7;
 const CONT_DATA_SIZE : usize = HID_RPT_SIZE - 5;
 
 #[repr(packed)]
+#[allow(dead_code)]
 struct U2FHIDInit {
     cid: [u8; 4],
     cmd: u8,
@@ -128,17 +80,6 @@ struct U2FHIDCont {
     pub data: [u8; CONT_DATA_SIZE]
 }
 
-fn print_array(arr: &[u8]) {
-    let mut i = 0;
-    while i < arr.len() {
-        print!("0x{:02x}, ", arr[i]);
-        i += 1;
-        if i % 8 == 0 {
-            println!();
-        }
-    }
-}
-
 pub fn init_device<T>(dev: &mut T) -> io::Result<()>
     where T: U2FDevice + Read + Write
 {
@@ -167,7 +108,6 @@ pub fn sendrecv<T>(dev: &mut T,
                    send: &Vec<u8>) -> io::Result<Vec<u8>>
     where T: U2FDevice + Read + Write
 {
-    let mut data_sent: usize = 0;
     let mut sequence: u8 = 1;
     let mut data_itr = send.into_iter();
     let mut init_sent = false;
@@ -210,7 +150,7 @@ pub fn sendrecv<T>(dev: &mut T,
     let mut recvlen = INIT_DATA_SIZE;
     // We'll get an init packet back from USB, open it to see how much we'll be
     // reading overall. (should unpack to an init struct)
-    let mut info_frame : &U2FHIDInit = from_u8_array(&raw_frame);
+    let info_frame : &U2FHIDInit = from_u8_array(&raw_frame);
 
     // Read until we've exhausted the total read amount or error out
     let datalen : usize = (info_frame.bcnth as usize) << 8 | (info_frame.bcntl as usize);
@@ -223,15 +163,11 @@ pub fn sendrecv<T>(dev: &mut T,
         clone_len = recvlen;
     }
     data.extend(info_frame.data[0..clone_len].iter().cloned());
-    println!("{:?}", data);
-    println!("{:?}", datalen);
     sequence = 0;
     while recvlen < datalen {
-        println!("{:?}", recvlen);
-        println!("trying to get more data?");
         let mut frame : [u8; HID_RPT_SIZE] = [0u8; HID_RPT_SIZE];
         dev.read(&mut frame).unwrap();
-        let mut cont_frame : &U2FHIDCont;
+        let cont_frame : &U2FHIDCont;
         cont_frame = from_u8_array(&frame);
         if cont_frame.cid != dev.get_cid() {
             return Err(io::Error::new(io::ErrorKind::Other, "Wrong CID!"));
@@ -241,8 +177,6 @@ pub fn sendrecv<T>(dev: &mut T,
         }
         sequence = cont_frame.seq;
         if (recvlen + CONT_DATA_SIZE) > datalen {
-            println!("Last packet! {}", datalen-recvlen);
-            println!("{:?}", cont_frame.data[0..(datalen-recvlen)].iter());
             data.extend(cont_frame.data[0..(datalen-recvlen)].iter().cloned());
         } else {
             data.extend(cont_frame.data.iter().cloned());
@@ -255,7 +189,8 @@ pub fn sendrecv<T>(dev: &mut T,
 // https://en.wikipedia.org/wiki/Smart_card_application_protocol_data_unit
 const U2FAPDUHEADER_SIZE : usize = 7;
 #[repr(packed)]
-    struct U2FAPDUHeader {
+#[allow(dead_code)]
+struct U2FAPDUHeader {
     cla : u8,
     ins : u8,
     p1 : u8,
@@ -290,10 +225,11 @@ pub fn send_apdu<T>(dev: &mut T,
 
 #[cfg(test)]
     mod tests {
-    use ::{U2FDevice, init_device, sendrecv, U2FHID_PING, print_array};
+    use ::{U2FDevice, init_device, sendrecv};
     use std::error::Error;
+    use consts::{U2FHID_PING};
     mod platform {
-        use ::{CID_BROADCAST, print_array};
+        use consts::{CID_BROADCAST};
         use U2FDevice;
         use std::io;
         use std::io::{Read, Write};
@@ -320,8 +256,6 @@ pub fn send_apdu<T>(dev: &mut T,
                 // against bytes array.
                 assert!(self.expected_writes.len() > 0, "Ran out of expected write values!");
                 let check = self.expected_writes.remove(0);
-                println!("Expecting:");
-                print_array(&bytes[1..]);
                 assert_eq!(check.len(), bytes.len());
                 assert_eq!(&check[..], bytes);
                 Ok(bytes.len())
@@ -346,7 +280,6 @@ pub fn send_apdu<T>(dev: &mut T,
                 return self.cid.clone();
             }
             fn set_cid(&mut self, cid: &[u8; 4]) {
-                println!("Setting CID to {:?}", cid);
                 self.cid = cid.clone();
             }
         }
