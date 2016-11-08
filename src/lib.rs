@@ -106,6 +106,21 @@ pub fn from_u8_array<T>(arr: &[u8]) -> &T {
     unsafe { &*(arr.as_ptr() as *const T) }
 }
 
+pub fn set_data(data: &mut [u8], itr: &mut std::slice::Iter<u8>, max: usize)
+{
+    let take_amount;
+    let count = itr.size_hint().0;
+    if max < count {
+        take_amount = max;
+    } else {
+        take_amount = count;
+    }
+    // TODO There is a better way to do this :|
+    for i in 0..take_amount {
+        data[i] = *itr.next().unwrap();
+    }
+}
+
 #[repr(packed)]
 struct U2FHIDCont {
     cid: [u8; 4],
@@ -147,24 +162,19 @@ pub fn init_device<T>(dev: &mut T) -> io::Result<()>
     Ok(())
 }
 
-// pub fn wink_device<T>(dev: &mut T) -> io::Result<()>
-//     where T: U2FDevice + Read + Write
-// {
-// }
-
 pub fn sendrecv<T>(dev: &mut T,
                    cmd: u8,
                    send: &Vec<u8>) -> io::Result<Vec<u8>>
     where T: U2FDevice + Read + Write
 {
     let mut data_sent: usize = 0;
-    let mut sequence: u8 = 0;
-
+    let mut sequence: u8 = 1;
+    let mut data_itr = send.into_iter();
+    let mut init_sent = false;
     // Write Data.
-    while send.len() > data_sent {
-        let mut frame : [u8; HID_RPT_SIZE] = [0; HID_RPT_SIZE];
-        let data_buf_size;
-        if data_sent == 0 {
+    while data_itr.size_hint().0 != 0 {
+        let mut frame : [u8; HID_RPT_SIZE + 1] = [0; HID_RPT_SIZE + 1];
+        if !init_sent {
             let mut uf = U2FHIDInit {
                 cid: dev.get_cid(),
                 cmd: cmd,
@@ -172,41 +182,21 @@ pub fn sendrecv<T>(dev: &mut T,
                 bcntl: send.len() as u8,
                 data: [0; INIT_DATA_SIZE]
             };
-            data_buf_size = INIT_DATA_SIZE;
-            let send_length : usize;
-            if (send.len() - data_sent) > data_buf_size {
-                send_length = data_sent + data_buf_size;
-            } else {
-                send_length = send.len();
-            }
-            // clone_from_slice panics if src/dst sizes don't match.
-            uf.data[data_sent..send_length].clone_from_slice(&send[data_sent..send_length]);
-            frame.clone_from_slice(to_u8_array(&uf));
+            set_data(&mut uf.data, &mut data_itr, INIT_DATA_SIZE);
+            frame[1..].clone_from_slice(to_u8_array(&uf));
+            init_sent = true;
         } else {
             let mut uf = U2FHIDCont {
                 cid: dev.get_cid(),
                 seq: sequence,
                 data: [0; CONT_DATA_SIZE]
             };
-            data_buf_size = CONT_DATA_SIZE;
-            let send_length : usize;
-            if (send.len() - data_sent) > data_buf_size {
-                send_length = data_buf_size;
-            } else {
-                send_length = send.len() - data_sent;
-            }
-            uf.data[0..send_length].clone_from_slice(&send[data_sent..send_length + data_sent]);
-            frame.clone_from_slice(to_u8_array(&uf));
+            set_data(&mut uf.data, &mut data_itr, CONT_DATA_SIZE);
+            sequence += 1;
+            frame[1..].clone_from_slice(to_u8_array(&uf));
         }
-        print_array(&frame);
-        sequence += 1;
-        // TODO Figure out nicer way to prepend record number
-        let mut frame_data : [u8; HID_RPT_SIZE + 1] = [0u8; HID_RPT_SIZE + 1];
-        frame_data[0] = 0;
-        frame_data[1..].clone_from_slice(&frame);
-        match dev.write(&frame_data) {
-            Ok(n) => data_sent += data_buf_size,
-            Err(er) => return Err(er)
+        if let Err(er) = dev.write(&frame) {
+            return Err(er);
         };
     }
 
@@ -276,8 +266,7 @@ const U2FAPDUHEADER_SIZE : usize = 7;
 pub fn send_apdu<T>(dev: &mut T,
                     cmd: u8,
                     p1: u8,
-                    send: &Vec<u8>,
-                    recv: &mut Vec<u8>) -> io::Result<()>
+                    send: &Vec<u8>) -> io::Result<Vec<u8>>
     where T: U2FDevice + Read + Write
 {
     // TODO: Check send length to make sure it's < 2^16
@@ -285,7 +274,7 @@ pub fn send_apdu<T>(dev: &mut T,
         cla: 0,
         ins: cmd,
         p1: p1,
-        p2: 0,
+        p2: 0, // p2 is always 0, at least, for our requirements.
         lc: [0, // lc[0] should always be 0
              (send.len() & 0xff) as u8,
              (send.len() >> 8) as u8]
@@ -293,15 +282,10 @@ pub fn send_apdu<T>(dev: &mut T,
     // Size of header, plus data, plus 2 0 bytes at the end for maximum return
     // size.
     let mut data_vec : Vec<u8> = vec![0; std::mem::size_of::<U2FAPDUHeader>() + send.len() + 2];
-    let header_raw : [u8; U2FAPDUHEADER_SIZE];
-    unsafe {
-        header_raw = mem::transmute(header);
-    }
+    let header_raw : &[u8] = to_u8_array(&header);
     data_vec[0..U2FAPDUHEADER_SIZE].clone_from_slice(&header_raw);
     data_vec[U2FAPDUHEADER_SIZE..(send.len() + U2FAPDUHEADER_SIZE)].clone_from_slice(&send);
-    let mut base_recv = vec![0 as u8; 65536];
-    //sendrecv(dev, U2FHID_MSG, &data_vec, &mut base_recv);
-    Ok(())
+    sendrecv(dev, U2FHID_MSG, &data_vec)
 }
 
 #[cfg(test)]
