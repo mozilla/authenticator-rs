@@ -16,7 +16,6 @@ use consts::*;
 use std::{mem, io, slice};
 use std::io::{Read, Write};
 
-
 pub trait U2FDevice {
     fn get_cid(&self) -> [u8; 4];
     fn set_cid(&mut self, cid: &[u8; 4]);
@@ -113,6 +112,8 @@ pub fn sendrecv<T>(dev: &mut T,
     let mut init_sent = false;
     // Write Data.
     while data_itr.size_hint().0 != 0 {
+        // Add 1 to HID_RPT_SIZE since we need to prefix this with a record
+        // index.
         let mut frame : [u8; HID_RPT_SIZE + 1] = [0; HID_RPT_SIZE + 1];
         if !init_sent {
             let mut uf = U2FHIDInit {
@@ -187,7 +188,6 @@ pub fn sendrecv<T>(dev: &mut T,
 }
 
 // https://en.wikipedia.org/wiki/Smart_card_application_protocol_data_unit
-const U2FAPDUHEADER_SIZE : usize = 7;
 #[repr(packed)]
 #[allow(dead_code)]
 struct U2FAPDUHeader {
@@ -211,13 +211,14 @@ pub fn send_apdu<T>(dev: &mut T,
         p1: p1,
         p2: 0, // p2 is always 0, at least, for our requirements.
         lc: [0, // lc[0] should always be 0
-             (send.len() & 0xff) as u8,
-             (send.len() >> 8) as u8]
+             (send.len() >> 8) as u8,
+             (send.len() & 0xff) as u8]
     };
     // Size of header, plus data, plus 2 0 bytes at the end for maximum return
     // size.
     let mut data_vec : Vec<u8> = vec![0; std::mem::size_of::<U2FAPDUHeader>() + send.len() + 2];
     let header_raw : &[u8] = to_u8_array(&header);
+    println!("{:?}", header_raw);
     data_vec[0..U2FAPDUHEADER_SIZE].clone_from_slice(&header_raw);
     data_vec[U2FAPDUHEADER_SIZE..(send.len() + U2FAPDUHEADER_SIZE)].clone_from_slice(&send);
     sendrecv(dev, U2FHID_MSG, &data_vec)
@@ -225,9 +226,9 @@ pub fn send_apdu<T>(dev: &mut T,
 
 #[cfg(test)]
     mod tests {
-    use ::{U2FDevice, init_device, sendrecv};
+    use ::{U2FDevice, init_device, sendrecv, send_apdu};
     use std::error::Error;
-    use consts::{U2FHID_PING};
+    use consts::{U2FHID_PING, U2FHID_MSG, U2FAPDUHEADER_SIZE};
     mod platform {
         use consts::{CID_BROADCAST};
         use U2FDevice;
@@ -398,5 +399,21 @@ pub fn send_apdu<T>(dev: &mut T,
 
     #[test]
     fn test_sendapdu() {
+        let mut device = platform::TestDevice::new();
+        device.set_cid(&[1, 2, 3, 4]);
+        let mut r = vec![0x00,
+                     // sendrecv header
+                     0x01, 0x02, 0x03, 0x04, U2FHID_MSG, 0x00, 0x0e,
+                     // apdu header
+                     0x00, U2FHID_PING, 0xaa, 0x00, 0x00, 0x00, 0x05,
+                     // apdu data
+                     0x01, 0x02, 0x03, 0x04, 0x05];
+        r.extend([0x0 as u8; 45].iter());
+        device.expected_writes.push(r);
+        let mut ret = vec![0x01, 0x02, 0x03, 0x04, U2FHID_MSG, 0x00, 0x05,
+                           0x01, 0x02, 0x03, 0x04, 0x05];
+        ret.extend([0x0 as u8; 52].iter());
+        device.expected_reads.push(ret);
+        send_apdu(&mut device, U2FHID_PING, 0xaa, &vec![1, 2, 3, 4, 5]);
     }
 }

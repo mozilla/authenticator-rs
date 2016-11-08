@@ -2,6 +2,7 @@
 #![allow(dead_code)]
 
 pub const HID_RPT_SIZE : usize = 64;
+pub const U2FAPDUHEADER_SIZE : usize = 7;
 pub const CID_BROADCAST : [u8; 4] = [0xff, 0xff, 0xff, 0xff];
 pub const TYPE_MASK : u8 = 0x80;
 pub const TYPE_INIT : u8 = 0x80;
