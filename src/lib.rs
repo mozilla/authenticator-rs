@@ -16,11 +16,59 @@ use consts::*;
 use std::{mem, io, slice};
 use std::io::{Read, Write};
 
+// Trait for representing U2F HID Devices. Requires getters/setters for the
+// channel ID, created during device initialization.
 pub trait U2FDevice {
     fn get_cid(&self) -> [u8; 4];
     fn set_cid(&mut self, cid: &[u8; 4]);
 }
 
+// Size of data chunk expected in U2F Init USB HID Packets
+const INIT_DATA_SIZE : usize = HID_RPT_SIZE - 7;
+// Size of data chunk expected in U2F Cont USB HID Packets
+const CONT_DATA_SIZE : usize = HID_RPT_SIZE - 5;
+
+// Init structure for U2F Communications. Tells the receiver what channel
+// communication is happening on, what command is running, and how much data to
+// expect to receive over all.
+//
+// Spec at https://fidoalliance.org/specs/fido-u2f-v1.0-nfc-bt-amendment-20150514/fido-u2f-hid-protocol.html#message--and-packet-structure
+#[repr(packed)]
+#[allow(dead_code)]
+struct U2FHIDInit {
+    // U2F Channel ID
+    cid: [u8; 4],
+    // U2F Command
+    cmd: u8,
+    // High byte of 16-bit data size
+    bcnth: u8,
+    // Low byte of 16-bit data size
+    bcntl: u8,
+    // Packet data
+    pub data: [u8; INIT_DATA_SIZE]
+}
+
+// Continuation structure for U2F Communications. After an Init structure is
+// sent, continuation structures are used to transmit all extra data that
+// wouldn't fit in the initial packet. The sequence number increases with every
+// packet, until all data is received.
+//
+// https://fidoalliance.org/specs/fido-u2f-v1.0-nfc-bt-amendment-20150514/fido-u2f-hid-protocol.html#message--and-packet-structure
+#[repr(packed)]
+struct U2FHIDCont {
+    // U2F Channel ID
+    cid: [u8; 4],
+    // Continuation Sequence Number
+    seq: u8,
+    // Packet Data
+    pub data: [u8; CONT_DATA_SIZE]
+}
+
+// Reply sent after initialization command. Contains information about U2F USB
+// Key versioning, as well as the communication channel to be used for all
+// further requests.
+//
+// https://fidoalliance.org/specs/fido-u2f-v1.0-nfc-bt-amendment-20150514/fido-u2f-hid-protocol.html#u2fhid_init
 #[repr(packed)]
 #[derive(Debug)]
 struct U2FHIDInitResp {
@@ -33,28 +81,30 @@ struct U2FHIDInitResp {
     cap_flags: u8
 }
 
-const INIT_DATA_SIZE : usize = HID_RPT_SIZE - 7;
-const CONT_DATA_SIZE : usize = HID_RPT_SIZE - 5;
+////////////////////////////////////////////////////////////////////////
+// Utility Functions
+////////////////////////////////////////////////////////////////////////
 
-#[repr(packed)]
-#[allow(dead_code)]
-struct U2FHIDInit {
-    cid: [u8; 4],
-    cmd: u8,
-    bcnth: u8,
-    bcntl: u8,
-    pub data: [u8; INIT_DATA_SIZE]
-}
-
-pub fn to_u8_array<T>(non_ptr: &T) -> &[u8] {
+fn to_u8_array<T>(non_ptr: &T) -> &[u8] {
     unsafe {
         slice::from_raw_parts(non_ptr as *const T as *const u8,
                               mem::size_of::<T>())
     }
 }
 
-pub fn from_u8_array<T>(arr: &[u8]) -> &T {
+fn from_u8_array<T>(arr: &[u8]) -> &T {
     unsafe { &*(arr.as_ptr() as *const T) }
+}
+
+fn print_array(arr: &[u8]) {
+    let mut i = 0;
+    while i < arr.len() {
+        print!("0x{:02x}, ", arr[i]);
+        i += 1;
+        if i % 8 == 0 {
+            println!();
+        }
+    }
 }
 
 pub fn set_data(data: &mut [u8], itr: &mut std::slice::Iter<u8>, max: usize)
@@ -72,12 +122,9 @@ pub fn set_data(data: &mut [u8], itr: &mut std::slice::Iter<u8>, max: usize)
     }
 }
 
-#[repr(packed)]
-struct U2FHIDCont {
-    cid: [u8; 4],
-    seq: u8,
-    pub data: [u8; CONT_DATA_SIZE]
-}
+////////////////////////////////////////////////////////////////////////
+// Device Commands
+////////////////////////////////////////////////////////////////////////
 
 pub fn init_device<T>(dev: &mut T) -> io::Result<()>
     where T: U2FDevice + Read + Write
@@ -92,15 +139,27 @@ pub fn init_device<T>(dev: &mut T) -> io::Result<()>
             return Err(e);
         }
     }
-    let ptr: *const u8 = raw.as_slice().as_ptr();
-    let ptr: *const U2FHIDInitResp = ptr as *const U2FHIDInitResp;
-    let r : &U2FHIDInitResp = unsafe { &*ptr };
+    let r : &U2FHIDInitResp = from_u8_array(&raw);
     if nonce != r.nonce {
         return Err(io::Error::new(io::ErrorKind::Other, "Nonces do not match!"));
     }
     dev.set_cid(&r.cid);
     Ok(())
 }
+
+pub fn ping_device<T>(dev: &mut T)
+    where T: U2FDevice + Read + Write
+{
+    let nums : Vec<u8> = (0..).take(10).collect();
+    match sendrecv(dev, U2FHID_PING, &nums) {
+        Ok(v) => assert_eq!(nums, v),
+        Err(r) => panic!("Error!")
+    }
+}
+
+////////////////////////////////////////////////////////////////////////
+// Device Communication Functions
+////////////////////////////////////////////////////////////////////////
 
 pub fn sendrecv<T>(dev: &mut T,
                    cmd: u8,
@@ -144,29 +203,36 @@ pub fn sendrecv<T>(dev: &mut T,
     // Now we read. This happens in 2 chunks: The initial packet, which has the
     // size we expect overall, then continuation packets, which will fill in
     // data until we have everything.
-    let mut raw_frame : [u8; HID_RPT_SIZE] = [0u8; HID_RPT_SIZE];
+    let mut frame : [u8; HID_RPT_SIZE] = [0u8; HID_RPT_SIZE];
+    let datalen: usize;
+    let mut data : Vec<u8>;
 
     // TODO Check the status of the read, figure out how we'll deal with timeouts.
-    dev.read(&mut raw_frame).unwrap();
+    dev.read(&mut frame).unwrap();
     let mut recvlen = INIT_DATA_SIZE;
+
     // We'll get an init packet back from USB, open it to see how much we'll be
-    // reading overall. (should unpack to an init struct)
-    let info_frame : &U2FHIDInit = from_u8_array(&raw_frame);
+    // reading overall. (should unpack to an init struct). Scope this to deal
+    // with the lifetime of the frame borrow in from_u8_array.
+    {
+        let info_frame : &U2FHIDInit = from_u8_array(&frame);
 
-    // Read until we've exhausted the total read amount or error out
-    let datalen : usize = (info_frame.bcnth as usize) << 8 | (info_frame.bcntl as usize);
-    let mut data : Vec<u8> = Vec::with_capacity(datalen);
+        // Read until we've exhausted the total read amount or error out
+        datalen = (info_frame.bcnth as usize) << 8 | (info_frame.bcntl as usize);
+        data = Vec::with_capacity(datalen);
 
-    let clone_len : usize;
-    if datalen < recvlen {
-        clone_len = datalen;
-    } else {
-        clone_len = recvlen;
+        let clone_len : usize;
+        if datalen < recvlen {
+            clone_len = datalen;
+        } else {
+            clone_len = recvlen;
+        }
+        data.extend(info_frame.data[0..clone_len].iter().cloned());
     }
-    data.extend(info_frame.data[0..clone_len].iter().cloned());
     sequence = 0;
     while recvlen < datalen {
-        let mut frame : [u8; HID_RPT_SIZE] = [0u8; HID_RPT_SIZE];
+        // Reset frame value
+        frame = [0u8; HID_RPT_SIZE];
         dev.read(&mut frame).unwrap();
         let cont_frame : &U2FHIDCont;
         cont_frame = from_u8_array(&frame);
@@ -188,6 +254,7 @@ pub fn sendrecv<T>(dev: &mut T,
 }
 
 // https://en.wikipedia.org/wiki/Smart_card_application_protocol_data_unit
+// https://fidoalliance.org/specs/fido-u2f-v1.0-nfc-bt-amendment-20150514/fido-u2f-raw-message-formats.html#u2f-message-framing
 #[repr(packed)]
 #[allow(dead_code)]
 struct U2FAPDUHeader {
@@ -218,7 +285,6 @@ pub fn send_apdu<T>(dev: &mut T,
     // size.
     let mut data_vec : Vec<u8> = vec![0; std::mem::size_of::<U2FAPDUHeader>() + send.len() + 2];
     let header_raw : &[u8] = to_u8_array(&header);
-    println!("{:?}", header_raw);
     data_vec[0..U2FAPDUHEADER_SIZE].clone_from_slice(&header_raw);
     data_vec[U2FAPDUHEADER_SIZE..(send.len() + U2FAPDUHEADER_SIZE)].clone_from_slice(&send);
     sendrecv(dev, U2FHID_MSG, &data_vec)

@@ -9,7 +9,7 @@ pub const TYPE_INIT : u8 = 0x80;
 pub const TYPE_CONT : u8 = 0x80;
 
 pub const FIDO_USAGE_PAGE     : u16 =    0xf1d0;	// FIDO alliance HID usage page
-pub const FIDO_USAGE_U2FHID   : u8  =   0x01;	// U2FHID usage for top-level collection
+pub const FIDO_USAGE_U2FHID   : u16  =   0x01;	// U2FHID usage for top-level collection
 pub const FIDO_USAGE_DATA_IN  : u8  =   0x20;	// Raw IN data report
 pub const FIDO_USAGE_DATA_OUT : u8  =   0x21;	// Raw OUT data report
 

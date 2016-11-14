@@ -1,12 +1,16 @@
 use libudev;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::fs::{File, OpenOptions};
 use std::os::unix::io::AsRawFd;
 use std::io;
 use std::io::{Read, Write};
-use ::{init_device};
-use ::consts::CID_BROADCAST;
+use ::{init_device, ping_device};
+use ::consts::{CID_BROADCAST, FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID};
 use U2FDevice;
+
+////////////////////////////////////////////////////////////////////////
+// USB and HID Device Structs
+////////////////////////////////////////////////////////////////////////
 
 #[allow(non_camel_case_types)]
 #[repr(C)]
@@ -15,20 +19,72 @@ pub struct hidraw_report_descriptor {
     pub value: [u8;4096]
 }
 
+impl hidraw_report_descriptor {
+    pub fn new(s: u32) -> hidraw_report_descriptor  {
+        hidraw_report_descriptor {
+            size: s,
+            value: [0; 4096]
+        }
+    }
+}
+
 // Taken from ioctl crate, but it doesn't look like they're alive anymore?
 ioctl!(read hidiocgrdescsize with b'H', 0x01; ::libc::c_int);
 ioctl!(read hidiocgrdesc with b'H', 0x02; /*struct*/ hidraw_report_descriptor);
 
+// Struct representing a USB HID device on Linux, via hidraw API
 #[derive(Debug)]
 pub struct Device {
-    // TODO: Does this need a lifetime?
-    pub device: File,
-    pub blocking: bool,
+    pub devnode: PathBuf,
+    // hidraw device file handle
+    pub device: Option<File>,
+    // Stores whether or not the device uses numbered reports
+    // TODO: Needs implementation
     pub uses_numbered_reports: bool,
+    // Channel ID for U2F HID communication. Needed to implement U2FDevice
+    // trait.
     pub cid: [u8; 4],
 }
 
-#[derive(Debug)]
+impl Read for Device {
+    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        if let Some(ref mut d) = self.device {
+            d.read(bytes)
+        } else {
+            Err(io::Error::new(io::ErrorKind::NotConnected, "Device not opened!"))
+        }
+    }
+}
+
+impl Write for Device {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if let Some(ref mut d) = self.device {
+            d.write(bytes)
+        } else {
+            Err(io::Error::new(io::ErrorKind::NotConnected, "Device not opened!"))
+        }
+    }
+
+    // USB HID writes don't buffer, so this will be a nop.
+    fn flush(&mut self) -> io::Result<()> {
+        if let Some(ref d) = self.device {
+            Ok(())
+        } else {
+            Err(io::Error::new(io::ErrorKind::NotConnected, "Device not opened!"))
+        }
+    }
+}
+
+impl U2FDevice for Device {
+    fn get_cid(&self) -> [u8; 4] {
+        return self.cid.clone();
+    }
+    fn set_cid(&mut self, cid: &[u8; 4]) {
+        self.cid.clone_from(cid);
+    }
+}
+
+#[derive(Debug, Clone)]
 struct DeviceUsage {
     pub usage: u16,
     pub usage_page: u16
@@ -43,14 +99,9 @@ impl DeviceUsage {
     }
 }
 
-impl hidraw_report_descriptor {
-    pub fn new(s: u32) -> hidraw_report_descriptor  {
-        hidraw_report_descriptor {
-            size: s,
-            value: [0; 4096]
-        }
-    }
-}
+////////////////////////////////////////////////////////////////////////
+// Utility Functions
+////////////////////////////////////////////////////////////////////////
 
 fn from_nix_error(err: ::nix::Error) -> io::Error {
     io::Error::from_raw_os_error(err.errno() as i32)
@@ -62,6 +113,10 @@ fn from_nix_result<T>(res: ::nix::Result<T>) -> io::Result<T> {
         Err(err) => Err(from_nix_error(err)),
     }
 }
+
+////////////////////////////////////////////////////////////////////////
+// HID Usage Page Functions
+////////////////////////////////////////////////////////////////////////
 
 fn get_bytes(desc: &[u8], num_bytes: usize, cur: usize) -> u32 {
     /* Return if there aren't enough bytes. */
@@ -81,7 +136,9 @@ fn get_bytes(desc: &[u8], num_bytes: usize, cur: usize) -> u32 {
     0
 }
 
-fn get_usage(desc: &[u8]) -> Result<DeviceUsage, ()> {
+fn get_usage(desc: &[u8]) -> Result<Vec<DeviceUsage>, ()> {
+
+    let mut usages : Vec<DeviceUsage> = vec![];
     let mut du : DeviceUsage = DeviceUsage::new();
     let mut size_code: u8;
     let mut data_len: usize;
@@ -105,7 +162,7 @@ fn get_usage(desc: &[u8]) -> Result<DeviceUsage, ()> {
             _ => data_len = 0
 	      };
         key_size = 1;
-        println!("start: {0}, len: {1}", i, data_len);
+        let mut du : DeviceUsage = DeviceUsage::new();
         if key_cmd == 0x4
         {
             du.usage_page = get_bytes(desc, data_len, i) as u16;
@@ -118,109 +175,96 @@ fn get_usage(desc: &[u8]) -> Result<DeviceUsage, ()> {
         }
 
         if usage_page_found && usage_found {
-            // TODO: Hack to make sure we only access Yubikey
-            if du.usage == 1 {
-                return Ok(du);		/* success */
-            }
-            return Err(());
+            usage_page_found = false;
+            usage_found = false;
+            usages.push(du.clone());
+            du = DeviceUsage::new();
         }
         i += data_len + (key_size as usize);
     }
-
-    return Err(())
+    Ok(usages)
 }
 
-fn get_usages(dev : &libudev::Device) -> io::Result<()> {
+fn get_usages(dev : &libudev::Device) -> io::Result<Vec<DeviceUsage>> {
     let mut desc_size: i32 = 0;
-    let fd;
-    let fname;
-    match dev.devnode() {
-        Some(n) => fname = n,
+    let fname = match dev.devnode() {
+        Some(n) => n,
         None => return Err(io::Error::new(io::ErrorKind::Other, "No devnode!"))
-    }
-    let f = try!(File::open(fname));
-    fd = AsRawFd::as_raw_fd(&f);
-    match from_nix_result(unsafe { hidiocgrdescsize(fd, &mut desc_size) }) {
-        Ok(_) => println!("Descriptor size: {:?}", desc_size),
+    };
+    let fd = match File::open(fname) {
+        Ok(f) => AsRawFd::as_raw_fd(&f),
         Err(e) => return Err(e)
+    };
+    if let Err(e) = from_nix_result(unsafe { hidiocgrdescsize(fd, &mut desc_size) }) {
+        return Err(e);
     }
-    println!("{:?} {:?}", dev.devnode(), dev.sysname());
     let mut rpt_desc: hidraw_report_descriptor = hidraw_report_descriptor::new(desc_size as u32);
-    match from_nix_result(unsafe { hidiocgrdesc(fd, &mut rpt_desc) }) {
-        Ok(_) => println!("Descriptor size: {:?}", desc_size),
-        Err(e) => return Err(e)
+    if let Err(e) = from_nix_result(unsafe { hidiocgrdesc(fd, &mut rpt_desc) }) {
+        return Err(e);
     }
     match get_usage(&rpt_desc.value[0..(desc_size as usize)]) {
-        Ok(_) => Ok(()),
+        Ok(v) => Ok(v),
         Err(_) => return Err(io::Error::new(io::ErrorKind::Other, "Can't get descriptor!"))
     }
 }
 
-pub fn open_device(fname: &Path) -> io::Result<Device> {
-    println!("opening device!");
-    let d = match OpenOptions::new().write(true).read(true).open(fname) {
-        Ok(f) => f,
-        Err(er) => { println!("{:?}", er); return Err(io::Error::new(io::ErrorKind::Other, "Can't open!")); }
+fn is_u2f_device(device: &libudev::Device) -> bool {
+    match get_usages(&device) {
+        Ok(usages) => {
+            usages.iter()
+                .any(|ref x| {
+                    x.usage_page == FIDO_USAGE_PAGE && x.usage == FIDO_USAGE_U2FHID
+                })
+        },
+        // If we error out while finding usage pages, just say we're not a U2F
+        // device.
+        Err(_) => false
+    }
+}
+
+////////////////////////////////////////////////////////////////////////
+// Publicly Exposed Device Functions
+////////////////////////////////////////////////////////////////////////
+
+fn create_device(dev: &libudev::Device) -> io::Result<Device> {
+    let devnode = match dev.devnode() {
+        Some(n) => n,
+        None => return Err(io::Error::new(io::ErrorKind::Other, "No devnode for device!"))
     };
-    println!("Opened device! {:?}", d);
-    let mut device = Device {
-        device: d,
-        blocking: true,
+    Ok(Device {
+        devnode: devnode.to_owned(),
+        device: None,
         // TODO Actually check the usage report here
         uses_numbered_reports: true,
         // Start device with CID_BROADCAST as a cid, we'll get the actual CID on
         // device init.
         cid: CID_BROADCAST
-    };
-    println!("Trying to init device!");
-    init_device(&mut device);
-    Ok(device)
+    })
 }
 
-pub fn find_keys() -> io::Result<()> {
-    let context = libudev::Context::new().unwrap();
-    let mut enumerator = try!(libudev::Enumerator::new(&context));
-
-    for device in try!(enumerator.scan_devices()) {
-        //let u;
-        match get_usages(&device) {
-            Ok(usage) => {
-                println!("{:?}", usage);
-                match device.devnode() {
-                    Some(n) => { open_device(n); },
-                    None => println!("Can't open!")
-                };
-            },
-            Err(_) => continue
-        };
-    }
-
+pub fn open_device(dev: &mut Device) -> io::Result<()> {
+    dev.device = match OpenOptions::new().write(true).read(true).open(&dev.devnode) {
+        Ok(f) => Some(f),
+        Err(er) => return Err(er)
+    };
     Ok(())
 }
 
-impl Read for Device {
-    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
-        self.device.read(bytes)
-    }
-}
+pub fn find_keys() -> io::Result<Vec<Device>> {
+    let context = libudev::Context::new().unwrap();
+    let mut enumerator = try!(libudev::Enumerator::new(&context));
+    let mut devices : Vec<Device> = vec![];
 
-impl Write for Device {
-    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        println!("writing to device! {:?}", self.device);
-        self.device.write(bytes)
+    // udev's enumerator returns an internally allocated linked list, not an
+    // iterator, so we can't use filter on it.
+    for device in try!(enumerator.scan_devices()) {
+        if is_u2f_device(&device) {
+            match create_device(&device) {
+                Ok(d) => devices.push(d),
+                Err(e) => return Err(e)
+            }
+        }
     }
 
-    // nop
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-
-impl U2FDevice for Device {
-    fn get_cid(&self) -> [u8; 4] {
-        return self.cid.clone();
-    }
-    fn set_cid(&mut self, cid: &[u8; 4]) {
-        self.cid.clone_from(cid);
-    }
+    Ok(devices)
 }
