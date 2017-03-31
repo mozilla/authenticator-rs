@@ -1,20 +1,32 @@
-#[cfg(any(target_os = "linux"))]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[macro_use]
 extern crate nix;
-#[cfg(any(target_os = "linux"))]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[macro_use]
 extern crate libc;
+
 #[cfg(any(target_os = "linux"))]
 extern crate libudev;
 
 #[cfg(any(target_os = "linux"))]
 #[path="linux/mod.rs"]
 pub mod platform;
+
+#[cfg(any(target_os = "macos"))]
+extern crate core_foundation_sys;
+#[cfg(any(target_os = "macos"))]
+extern crate mach;
+
+#[cfg(any(target_os = "macos"))]
+#[path="macos/mod.rs"]
+pub mod platform;
+
 mod consts;
 
 use consts::*;
 use std::{mem, io, slice};
 use std::io::{Read, Write};
+use std::ffi::CString;
 
 // Trait for representing U2F HID Devices. Requires getters/setters for the
 // channel ID, created during device initialization.
@@ -102,7 +114,7 @@ fn print_array(arr: &[u8]) {
         print!("0x{:02x}, ", arr[i]);
         i += 1;
         if i % 8 == 0 {
-            println!();
+            println!("");
         }
     }
 }
@@ -155,6 +167,39 @@ pub fn ping_device<T>(dev: &mut T)
         Ok(v) => assert_eq!(nums, v),
         Err(r) => panic!("Error!")
     }
+}
+
+pub fn u2f_version<T>(dev: &mut T) -> io::Result<std::ffi::CString>
+    where T: U2FDevice + Read + Write
+{
+    let mut version_resp = try!(send_apdu(dev, U2F_VERSION, 0x00, &vec![]));
+    let sw_low = version_resp.pop().unwrap();
+    let sw_high = version_resp.pop().unwrap();
+    let status_word = (sw_high as u16) << 8 | sw_low as u16;
+
+    match status_word {
+        SW_NO_ERROR => Ok(try!(CString::new(version_resp))),
+        SW_WRONG_LENGTH => Err(io::Error::new(io::ErrorKind::Other, "Wrong Length")),
+        SW_WRONG_DATA => Err(io::Error::new(io::ErrorKind::Other, "Wrong Data")),
+        SW_CONDITIONS_NOT_SATISFIED => Err(io::Error::new(io::ErrorKind::Other, "Conditions not satisfied")),
+        _ => Err(io::Error::new(io::ErrorKind::Other, format!("Problem Status: {:x}", status_word))),
+    }
+}
+
+pub fn u2f_register<T>(dev: &mut T, challenge: &Vec<u8>, application: &Vec<u8>) -> io::Result<Vec<u8>>
+    where T: U2FDevice + Read + Write
+{
+    if challenge.len() != PARAMETER_SIZE || application.len() != PARAMETER_SIZE {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid parameter sizes"));
+    }
+
+    let mut register_data = Vec::with_capacity(2*PARAMETER_SIZE);
+    register_data.extend(challenge);
+    register_data.extend(application);
+
+    let mut register_resp = try!(send_apdu(dev, U2F_REGISTER, 0x00, &register_data));
+    println!("Got: {:?}", register_resp);
+    Ok(register_resp)
 }
 
 ////////////////////////////////////////////////////////////////////////

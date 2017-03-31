@@ -8,6 +8,8 @@ pub const TYPE_MASK : u8 = 0x80;
 pub const TYPE_INIT : u8 = 0x80;
 pub const TYPE_CONT : u8 = 0x80;
 
+pub const PARAMETER_SIZE : usize = 32;
+
 pub const FIDO_USAGE_PAGE     : u16 =    0xf1d0;	// FIDO alliance HID usage page
 pub const FIDO_USAGE_U2FHID   : u16  =   0x01;	// U2FHID usage for top-level collection
 pub const FIDO_USAGE_DATA_IN  : u8  =   0x20;	// Raw IN data report
@@ -20,18 +22,29 @@ pub const U2FHID_FRAME_TIMEOUT : u32 =  500;	// Default frame timeout in ms
 pub const U2FHID_TRANS_TIMEOUT : u32 =  3000;	// Default message timeout in ms
 
 // U2FHID native commands
+pub const U2FHID_PING         : u8 = (TYPE_INIT | 0x01);  // Echo data through local processor only
+pub const U2FHID_MSG          : u8 = (TYPE_INIT | 0x03);  // Send U2F message frame
+pub const U2FHID_LOCK         : u8 = (TYPE_INIT | 0x04);  // Send lock channel command
+pub const U2FHID_INIT         : u8 = (TYPE_INIT | 0x06);  // Channel initialization
+pub const U2FHID_WINK         : u8 = (TYPE_INIT | 0x08);  // Send device identification wink
+pub const U2FHID_ERROR        : u8 = (TYPE_INIT | 0x3f);  // Error response
 
-pub const U2FHID_PING         : u8 = (TYPE_INIT | 0x01);	// Echo data through local processor only
-pub const U2FHID_MSG          : u8 = (TYPE_INIT | 0x03);	// Send U2F message frame
-pub const U2FHID_LOCK         : u8 = (TYPE_INIT | 0x04);	// Send lock channel command
-pub const U2FHID_INIT         : u8 = (TYPE_INIT | 0x06);	// Channel initialization
-pub const U2FHID_WINK         : u8 = (TYPE_INIT | 0x08);	// Send device identification wink
-pub const U2FHID_ERROR        : u8 = (TYPE_INIT | 0x3f);	// Error response
-pub const U2FHID_VENDOR_FIRST : u8 = (TYPE_INIT | 0x40);	// First vendor defined command
-pub const U2FHID_VENDOR_LAST  : u8 = (TYPE_INIT | 0x7f);	// Last vendor defined command
+// U2FHID_MSG commands
+pub const U2F_VENDOR_FIRST : u8 = (TYPE_INIT | 0x40); // First vendor defined command
+pub const U2F_VENDOR_LAST  : u8 = (TYPE_INIT | 0x7f); // Last vendor defined command
+pub const U2F_REGISTER     : u8 = 0x01;  // Registration command
+pub const U2F_AUTHENTICATE : u8 = 0x02;  // Authenticate/sign command
+pub const U2F_VERSION      : u8 = 0x03;  // Read version string command
+
+// U2F_REGISTER command defines
+pub const U2F_REGISTER_ID      : u8 = 0x05;  // Version 2 registration identifier
+pub const U2F_REGISTER_HASH_ID : u8 = 0x00;  // Version 2 hash identintifier
+
+// U2F_AUTHENTICATE command defines
+pub const U2F_REQUEST_USER_PRESENCE : u8 = 0x03; // Verify user presence and sign
+pub const U2F_CHECK_IS_REGISTERED   : u8 = 0x07; // Check if the key handle is registered
 
 // U2FHID_INIT command defines
-
 pub const INIT_NONCE_SIZE     : usize =    8;	// Size of channel initialization challenge
 pub const CAPFLAG_WINK        : u8 =    0x01;	// Device supports WINK command
 pub const CAPFLAG_LOCK        : u8 =    0x02;	// Device supports LOCK command
@@ -48,3 +61,9 @@ pub const ERR_CHANNEL_BUSY    : u8 =    0x06;	// Channel busy
 pub const ERR_LOCK_REQUIRED   : u8 =    0x0a;	// Command requires channel lock
 pub const ERR_INVALID_CID     : u8 =    0x0b;	// Command not allowed on this cid
 pub const ERR_OTHER           : u8 =    0x7f;	// Other unspecified error
+
+// These are ISO 7816-4 defined response status words.
+pub const SW_NO_ERROR : u16 = 0x9000;
+pub const SW_CONDITIONS_NOT_SATISFIED : u16 = 0x6985;
+pub const SW_WRONG_DATA : u16 = 0x6A80;
+pub const SW_WRONG_LENGTH : u16 = 0x6700;
