@@ -52,7 +52,8 @@ pub struct Device {
 
 impl fmt::Display for Device {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Device({}, {:?}, {:?})", self.name, self.deviceRef, self.cid)
+        write!(f, "Device({}, ptr:{:?}, cid: {:02x}{:02x}{:02x}{:02x})", self.name, self.deviceRef,
+               self.cid[0], self.cid[1], self.cid[2], self.cid[3])
     }
 }
 
@@ -223,8 +224,6 @@ unsafe fn set_report(device_ref: IOHIDDeviceRef,
         length = length - 1;
         data = data.offset(1);
     }
-
-    println!("Sending ID = {} length = {}", report_id, length);
 
     let result = IOHIDDeviceSetReport(device_ref, report_type, report_id, data, length);
     if result != KERN_SUCCESS {

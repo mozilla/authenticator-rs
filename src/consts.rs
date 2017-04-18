@@ -63,7 +63,7 @@ pub const ERR_INVALID_CID     : u8 =    0x0b;	// Command not allowed on this cid
 pub const ERR_OTHER           : u8 =    0x7f;	// Other unspecified error
 
 // These are ISO 7816-4 defined response status words.
-pub const SW_NO_ERROR : u16 = 0x9000;
-pub const SW_CONDITIONS_NOT_SATISFIED : u16 = 0x6985;
-pub const SW_WRONG_DATA : u16 = 0x6A80;
-pub const SW_WRONG_LENGTH : u16 = 0x6700;
+pub const SW_NO_ERROR : [u8; 2] = [0x90, 0x00];
+pub const SW_CONDITIONS_NOT_SATISFIED : [u8; 2] = [0x69, 0x85];
+pub const SW_WRONG_DATA : [u8; 2] = [0x6A, 0x80];
+pub const SW_WRONG_LENGTH : [u8; 2] = [0x67, 0x00];

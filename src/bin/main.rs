@@ -1,10 +1,13 @@
 #[macro_use]
+extern crate crypto;
+use crypto::digest::Digest;
+use crypto::sha2::Sha256;
 extern crate clap;
 use clap::App;
 extern crate u2fhid;
 use u2fhid::U2FDevice;
 use std::ffi::CString;
-
+extern crate base64;
 
 fn main() {
     println!("Searching for keys...");
@@ -42,13 +45,20 @@ fn main() {
             Err(e) => continue,
         }
 
-        let challenge = vec![0x8, 0x7, 0x6, 0x5, 0x4, 0x3, 0x2, 0x1, 0x8, 0x7, 0x6, 0x5, 0x4, 0x3, 0x2, 0x1, 0x8, 0x7, 0x6, 0x5, 0x4, 0x3, 0x2, 0x1, 0x8, 0x7, 0x6, 0x5, 0x4, 0x3, 0x2, 0x1];
-        let application = vec![0x8, 0x7, 0x6, 0x5, 0x4, 0x3, 0x2, 0x1, 0x8, 0x7, 0x6, 0x5, 0x4, 0x3, 0x2, 0x1, 0x8, 0x7, 0x6, 0x5, 0x4, 0x3, 0x2, 0x1, 0x8, 0x7, 0x6, 0x5, 0x4, 0x3, 0x2, 0x1];
+        let mut challenge = Sha256::new();
+        challenge.input_str(r#"{"challenge": "1vQ9mxionq0ngCnjD-wTsv1zUSrGRtFqG2xP09SbZ70", "version": "U2F_V2", "appId": "http://demo.yubico.com"}"#);
+        let mut chall_bytes: Vec<u8> = vec![0; challenge.output_bytes()];
+        challenge.result(&mut chall_bytes);
 
-        println!("Register: challenge={:?} application={:?}", challenge, application);
+        let mut application = Sha256::new();
+        application.input_str("http://demo.yubico.com");
+        let mut app_bytes: Vec<u8> = vec![0; application.output_bytes()];
+        application.result(&mut app_bytes);
 
-        match u2fhid::u2f_register(&mut device_obj, &challenge, &application) {
-            Ok(v) => println!("Register Response: {:?}", v),
+        println!("Register: challenge={:?} application={:?}", challenge.result_str(), application.result_str());
+
+        match u2fhid::u2f_register(&mut device_obj, 15, &chall_bytes, &app_bytes) {
+            Ok(v) => println!("Register Response: {:?}", base64::encode(&v)),
             Err(e) => panic!("Error! {:?}", e),
         }
 

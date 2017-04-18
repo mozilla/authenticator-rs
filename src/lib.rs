@@ -24,7 +24,7 @@ pub mod platform;
 mod consts;
 
 use consts::*;
-use std::{mem, io, slice};
+use std::{thread, time, mem, io, slice};
 use std::io::{Read, Write};
 use std::ffi::CString;
 
@@ -175,31 +175,51 @@ pub fn u2f_version<T>(dev: &mut T) -> io::Result<std::ffi::CString>
     let mut version_resp = try!(send_apdu(dev, U2F_VERSION, 0x00, &vec![]));
     let sw_low = version_resp.pop().unwrap();
     let sw_high = version_resp.pop().unwrap();
-    let status_word = (sw_high as u16) << 8 | sw_low as u16;
+    let status_word = [sw_high, sw_low];
 
     match status_word {
         SW_NO_ERROR => Ok(try!(CString::new(version_resp))),
         SW_WRONG_LENGTH => Err(io::Error::new(io::ErrorKind::Other, "Wrong Length")),
         SW_WRONG_DATA => Err(io::Error::new(io::ErrorKind::Other, "Wrong Data")),
         SW_CONDITIONS_NOT_SATISFIED => Err(io::Error::new(io::ErrorKind::Other, "Conditions not satisfied")),
-        _ => Err(io::Error::new(io::ErrorKind::Other, format!("Problem Status: {:x}", status_word))),
+        _ => Err(io::Error::new(io::ErrorKind::Other, format!("Problem Status: {:?}", status_word))),
     }
 }
 
-pub fn u2f_register<T>(dev: &mut T, challenge: &Vec<u8>, application: &Vec<u8>) -> io::Result<Vec<u8>>
+pub fn u2f_register<T>(dev: &mut T, timeout_sec: u8, challenge: &Vec<u8>, application: &Vec<u8>) -> io::Result<Vec<u8>>
     where T: U2FDevice + Read + Write
 {
     if challenge.len() != PARAMETER_SIZE || application.len() != PARAMETER_SIZE {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid parameter sizes"));
     }
 
+    let flags = 0x00;
+
     let mut register_data = Vec::with_capacity(2*PARAMETER_SIZE);
     register_data.extend(challenge);
     register_data.extend(application);
 
-    let mut register_resp = try!(send_apdu(dev, U2F_REGISTER, 0x00, &register_data));
-    println!("Got: {:?}", register_resp);
-    Ok(register_resp)
+    let mut iteration_count = 0;
+    while iteration_count < timeout_sec {
+        let mut register_resp = try!(send_apdu(dev, U2F_REGISTER, flags | U2F_REQUEST_USER_PRESENCE, &register_data));
+        println!("Got: {:?}", register_resp);
+
+        if register_resp.len() != 2 {
+            // Real data, let's bail out here
+            // NOTE: for some reason the C version shortens response by 2 bytes
+            return Ok(register_resp)
+        }
+
+        // We expect a certain number of SW_CONDITIONS_NOT_SATISFIED results, but nothing else
+        if register_resp != SW_CONDITIONS_NOT_SATISFIED {
+            return Err(io::Error::new(io::ErrorKind::Other, format!("Unexpected response: {:?}", register_resp)));
+        }
+
+        iteration_count += 1;
+        thread::sleep(time::Duration::from_secs(1));
+    }
+
+    Err(io::Error::new(io::ErrorKind::Other, "Timed out"))
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -211,7 +231,7 @@ pub fn sendrecv<T>(dev: &mut T,
                    send: &Vec<u8>) -> io::Result<Vec<u8>>
     where T: U2FDevice + Read + Write
 {
-    let mut sequence: u8 = 1;
+    let mut sequence: u8 = 0; // Start at 0
     let mut data_itr = send.into_iter();
     let mut init_sent = false;
     // Write Data.
@@ -240,6 +260,13 @@ pub fn sendrecv<T>(dev: &mut T,
             sequence += 1;
             frame[1..].clone_from_slice(to_u8_array(&uf));
         }
+
+        print!("USB send: ");
+        for &byte in frame.iter() {
+            print!("{:02x}", byte);
+        }
+        println!();
+
         if let Err(er) = dev.write(&frame) {
             return Err(er);
         };
@@ -284,10 +311,10 @@ pub fn sendrecv<T>(dev: &mut T,
         if cont_frame.cid != dev.get_cid() {
             return Err(io::Error::new(io::ErrorKind::Other, "Wrong CID!"));
         }
-        if cont_frame.seq != sequence + 1 {
+        if cont_frame.seq != sequence {
             return Err(io::Error::new(io::ErrorKind::Other, "Sequence numbers out of order!"));
         }
-        sequence = cont_frame.seq;
+        sequence = cont_frame.seq + 1;
         if (recvlen + CONT_DATA_SIZE) > datalen {
             data.extend(cont_frame.data[0..(datalen-recvlen)].iter().cloned());
         } else {
