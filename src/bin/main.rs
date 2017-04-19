@@ -2,11 +2,7 @@
 extern crate crypto;
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
-extern crate clap;
-use clap::App;
 extern crate u2fhid;
-use u2fhid::U2FDevice;
-use u2fhid::platform::U2FManager;
 use std::{io, ffi};
 extern crate base64;
 
@@ -72,12 +68,12 @@ fn u2f_register(hid_manager: &u2fhid::platform::U2FManager, timeout_sec: u8, cha
                 println!("Version OK {:?}", v);
 
             }
-            Err(e) => continue,
+            Err(_) => continue,
         }
 
-        match u2fhid::u2f_register(&mut device_obj, 15, &challenge, &application) {
+        match u2fhid::u2f_register(&mut device_obj, timeout_sec, &challenge, &application) {
             Ok(v) => return Ok(v),
-            Err(e) => continue,
+            Err(_) => continue,
         }
     }
 
@@ -102,12 +98,12 @@ fn u2f_sign(hid_manager: &u2fhid::platform::U2FManager, timeout_sec: u8, challen
                 println!("Version OK {:?}", v);
 
             }
-            Err(e) => continue,
+            Err(_) => continue,
         }
 
-        match u2fhid::u2f_sign(&mut device_obj, 15, challenge, application, &key_handle) {
+        match u2fhid::u2f_sign(&mut device_obj, timeout_sec, challenge, application, &key_handle) {
             Ok(v) => return Ok(v),
-            Err(e) => continue,
+            Err(_) => continue,
         };
     }
 

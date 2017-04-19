@@ -4,19 +4,14 @@ extern crate mach;
 pub use self::iokit::*;
 mod iokit;
 
-use std::ffi::{CString, CStr};
-use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::io;
 use std::fmt;
 use std::mem;
-use std::os::unix::io::AsRawFd;
-use std::path::{Path, PathBuf};
 use std::ptr;
 use std::sync::{Arc, Barrier};
 use std::sync::mpsc::{channel, Sender, Receiver};
 use std::thread;
-use std::time::Duration;
 
 use libc::{c_char, c_void};
 
@@ -28,9 +23,7 @@ use core_foundation_sys::string::*;
 use core_foundation_sys::number::*;
 use core_foundation_sys::set::*;
 use core_foundation_sys::runloop::*;
-use core_foundation_sys::dictionary::*;
 
-use {init_device, ping_device};
 use consts::{CID_BROADCAST, FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID, HID_RPT_SIZE};
 use U2FDevice;
 pub struct Report {
@@ -41,7 +34,7 @@ unsafe impl Sync for Report {}
 
 pub struct Device {
     pub name: String,
-    pub deviceRef: IOHIDDeviceRef,
+    pub device_ref: IOHIDDeviceRef,
     // Channel ID for U2F HID communication. Needed to implement U2FDevice
     // trait.
     pub cid: [u8; 4],
@@ -52,7 +45,7 @@ pub struct Device {
 
 impl fmt::Display for Device {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Device({}, ptr:{:?}, cid: {:02x}{:02x}{:02x}{:02x})", self.name, self.deviceRef,
+        write!(f, "Device({}, ptr:{:?}, cid: {:02x}{:02x}{:02x}{:02x})", self.name, self.device_ref,
                self.cid[0], self.cid[1], self.cid[2], self.cid[3])
     }
 }
@@ -62,7 +55,7 @@ fn create_device(dev: IOHIDDeviceRef, name: String) -> Device {
 
     let mut device = Device {
         name: name.clone(),
-        deviceRef: dev,
+        device_ref: dev,
         cid: CID_BROADCAST,
         report_send: tx.clone(),
         report_recv: rx,
@@ -84,7 +77,7 @@ fn create_device(dev: IOHIDDeviceRef, name: String) -> Device {
 
     device.thread = match thread::Builder::new().name(name).spawn(move || {
       unsafe {
-          let device_handle : IOHIDDeviceRef = unsafe { ::std::mem::transmute(device_raw_handle) };
+          let device_handle : IOHIDDeviceRef = ::std::mem::transmute(device_raw_handle);
           let tx_ptr: *mut libc::c_void = &mut tx as *mut _ as *mut libc::c_void;
           let scratch_buf = [0; HID_RPT_SIZE];
 
@@ -98,8 +91,9 @@ fn create_device(dev: IOHIDDeviceRef, name: String) -> Device {
 
           // Run the Event Loop. CFRunLoopRunInMode() will dispatch HID input reports into the
           // read_new_data_cb() callback.
-          while true {
+          loop {
             println!("Run loop running, deviceRef={:?}", device_handle);
+            #[allow(non_upper_case_globals)]
             match CFRunLoopRunInMode(kCFRunLoopDefaultMode, 2.0, 0) {
               kCFRunLoopRunFinished => {
                 println!("Device disconnected.");
@@ -116,7 +110,7 @@ fn create_device(dev: IOHIDDeviceRef, name: String) -> Device {
 
     }) {
       Ok(t) => Some(t),
-      Err(e) => panic!("Unable to start thread"),
+      Err(e) => panic!("Unable to start thread: {}", e),
     };
 
     barrier.wait();
@@ -138,7 +132,7 @@ impl Read for Device {
 
 impl Write for Device {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        unsafe { set_report(self.deviceRef, kIOHIDReportTypeOutput, bytes) }
+        unsafe { set_report(self.device_ref, kIOHIDReportTypeOutput, bytes) }
     }
 
     // USB HID writes don't buffer, so this will be a nop.
@@ -244,12 +238,12 @@ unsafe fn get_int_property(device_ref: IOHIDDeviceRef, property_name: *const c_c
         panic!("failed to allocate key string");
     }
 
-    let numberRef = IOHIDDeviceGetProperty(device_ref, key);
-    if numberRef.is_null() {
+    let number_ref = IOHIDDeviceGetProperty(device_ref, key);
+    if number_ref.is_null() {
         result = -1
     } else {
-        if CFGetTypeID(numberRef) == CFNumberGetTypeID() {
-            CFNumberGetValue(numberRef as CFNumberRef,
+        if CFGetTypeID(number_ref) == CFNumberGetTypeID() {
+            CFNumberGetValue(number_ref as CFNumberRef,
                              kCFNumberSInt32Type,
                              mem::transmute(&mut result));
         }
@@ -284,8 +278,8 @@ unsafe fn is_u2f_device(device_ref: IOHIDDeviceRef) -> bool {
 
 // This is called from the RunLoop thread
 extern "C" fn read_new_data_cb(context: *mut c_void,
-                               result: IOReturn,
-                               sender: *mut c_void,
+                               _: IOReturn,
+                               _: *mut c_void,
                                report_type: IOHIDReportType,
                                report_id: u32,
                                report: *mut u8,
@@ -309,7 +303,12 @@ extern "C" fn read_new_data_cb(context: *mut c_void,
                      HID_RPT_SIZE);
         }
 
-        tx.send(report_obj);
+        if let Err(e) = tx.send(report_obj) {
+            // TOOD: This happens when the channel closes before this thread
+            // does. This is pretty common, but let's deal with stopping
+            // properly later.
+            println!("Problem returning data for thread: {}", e);
+        };
     }
 }
 
@@ -320,7 +319,7 @@ extern "C" fn device_unregistered_cb(void_ref: CFTypeRef, context: *const c_void
         let device: &mut Device = &mut *(context as *mut Device);
 
         let device_ref = void_ref as IOHIDDeviceRef;
-        println!("device_unregistered_cb = {}", device);
+        println!("device_unregistered_cb device={} device_ref={:?}", device, device_ref);
     }
 }
 

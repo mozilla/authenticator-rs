@@ -1,8 +1,10 @@
+#![allow(non_snake_case, non_camel_case_types, non_upper_case_globals)]
+
 extern crate core_foundation_sys;
 extern crate libc;
 extern crate mach;
 
-use libc::{c_void, c_char};
+use libc::c_void;
 use core_foundation_sys::base::{CFIndex, CFTypeRef};
 use core_foundation_sys::string::CFStringRef;
 use core_foundation_sys::runloop::CFRunLoopRef;

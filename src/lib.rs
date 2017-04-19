@@ -108,17 +108,6 @@ fn from_u8_array<T>(arr: &[u8]) -> &T {
     unsafe { &*(arr.as_ptr() as *const T) }
 }
 
-fn print_array(arr: &[u8]) {
-    let mut i = 0;
-    while i < arr.len() {
-        print!("0x{:02x}, ", arr[i]);
-        i += 1;
-        if i % 8 == 0 {
-            println!("");
-        }
-    }
-}
-
 pub fn set_data(data: &mut [u8], itr: &mut std::slice::Iter<u8>, max: usize)
 {
     let take_amount;
@@ -211,7 +200,7 @@ pub fn u2f_register<T>(dev: &mut T, timeout_sec: u8, challenge: &Vec<u8>, applic
 
     let mut iteration_count = 0;
     while iteration_count < timeout_sec {
-        let mut register_resp = try!(send_apdu(dev, U2F_REGISTER, flags | U2F_REQUEST_USER_PRESENCE, &register_data));
+        let register_resp = try!(send_apdu(dev, U2F_REGISTER, flags | U2F_REQUEST_USER_PRESENCE, &register_data));
         println!("Got: {:?}", register_resp);
 
         if register_resp.len() != 2 {
@@ -246,7 +235,6 @@ pub fn u2f_sign<T>(dev: &mut T, timeout_sec: u8, challenge: &Vec<u8>, applicatio
     }
 
     let flags = 0x00;
-    let control_byte = U2F_REQUEST_USER_PRESENCE;
 
     let mut sign_data = Vec::with_capacity(2 * PARAMETER_SIZE + 1 + key_handle.len());
     sign_data.extend(challenge);
@@ -256,7 +244,7 @@ pub fn u2f_sign<T>(dev: &mut T, timeout_sec: u8, challenge: &Vec<u8>, applicatio
 
     let mut iteration_count = 0;
     while iteration_count < timeout_sec {
-        let mut sign_resp = try!(send_apdu(dev, U2F_AUTHENTICATE, flags | U2F_REQUEST_USER_PRESENCE, &sign_data));
+        let sign_resp = try!(send_apdu(dev, U2F_AUTHENTICATE, flags | U2F_REQUEST_USER_PRESENCE, &sign_data));
         println!("Got: {:?}", sign_resp);
 
         if sign_resp.len() != 2 {

@@ -1,3 +1,5 @@
+#![allow(non_snake_case, non_camel_case_types, non_upper_case_globals)]
+
 extern crate core_foundation_sys;
 extern crate libc;
 extern crate mach;
@@ -10,8 +12,7 @@ mod ioreturn;
 mod hiddevice;
 mod hidmanager;
 
-use libc::{c_void, c_char};
-use mach::kern_return::{kern_return_t, KERN_SUCCESS};
+use libc::c_char;
 
 pub type IOOptionBits = u32;
 
@@ -19,7 +20,6 @@ pub type IOOptionBits = u32;
 pub fn kIOUSBDeviceClassName() -> *const c_char {
     b"IOUSBDevice\0".as_ptr() as *const c_char
 }
-
 pub fn kIOUSBInterfaceClassName() -> *const c_char {
     b"IOUSBInterface\0".as_ptr() as *const c_char
 }
@@ -28,23 +28,18 @@ pub fn kIOUSBInterfaceClassName() -> *const c_char {
 pub fn kIOHIDDeviceUsageKey() -> *const c_char {
     b"DeviceUsage\0".as_ptr() as *const c_char
 }
-
 pub fn kIOHIDDeviceUsagePageKey() -> *const c_char {
     b"DeviceUsagePage\0".as_ptr() as *const c_char
 }
-
 pub fn kIOHIDPrimaryUsageKey() -> *const c_char {
     b"PrimaryUsage\0".as_ptr() as *const c_char
 }
-
 pub fn kIOHIDPrimaryUsagePageKey() -> *const c_char {
     b"PrimaryUsagePage\0".as_ptr() as *const c_char
 }
-
 pub fn kIOHIDVendorIDKey() -> *const c_char {
     b"VendorID\0".as_ptr() as *const c_char
 }
-
 pub fn kIOHIDProductIDKey() -> *const c_char {
     b"Product\0".as_ptr() as *const c_char
 }
