@@ -159,14 +159,15 @@ pub fn init_device<T>(dev: &mut T) -> io::Result<()>
     Ok(())
 }
 
-pub fn ping_device<T>(dev: &mut T)
+pub fn ping_device<T>(dev: &mut T) -> io::Result<()>
     where T: U2FDevice + Read + Write
 {
     let nums : Vec<u8> = (0..).take(10).collect();
-    match sendrecv(dev, U2FHID_PING, &nums) {
-        Ok(v) => assert_eq!(nums, v),
-        Err(r) => panic!("Error!")
+    let responses = try!(sendrecv(dev, U2FHID_PING, &nums));
+    if responses != nums {
+        return Err(io::Error::new(io::ErrorKind::Other, "Ping was corrupted!"));
     }
+    Ok(())
 }
 
 fn status_word_to_error(status_word_high: u8, status_word_low: u8) -> Option<io::Error>
