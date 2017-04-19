@@ -169,20 +169,29 @@ pub fn ping_device<T>(dev: &mut T)
     }
 }
 
+fn status_word_to_error(status_word_high: u8, status_word_low: u8) -> Option<io::Error>
+{
+    let status_word = [status_word_high, status_word_low];
+
+    match status_word {
+        SW_NO_ERROR => None,
+        SW_WRONG_LENGTH => Some(io::Error::new(io::ErrorKind::Other, "Wrong Length")),
+        SW_WRONG_DATA => Some(io::Error::new(io::ErrorKind::Other, "Wrong Data")),
+        SW_CONDITIONS_NOT_SATISFIED => Some(io::Error::new(io::ErrorKind::Other, "Conditions not satisfied")),
+        _ => Some(io::Error::new(io::ErrorKind::Other, format!("Problem Status: {:?}", status_word))),
+    }
+}
+
 pub fn u2f_version<T>(dev: &mut T) -> io::Result<std::ffi::CString>
     where T: U2FDevice + Read + Write
 {
     let mut version_resp = try!(send_apdu(dev, U2F_VERSION, 0x00, &vec![]));
     let sw_low = version_resp.pop().unwrap();
     let sw_high = version_resp.pop().unwrap();
-    let status_word = [sw_high, sw_low];
 
-    match status_word {
-        SW_NO_ERROR => Ok(try!(CString::new(version_resp))),
-        SW_WRONG_LENGTH => Err(io::Error::new(io::ErrorKind::Other, "Wrong Length")),
-        SW_WRONG_DATA => Err(io::Error::new(io::ErrorKind::Other, "Wrong Data")),
-        SW_CONDITIONS_NOT_SATISFIED => Err(io::Error::new(io::ErrorKind::Other, "Conditions not satisfied")),
-        _ => Err(io::Error::new(io::ErrorKind::Other, format!("Problem Status: {:?}", status_word))),
+    match status_word_to_error(sw_high, sw_low) {
+        None => Ok(try!(CString::new(version_resp))),
+        Some(e) => Err(e),
     }
 }
 
@@ -195,7 +204,7 @@ pub fn u2f_register<T>(dev: &mut T, timeout_sec: u8, challenge: &Vec<u8>, applic
 
     let flags = 0x00;
 
-    let mut register_data = Vec::with_capacity(2*PARAMETER_SIZE);
+    let mut register_data = Vec::with_capacity(2 * PARAMETER_SIZE);
     register_data.extend(challenge);
     register_data.extend(application);
 
@@ -212,7 +221,10 @@ pub fn u2f_register<T>(dev: &mut T, timeout_sec: u8, challenge: &Vec<u8>, applic
 
         // We expect a certain number of SW_CONDITIONS_NOT_SATISFIED results, but nothing else
         if register_resp != SW_CONDITIONS_NOT_SATISFIED {
-            return Err(io::Error::new(io::ErrorKind::Other, format!("Unexpected response: {:?}", register_resp)));
+            return match status_word_to_error(register_resp[0], register_resp[1]) {
+                None => Err(io::Error::new(io::ErrorKind::Other, format!("Unexpected response: {:?}", register_resp))),
+                Some(e) => Err(e),
+            };
         }
 
         iteration_count += 1;
@@ -222,6 +234,49 @@ pub fn u2f_register<T>(dev: &mut T, timeout_sec: u8, challenge: &Vec<u8>, applic
     Err(io::Error::new(io::ErrorKind::Other, "Timed out"))
 }
 
+pub fn u2f_sign<T>(dev: &mut T, timeout_sec: u8, challenge: &Vec<u8>, application: &Vec<u8>, key_handle: &Vec<u8>) -> io::Result<Vec<u8>>
+    where T: U2FDevice + Read + Write
+{
+    if challenge.len() != PARAMETER_SIZE || application.len() != PARAMETER_SIZE {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid parameter sizes"));
+    }
+    if key_handle.len() > 0xFF {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "Key handle too large"));
+    }
+
+    let flags = 0x00;
+    let control_byte = U2F_REQUEST_USER_PRESENCE;
+
+    let mut sign_data = Vec::with_capacity(2 * PARAMETER_SIZE + 1 + key_handle.len());
+    sign_data.extend(challenge);
+    sign_data.extend(application);
+    sign_data.push(key_handle.len() as u8);
+    sign_data.extend(key_handle);
+
+    let mut iteration_count = 0;
+    while iteration_count < timeout_sec {
+        let mut sign_resp = try!(send_apdu(dev, U2F_AUTHENTICATE, flags | U2F_REQUEST_USER_PRESENCE, &sign_data));
+        println!("Got: {:?}", sign_resp);
+
+        if sign_resp.len() != 2 {
+            // Real data, let's bail out here
+            // NOTE: for some reason the C version shortens this response by 2 bytes also
+            return Ok(sign_resp)
+        }
+
+        // We expect a certain number of SW_CONDITIONS_NOT_SATISFIED results, but nothing else
+        if sign_resp != SW_CONDITIONS_NOT_SATISFIED {
+            return match status_word_to_error(sign_resp[0], sign_resp[1]) {
+                None => Err(io::Error::new(io::ErrorKind::Other, format!("Unexpected response: {:?}", sign_resp))),
+                Some(e) => Err(e),
+            };
+        }
+
+        iteration_count += 1;
+        thread::sleep(time::Duration::from_secs(1));
+    }
+    Err(io::Error::new(io::ErrorKind::Other, "Timed out"))
+}
 ////////////////////////////////////////////////////////////////////////
 // Device Communication Functions
 ////////////////////////////////////////////////////////////////////////
