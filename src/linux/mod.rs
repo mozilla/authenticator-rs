@@ -46,6 +46,12 @@ pub struct Device {
     pub cid: [u8; 4],
 }
 
+impl PartialEq for Device {
+    fn eq(&self, other: &Device) -> bool {
+        self.devnode == other.devnode
+    }
+}
+
 impl Read for Device {
     fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
         if let Some(ref mut d) = self.device {

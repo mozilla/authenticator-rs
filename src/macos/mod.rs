@@ -38,9 +38,14 @@ pub struct Device {
     // Channel ID for U2F HID communication. Needed to implement U2FDevice
     // trait.
     pub cid: [u8; 4],
-    pub report_send: Sender<Report>,
     pub report_recv: Receiver<Report>,
     pub thread: Option<thread::JoinHandle<()>>,
+}
+
+impl PartialEq for Device {
+    fn eq(&self, other: &Device) -> bool {
+        self.device_ref == other.device_ref
+    }
 }
 
 impl fmt::Display for Device {
@@ -57,18 +62,13 @@ fn create_device(dev: IOHIDDeviceRef, name: String) -> Device {
         name: name.clone(),
         device_ref: dev,
         cid: CID_BROADCAST,
-        report_send: tx.clone(),
         report_recv: rx,
         thread: None,
     };
 
-
     // Use a barrier to block this function until the thread is ready
     let barrier = Arc::new(Barrier::new(2));
     let barrier_clone = barrier.clone();
-
-    // Use a refcounted clone
-    // let tx_clone = tx.clone();
 
     // Super, super sketchy, but we can't Send a libc::c_void to the thread, yet OSX wants us to do
     // just that. An alternative way to accomplish this might be to come up with enough information
@@ -150,14 +150,20 @@ impl U2FDevice for Device {
     }
 }
 
-pub struct U2FManager {
+pub struct PlatformManager {
     pub hid_manager: IOHIDManagerRef,
 }
 
-pub fn open_u2f_hid_manager() -> io::Result<U2FManager> {
+pub fn open_platform_manager() -> io::Result<PlatformManager> {
+    // TODO: Remove this disconnect-removal channel, or rework it, or something
+    let (mut tx, rx) = channel::<IOHIDDeviceRef>();
+
     unsafe {
         let hid_manager = IOHIDManagerCreate(kCFAllocatorDefault, kIOHIDManagerOptionNone);
         IOHIDManagerSetDeviceMatching(hid_manager, ptr::null());
+
+        let tx_ptr: *mut libc::c_void = &mut tx as *mut _ as *mut libc::c_void;
+        IOHIDManagerRegisterDeviceRemovalCallback(hid_manager, device_unregistered_cb, tx_ptr);
 
         // Start the manager
         IOHIDManagerScheduleWithRunLoop(hid_manager, CFRunLoopGetCurrent(), kCFRunLoopDefaultMode);
@@ -166,11 +172,12 @@ pub fn open_u2f_hid_manager() -> io::Result<U2FManager> {
         if result != KERN_SUCCESS {
             return Err(io::Error::from_raw_os_error(result));
         }
-        Ok(U2FManager { hid_manager: hid_manager })
+
+        Ok(PlatformManager { hid_manager: hid_manager })
     }
 }
 
-impl U2FManager {
+impl PlatformManager {
     pub fn close(&self) {
         unsafe {
             let result = IOHIDManagerClose(self.hid_manager, kIOHIDManagerOptionNone);
@@ -181,9 +188,10 @@ impl U2FManager {
         println!("U2FManager closing...");
     }
 
-    pub fn find_keys(&self) -> io::Result<Vec<Device>> {
+    pub fn find_keys(&self) -> io::Result<Vec<Device>>
+    {
         println!("Finding ... ");
-        let mut devices: Vec<Device> = vec![];
+        let mut devices = vec![];
         unsafe {
             println!("Device counting...");
             let device_set = IOHIDManagerCopyDevices(self.hid_manager);
@@ -307,19 +315,31 @@ extern "C" fn read_new_data_cb(context: *mut c_void,
             // TOOD: This happens when the channel closes before this thread
             // does. This is pretty common, but let's deal with stopping
             // properly later.
-            println!("Problem returning data for thread: {}", e);
+            println!("Problem returning read_new_data_cb data for thread: {}", e);
         };
     }
 }
 
 // This is called from the RunLoop thread
-extern "C" fn device_unregistered_cb(void_ref: CFTypeRef, context: *const c_void) {
+extern "C" fn device_unregistered_cb(context: *mut c_void,
+                                     result: IOReturn,
+                                     _: *mut c_void,
+                                     device: IOHIDDeviceRef) {
     unsafe {
-        // context contains a Device which we populate as the out variable
-        let device: &mut Device = &mut *(context as *mut Device);
+        let tx: &mut Sender<IOHIDDeviceRef> = &mut *(context as *mut Sender<IOHIDDeviceRef>);
 
-        let device_ref = void_ref as IOHIDDeviceRef;
-        println!("device_unregistered_cb device={} device_ref={:?}", device, device_ref);
+        // context contains a Device which we populate as the out variable
+        // let device: &mut Device = &mut *(context as *mut Device);
+
+        // let device_ref = void_ref as IOHIDDeviceRef;
+        println!("{:?} device_unregistered_cb context={:?} result={:?} device_ref={:?}", thread::current(), context, result, device);
+
+        if let Err(e) = tx.send(device) {
+            // TOOD: This happens when the channel closes before this thread
+            // does. This is pretty common, but let's deal with stopping
+            // properly later.
+            println!("Problem returning device_unregistered_cb data for thread: {}", e);
+        };
     }
 }
 
@@ -340,7 +360,7 @@ extern "C" fn locate_hid_devices_cb(void_ref: CFTypeRef, context: *const c_void)
             let name = format!("Vendor={} Product={} Page={} Usage={}",
                      vendor_id, product_id, device_usage_page, device_usage);
 
-            println!("FIDO-compliant Device Found: {}", name);
+            println!("{:?} FIDO-compliant Device Found: {}", thread::current(), name);
 
             devices.push(create_device(device_ref, name));
         }

@@ -24,7 +24,7 @@ pub mod platform;
 mod consts;
 
 use consts::*;
-use std::{thread, time, mem, io, slice};
+use std::{ffi, mem, io, slice};
 use std::io::{Read, Write};
 use std::ffi::CString;
 
@@ -165,9 +165,9 @@ fn status_word_to_error(status_word_high: u8, status_word_low: u8) -> Option<io:
 
     match status_word {
         SW_NO_ERROR => None,
-        SW_WRONG_LENGTH => Some(io::Error::new(io::ErrorKind::Other, "Wrong Length")),
-        SW_WRONG_DATA => Some(io::Error::new(io::ErrorKind::Other, "Wrong Data")),
-        SW_CONDITIONS_NOT_SATISFIED => Some(io::Error::new(io::ErrorKind::Other, "Conditions not satisfied")),
+        SW_WRONG_LENGTH => Some(io::Error::new(io::ErrorKind::InvalidInput, "Wrong Length")),
+        SW_WRONG_DATA => Some(io::Error::new(io::ErrorKind::InvalidData, "Wrong Data")),
+        SW_CONDITIONS_NOT_SATISFIED => Some(io::Error::new(io::ErrorKind::TimedOut, "Conditions not satisfied")),
         _ => Some(io::Error::new(io::ErrorKind::Other, format!("Problem Status: {:?}", status_word))),
     }
 }
@@ -185,7 +185,18 @@ pub fn u2f_version<T>(dev: &mut T) -> io::Result<std::ffi::CString>
     }
 }
 
-pub fn u2f_register<T>(dev: &mut T, timeout_sec: u8, challenge: &Vec<u8>, application: &Vec<u8>) -> io::Result<Vec<u8>>
+pub fn u2f_version_is_v2<T>(dev: &mut T) -> io::Result<()>
+    where T: U2FDevice + Read + Write
+{
+    let version_string = try!(u2f_version(dev));
+
+    if version_string != try!(ffi::CString::new("U2F_V2")) {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "Unexpected U2F Version"));
+    }
+    Ok(())
+}
+
+pub fn u2f_register<T>(dev: &mut T, challenge: &Vec<u8>, application: &Vec<u8>) -> io::Result<Vec<u8>>
     where T: U2FDevice + Read + Write
 {
     if challenge.len() != PARAMETER_SIZE || application.len() != PARAMETER_SIZE {
@@ -198,33 +209,20 @@ pub fn u2f_register<T>(dev: &mut T, timeout_sec: u8, challenge: &Vec<u8>, applic
     register_data.extend(challenge);
     register_data.extend(application);
 
-    let mut iteration_count = 0;
-    while iteration_count < timeout_sec {
-        let register_resp = try!(send_apdu(dev, U2F_REGISTER, flags | U2F_REQUEST_USER_PRESENCE, &register_data));
-        println!("Got: {:?}", register_resp);
+    let register_resp = try!(send_apdu(dev, U2F_REGISTER, flags | U2F_REQUEST_USER_PRESENCE, &register_data));
 
-        if register_resp.len() != 2 {
-            // Real data, let's bail out here
-            // NOTE: for some reason the C version shortens response by 2 bytes
-            return Ok(register_resp)
-        }
-
-        // We expect a certain number of SW_CONDITIONS_NOT_SATISFIED results, but nothing else
-        if register_resp != SW_CONDITIONS_NOT_SATISFIED {
-            return match status_word_to_error(register_resp[0], register_resp[1]) {
-                None => Err(io::Error::new(io::ErrorKind::Other, format!("Unexpected response: {:?}", register_resp))),
-                Some(e) => Err(e),
-            };
-        }
-
-        iteration_count += 1;
-        thread::sleep(time::Duration::from_secs(1));
+    if register_resp.len() != 2 {
+        // Real data, we're done
+        return Ok(register_resp)
     }
 
-    Err(io::Error::new(io::ErrorKind::Other, "Timed out"))
+    match status_word_to_error(register_resp[0], register_resp[1]) {
+        None => Ok(Vec::new()),
+        Some(e) => Err(e),
+    }
 }
 
-pub fn u2f_sign<T>(dev: &mut T, timeout_sec: u8, challenge: &Vec<u8>, application: &Vec<u8>, key_handle: &Vec<u8>) -> io::Result<Vec<u8>>
+pub fn u2f_sign<T>(dev: &mut T, challenge: &Vec<u8>, application: &Vec<u8>, key_handle: &Vec<u8>) -> io::Result<Vec<u8>>
     where T: U2FDevice + Read + Write
 {
     if challenge.len() != PARAMETER_SIZE || application.len() != PARAMETER_SIZE {
@@ -242,30 +240,27 @@ pub fn u2f_sign<T>(dev: &mut T, timeout_sec: u8, challenge: &Vec<u8>, applicatio
     sign_data.push(key_handle.len() as u8);
     sign_data.extend(key_handle);
 
-    let mut iteration_count = 0;
-    while iteration_count < timeout_sec {
-        let sign_resp = try!(send_apdu(dev, U2F_AUTHENTICATE, flags | U2F_REQUEST_USER_PRESENCE, &sign_data));
-        println!("Got: {:?}", sign_resp);
+    let sign_resp = try!(send_apdu(dev, U2F_AUTHENTICATE, flags | U2F_REQUEST_USER_PRESENCE, &sign_data));
 
-        if sign_resp.len() != 2 {
-            // Real data, let's bail out here
-            // NOTE: for some reason the C version shortens this response by 2 bytes also
-            return Ok(sign_resp)
-        }
-
-        // We expect a certain number of SW_CONDITIONS_NOT_SATISFIED results, but nothing else
-        if sign_resp != SW_CONDITIONS_NOT_SATISFIED {
-            return match status_word_to_error(sign_resp[0], sign_resp[1]) {
-                None => Err(io::Error::new(io::ErrorKind::Other, format!("Unexpected response: {:?}", sign_resp))),
-                Some(e) => Err(e),
-            };
-        }
-
-        iteration_count += 1;
-        thread::sleep(time::Duration::from_secs(1));
+    if sign_resp.len() != 2 {
+        // Real data, let's bail out here
+        return Ok(sign_resp)
     }
-    Err(io::Error::new(io::ErrorKind::Other, "Timed out"))
+
+    match status_word_to_error(sign_resp[0], sign_resp[1]) {
+        None => Ok(Vec::new()),
+        Some(e) => Err(e),
+    }
 }
+
+pub fn u2f_cancel<T>(dev: &mut T) -> io::Result<()>
+    where T: U2FDevice + Read + Write
+{
+    // TOOD: What do actually do here to cancel? Sending a new query seems OK.
+    let _ = try!(u2f_version(dev));
+    Ok(())
+}
+
 ////////////////////////////////////////////////////////////////////////
 // Device Communication Functions
 ////////////////////////////////////////////////////////////////////////
