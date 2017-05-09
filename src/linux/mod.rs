@@ -1,10 +1,10 @@
 use libudev;
-use std::path::{Path, PathBuf};
+use byteorder::{ByteOrder, LittleEndian};
+use std::path::PathBuf;
 use std::fs::{File, OpenOptions};
 use std::os::unix::io::AsRawFd;
 use std::io;
 use std::io::{Read, Write};
-use ::{init_device, ping_device};
 use ::consts::{CID_BROADCAST, FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID};
 use U2FDevice;
 
@@ -15,14 +15,14 @@ use U2FDevice;
 #[allow(non_camel_case_types)]
 #[repr(C)]
 pub struct hidraw_report_descriptor {
-    pub size: u32,
-    pub value: [u8;4096]
+    size: ::libc::c_int,
+    value: [u8; 4096]
 }
 
 impl hidraw_report_descriptor {
-    pub fn new(s: u32) -> hidraw_report_descriptor  {
+    fn new() -> hidraw_report_descriptor  {
         hidraw_report_descriptor {
-            size: s,
+            size: 0,
             value: [0; 4096]
         }
     }
@@ -90,21 +90,6 @@ impl U2FDevice for Device {
     }
 }
 
-#[derive(Debug, Clone)]
-struct DeviceUsage {
-    pub usage: u16,
-    pub usage_page: u16
-}
-
-impl DeviceUsage {
-    pub fn new() -> DeviceUsage {
-        DeviceUsage {
-            usage: 0,
-            usage_page: 0
-        }
-    }
-}
-
 ////////////////////////////////////////////////////////////////////////
 // Utility Functions
 ////////////////////////////////////////////////////////////////////////
@@ -124,107 +109,79 @@ fn from_nix_result<T>(res: ::nix::Result<T>) -> io::Result<T> {
 // HID Usage Page Functions
 ////////////////////////////////////////////////////////////////////////
 
-fn get_bytes(desc: &[u8], num_bytes: usize, cur: usize) -> u32 {
-    /* Return if there aren't enough bytes. */
-    if cur + num_bytes >= desc.len() {
-        return 0;
-    }
+fn read_report_descriptor(dev: &libudev::Device, desc: &mut hidraw_report_descriptor) -> io::Result<()> {
+    let path = dev.devnode().unwrap();
+    let opts = ::nix::fcntl::O_RDONLY;
+    let mode = ::nix::sys::stat::Mode::empty();
 
-    if num_bytes == 0 {
-        return 0;
-    }
-    else if num_bytes == 1 {
-        return desc[cur + 1] as u32;
-    }
-    else if num_bytes == 2 {
-        return ((desc[cur + 2] as u32) << 8) + (desc[cur + 1] as u32);
-    }
-    0
+    // Open the file and read the report descriptor.
+    let fd = try!(from_nix_result(::nix::fcntl::open(path, opts, mode)));
+
+    try!(from_nix_result(unsafe { hidiocgrdescsize(fd, &mut desc.size) }));
+    try!(from_nix_result(unsafe { hidiocgrdesc(fd, desc) }));
+    try!(from_nix_result(::nix::unistd::close(fd)));
+
+    Ok(())
 }
 
-fn get_usage(desc: &[u8]) -> Result<Vec<DeviceUsage>, ()> {
+fn has_fido_usage(desc: &hidraw_report_descriptor) -> bool {
+    let desc = &desc.value[..];
+    let mut usage_page = None;
+    let mut usage = None;
+    let mut i = 0;
 
-    let mut usages : Vec<DeviceUsage> = vec![];
-    let mut du : DeviceUsage = DeviceUsage::new();
-    let mut size_code: u8;
-    let mut data_len: usize;
-    let mut key_size: i32;
-    let mut usage_found: bool = false;
-    let mut usage_page_found: bool = false;
-    let mut i: usize = 0;
     while i < desc.len() {
         let key = desc[i];
-        let key_cmd = key & 0xfc;
+        let cmd = key & 0xfc;
+        let data = &desc[i+1..];
+
         if key & 0xf0 == 0xf0 {
-            return Err(());
-        }
-        size_code = (key & 0x3) as u8;
-        match size_code
-	      {
-	          0 => data_len = size_code as usize,
-            1 => data_len = size_code as usize,
-            2 => data_len = size_code as usize,
-            3 => data_len = 4,
-            _ => data_len = 0
-	      };
-        key_size = 1;
-        let mut du : DeviceUsage = DeviceUsage::new();
-        if key_cmd == 0x4
-        {
-            du.usage_page = get_bytes(desc, data_len, i) as u16;
-            usage_page_found = true;
-        }
-        if key_cmd == 0x8
-        {
-            du.usage = get_bytes(desc, data_len, i) as u16;
-            usage_found = true;
+            break; // Invalid data.
         }
 
-        if usage_page_found && usage_found {
-            usage_page_found = false;
-            usage_found = false;
-            usages.push(du.clone());
-            du = DeviceUsage::new();
+        // Determine length.
+        let data_len = match key & 0x3 {
+            s @ 0 ... 2 => s as usize,
+            _ => 4 /* key & 0x3 == 3 */
+        };
+
+        if data_len > data.len() {
+            break; // Invalid data.
         }
-        i += data_len + (key_size as usize);
+
+        // Read value.
+        if cmd == 0x4 {
+            usage_page = Some(LittleEndian::read_uint(data, data_len));
+        } else if cmd == 0x8 {
+            usage = Some(LittleEndian::read_uint(data, data_len));
+        }
+
+        // Check the values we found.
+        if let (Some(usage_page), Some(usage)) = (usage_page, usage) {
+            return usage_page == FIDO_USAGE_PAGE as u64 &&
+                   usage == FIDO_USAGE_U2FHID as u64;
+        }
+
+        // Next byte.
+        i += data_len + 1;
     }
-    Ok(usages)
+
+    false
 }
 
-fn get_usages(dev : &libudev::Device) -> io::Result<Vec<DeviceUsage>> {
-    let mut desc_size: i32 = 0;
-    let fname = match dev.devnode() {
-        Some(n) => n,
-        None => return Err(io::Error::new(io::ErrorKind::Other, "No devnode!"))
-    };
-    let fd = match File::open(fname) {
-        Ok(f) => AsRawFd::as_raw_fd(&f),
-        Err(e) => return Err(e)
-    };
-    if let Err(e) = from_nix_result(unsafe { hidiocgrdescsize(fd, &mut desc_size) }) {
-        return Err(e);
+fn is_u2f_device(dev: &libudev::Device) -> bool {
+    if dev.subsystem().to_str() != Some("hidraw") {
+        return false;
     }
-    let mut rpt_desc: hidraw_report_descriptor = hidraw_report_descriptor::new(desc_size as u32);
-    if let Err(e) = from_nix_result(unsafe { hidiocgrdesc(fd, &mut rpt_desc) }) {
-        return Err(e);
-    }
-    match get_usage(&rpt_desc.value[0..(desc_size as usize)]) {
-        Ok(v) => Ok(v),
-        Err(_) => return Err(io::Error::new(io::ErrorKind::Other, "Can't get descriptor!"))
-    }
-}
 
-fn is_u2f_device(device: &libudev::Device) -> bool {
-    match get_usages(&device) {
-        Ok(usages) => {
-            usages.iter()
-                .any(|ref x| {
-                    x.usage_page == FIDO_USAGE_PAGE && x.usage == FIDO_USAGE_U2FHID
-                })
-        },
-        // If we error out while finding usage pages, just say we're not a U2F
-        // device.
-        Err(_) => false
+    if dev.devnode().is_none() {
+        return false;
+    }
+
+    let mut desc = hidraw_report_descriptor::new();
+    match read_report_descriptor(&dev, &mut desc) {
+        Ok(_) => has_fido_usage(&desc),
+        Err(_) => false // Upon failure, just say it's not a U2F device.
     }
 }
 
