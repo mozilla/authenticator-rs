@@ -43,7 +43,7 @@ pub struct InternalDevice {
     // trait.
     pub cid: [u8; 4],
     pub report_recv: Receiver<Report>,
-    pub report_send: Sender<Report>,
+    pub report_send_void: *mut libc::c_void,
 }
 
 impl fmt::Display for InternalDevice {
@@ -148,7 +148,9 @@ pub fn open_platform_manager() -> io::Result<PlatformManager> {
         let (mut removal_tx, removal_rx) = channel::<IOHIDDeviceRef>();
 
         let hid_manager: IOHIDManagerRef = ::std::mem::transmute(hid_manager_ptr);
-        let removal_tx_ptr: *mut libc::c_void = &mut removal_tx as *mut _ as *mut libc::c_void;
+
+        let boxed_removal_tx = Box::new(removal_tx);
+        let removal_tx_ptr: *mut libc::c_void = unsafe { Box::into_raw(boxed_removal_tx) as *mut libc::c_void };
         IOHIDManagerRegisterDeviceRemovalCallback(hid_manager, device_unregistered_cb, removal_tx_ptr);
 
         // Start the manager
@@ -163,10 +165,13 @@ pub fn open_platform_manager() -> io::Result<PlatformManager> {
             match CFRunLoopRunInMode(kCFRunLoopDefaultMode, 1.0, 0) {
                 kCFRunLoopRunStopped => {
                     println!("Device stopped.");
+                    // TODO: drop the removal_tx_ptr
                     return;
                 },
                 _ => {},
             }
+
+            // TODO: When we deregister a device, also drop the report_send_void
         }
     }}) {
         Ok(t) => Some(t),
@@ -195,19 +200,20 @@ pub fn open_platform_manager() -> io::Result<PlatformManager> {
 
         let started_conditon = Arc::new((Mutex::new(false), Condvar::new()));
 
+        let boxed_report_tx = Box::new(report_tx);
+        let report_tx_ptr: *mut libc::c_void = unsafe { Box::into_raw(boxed_report_tx) as *mut libc::c_void };
+
         let int_device = InternalDevice {
             name: get_name(device_ref),
             device_ref: device_ref,
             cid: CID_BROADCAST,
-            report_send: report_tx,
             report_recv: report_rx,
+            report_send_void: report_tx_ptr,
         };
 
         let device = Device {
             device: Arc::new(RwLock::new(int_device)),
         };
-
-        let report_tx_ptr: *mut libc::c_void = unsafe { &mut device.device.read().unwrap().report_send.clone() as *mut _ as *mut libc::c_void };
 
         unsafe {
             IOHIDDeviceRegisterInputReportCallback(device_ref, scratch_buf.as_ptr(),
