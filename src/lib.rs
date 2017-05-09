@@ -7,8 +7,6 @@ extern crate libc;
 
 #[cfg(any(target_os = "linux"))]
 extern crate libudev;
-#[cfg(any(target_os = "linux"))]
-extern crate byteorder;
 
 #[cfg(any(target_os = "linux"))]
 #[path="linux/mod.rs"]

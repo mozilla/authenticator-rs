@@ -1,5 +1,4 @@
 use libudev;
-use byteorder::{ByteOrder, LittleEndian};
 use std::path::PathBuf;
 use std::fs::{File, OpenOptions};
 use std::os::unix::io::RawFd;
@@ -28,7 +27,7 @@ impl hidraw_report_descriptor {
     }
 }
 
-// Taken from ioctl crate, but it doesn't look like they're alive anymore?
+// https://github.com/torvalds/linux/blob/master/include/uapi/linux/hidraw.h
 ioctl!(read hidiocgrdescsize with b'H', 0x01; ::libc::c_int);
 ioctl!(read hidiocgrdesc with b'H', 0x02; /*struct*/ hidraw_report_descriptor);
 
@@ -124,6 +123,12 @@ fn read_report_descriptor(dev: &libudev::Device, desc: &mut hidraw_report_descri
     Ok(())
 }
 
+fn read_uint_le(buf: &[u8]) -> u32 {
+    assert!(buf.len() <= 4);
+    // Parse the number in little endian byte order.
+    buf.iter().rev().fold(0, |num, b| (num << 8) | (*b as u32))
+}
+
 fn has_fido_usage(desc: &hidraw_report_descriptor) -> bool {
     let desc = &desc.value[..];
     let mut usage_page = None;
@@ -133,7 +138,6 @@ fn has_fido_usage(desc: &hidraw_report_descriptor) -> bool {
     while i < desc.len() {
         let key = desc[i];
         let cmd = key & 0xfc;
-        let data = &desc[i+1..];
 
         if key & 0xf0 == 0xf0 {
             break; // Invalid data.
@@ -145,21 +149,23 @@ fn has_fido_usage(desc: &hidraw_report_descriptor) -> bool {
             _ => 4 /* key & 0x3 == 3 */
         };
 
-        if data_len > data.len() {
+        if i + data_len >= desc.len() {
             break; // Invalid data.
         }
 
+        let data = &desc[i+1..i+1+data_len];
+
         // Read value.
         if cmd == 0x4 {
-            usage_page = Some(LittleEndian::read_uint(data, data_len));
+            usage_page = Some(read_uint_le(data));
         } else if cmd == 0x8 {
-            usage = Some(LittleEndian::read_uint(data, data_len));
+            usage = Some(read_uint_le(data));
         }
 
         // Check the values we found.
         if let (Some(usage_page), Some(usage)) = (usage_page, usage) {
-            return usage_page == FIDO_USAGE_PAGE as u64 &&
-                   usage == FIDO_USAGE_U2FHID as u64;
+            return usage_page == FIDO_USAGE_PAGE as u32 &&
+                   usage == FIDO_USAGE_U2FHID as u32;
         }
 
         // Next byte.
