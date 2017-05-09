@@ -2,7 +2,7 @@ use libudev;
 use byteorder::{ByteOrder, LittleEndian};
 use std::path::PathBuf;
 use std::fs::{File, OpenOptions};
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::RawFd;
 use std::io;
 use std::io::{Read, Write};
 use ::consts::{CID_BROADCAST, FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID};
@@ -37,7 +37,7 @@ ioctl!(read hidiocgrdesc with b'H', 0x02; /*struct*/ hidraw_report_descriptor);
 pub struct Device {
     pub devnode: PathBuf,
     // hidraw device file handle
-    pub device: Option<File>,
+    pub device: RawFd,
     // Stores whether or not the device uses numbered reports
     // TODO: Needs implementation
     pub uses_numbered_reports: bool,
@@ -54,30 +54,30 @@ impl PartialEq for Device {
 
 impl Read for Device {
     fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
-        if let Some(ref mut d) = self.device {
-            d.read(bytes)
-        } else {
-            Err(io::Error::new(io::ErrorKind::NotConnected, "Device not opened!"))
+        if self.device == 0 {
+            return Err(io::Error::new(io::ErrorKind::NotConnected, "Device not opened!"));
         }
+
+        from_nix_result(::nix::unistd::read(self.device, bytes))
     }
 }
 
 impl Write for Device {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        if let Some(ref mut d) = self.device {
-            d.write(bytes)
-        } else {
-            Err(io::Error::new(io::ErrorKind::NotConnected, "Device not opened!"))
+        if self.device == 0 {
+            return Err(io::Error::new(io::ErrorKind::NotConnected, "Device not opened!"));
         }
+
+        from_nix_result(::nix::unistd::write(self.device, bytes))
     }
 
     // USB HID writes don't buffer, so this will be a nop.
     fn flush(&mut self) -> io::Result<()> {
-        if let Some(ref d) = self.device {
-            Ok(())
-        } else {
-            Err(io::Error::new(io::ErrorKind::NotConnected, "Device not opened!"))
+        if self.device == 0 {
+            return Err(io::Error::new(io::ErrorKind::NotConnected, "Device not opened!"));
         }
+
+        Ok(())
     }
 }
 
@@ -196,7 +196,7 @@ fn create_device(dev: &libudev::Device) -> io::Result<Device> {
     };
     Ok(Device {
         devnode: devnode.to_owned(),
-        device: None,
+        device: 0,
         // TODO Actually check the usage report here
         uses_numbered_reports: true,
         // Start device with CID_BROADCAST as a cid, we'll get the actual CID on
@@ -206,26 +206,24 @@ fn create_device(dev: &libudev::Device) -> io::Result<Device> {
 }
 
 pub fn open_device(dev: &mut Device) -> io::Result<()> {
-    dev.device = match OpenOptions::new().write(true).read(true).open(&dev.devnode) {
-        Ok(f) => Some(f),
-        Err(er) => return Err(er)
-    };
+    let path = &dev.devnode;
+    let opts = ::nix::fcntl::O_RDWR;
+    let mode = ::nix::sys::stat::Mode::empty();
+    dev.device = try!(from_nix_result(::nix::fcntl::open(path, opts, mode)));
+
     Ok(())
 }
 
 pub fn find_keys() -> io::Result<Vec<Device>> {
     let context = libudev::Context::new().unwrap();
     let mut enumerator = try!(libudev::Enumerator::new(&context));
-    let mut devices : Vec<Device> = vec![];
+    let mut devices = vec![];
 
     // udev's enumerator returns an internally allocated linked list, not an
     // iterator, so we can't use filter on it.
     for device in try!(enumerator.scan_devices()) {
         if is_u2f_device(&device) {
-            match create_device(&device) {
-                Ok(d) => devices.push(d),
-                Err(e) => return Err(e)
-            }
+            devices.push(try!(create_device(&device)));
         }
     }
 
