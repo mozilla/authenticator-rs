@@ -124,13 +124,10 @@ impl U2FDevice for Device {
 
 pub struct PlatformManager {
     pub hid_manager: IOHIDManagerRef,
-    device_added: Sender<AddedDevice>,
     known_devices: Vec<Device>,
 }
 
 pub fn open_platform_manager() -> io::Result<PlatformManager> {
-    let (mut added_tx, added_rx) = channel::<AddedDevice>();
-
     let hid_manager: IOHIDManagerRef;
     unsafe {
         hid_manager = IOHIDManagerCreate(kCFAllocatorDefault, kIOHIDManagerOptionNone);
@@ -146,12 +143,17 @@ pub fn open_platform_manager() -> io::Result<PlatformManager> {
     let thread = match thread::Builder::new().name("HID Runloop".to_string()).spawn(move || {
     unsafe {
         let (mut removal_tx, removal_rx) = channel::<IOHIDDeviceRef>();
+        let (mut added_tx, added_rx) = channel::<IOHIDDeviceRef>();
 
         let hid_manager: IOHIDManagerRef = ::std::mem::transmute(hid_manager_ptr);
 
         let boxed_removal_tx = Box::new(removal_tx);
         let removal_tx_ptr: *mut libc::c_void = unsafe { Box::into_raw(boxed_removal_tx) as *mut libc::c_void };
-        IOHIDManagerRegisterDeviceRemovalCallback(hid_manager, device_unregistered_cb, removal_tx_ptr);
+        IOHIDManagerRegisterDeviceRemovalCallback(hid_manager, device_register_cb, removal_tx_ptr);
+
+        let boxed_added_tx = Box::new(added_tx);
+        let added_tx_ptr: *mut libc::c_void = unsafe { Box::into_raw(boxed_added_tx) as *mut libc::c_void };
+        IOHIDManagerRegisterDeviceMatchingCallback(hid_manager, device_register_cb, added_tx_ptr);
 
         // Start the manager
         IOHIDManagerScheduleWithRunLoop(hid_manager, CFRunLoopGetCurrent(), kCFRunLoopDefaultMode);
@@ -180,17 +182,7 @@ pub fn open_platform_manager() -> io::Result<PlatformManager> {
 
     println!("Finding ... ");
     let mut device_refs: Vec<IOHIDDeviceRef> = Vec::new();
-    unsafe {
-        let device_set = IOHIDManagerCopyDevices(hid_manager);
-        if device_set.is_null() {
-            return Err(io::Error::new(io::ErrorKind::Other, "Could not get the set of devices"));
-        }
 
-        // The OSX System call can take a void pointer _context, which we will use
-        // for the out variable, devices.
-        let devices_ptr: *mut libc::c_void = &mut device_refs as *mut _ as *mut libc::c_void;
-        CFSetApplyFunction(device_set, locate_hid_devices_cb, devices_ptr);
-    }
 
     let scratch_buf = [0; HID_RPT_SIZE];
 
@@ -237,7 +229,6 @@ pub fn open_platform_manager() -> io::Result<PlatformManager> {
 
     Ok(PlatformManager {
         hid_manager: hid_manager,
-        device_added: added_tx,
         known_devices: devices,
     })
 }
@@ -379,10 +370,10 @@ extern "C" fn read_new_data_cb(context: *mut c_void,
 }
 
 // This is called from the RunLoop thread
-extern "C" fn device_unregistered_cb(context: *mut c_void,
-                                     result: IOReturn,
-                                     _: *mut c_void,
-                                     device: IOHIDDeviceRef) {
+extern "C" fn device_register_cb(context: *mut c_void,
+                                 result: IOReturn,
+                                 _: *mut c_void,
+                                 device: IOHIDDeviceRef) {
     unsafe {
         let tx: &mut Sender<IOHIDDeviceRef> = &mut *(context as *mut Sender<IOHIDDeviceRef>);
 
@@ -390,18 +381,17 @@ extern "C" fn device_unregistered_cb(context: *mut c_void,
         // let device: &mut Device = &mut *(context as *mut Device);
 
         // let device_ref = void_ref as IOHIDDeviceRef;
-        println!("{:?} device_unregistered_cb context={:?} result={:?} device_ref={:?}",
+        println!("{:?} device_register_cb context={:?} result={:?} device_ref={:?}",
                  thread::current(), context, result, device);
 
         if let Err(e) = tx.send(device) {
             // TOOD: This happens when the channel closes before this thread
             // does. This is pretty common, but let's deal with stopping
             // properly later.
-            println!("Problem returning device_unregistered_cb data for thread: {}", e);
+            println!("Problem returning device_register_cb data for thread: {}", e);
         };
     }
 }
-
 // This method is called in the same thread
 extern "C" fn locate_hid_devices_cb(void_ref: CFTypeRef, context: *const c_void) {
     unsafe {
