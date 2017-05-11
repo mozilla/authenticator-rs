@@ -5,125 +5,18 @@ use crypto::sha2::Sha256;
 extern crate base64;
 extern crate u2fhid;
 use std::{io, thread, time};
-use std::io::{Read, Write};
-use std::sync::mpsc::{channel, Sender, Receiver, RecvTimeoutError};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::mpsc::channel;
+use std::time::Duration;
 use u2fhid::U2FDevice;
 
 const PARAMETER_SIZE : usize = 32;
 
-enum Command {
-    Register,
-    Sign,
-}
-
-pub struct WorkUnit
-{
-    timeout: Duration,
-    start_time: Instant,
-    command: Command,
-    challenge: Vec<u8>,
-    application: Vec<u8>,
-    key_handle: Option<Vec<u8>>,
-    result_tx: Sender<io::Result<Vec<u8>>>
-}
-
 pub struct U2FManager {
-    work_tx: Sender<WorkUnit>,
-}
-
-pub fn open_u2f_manager() -> io::Result<U2FManager> {
-    let (mut tx, rx) = channel::<WorkUnit>();
-    let manager = U2FManager{
-        work_tx: tx,
-    };
-
-    if let Err(e) = thread::Builder::new().name("HID Runloop".to_string()).spawn(move || {
-        U2FManager::worker_loop(rx);
-    }) {
-        return Err(e);
-    }
-    Ok(manager)
 }
 
 impl U2FManager {
-    fn worker_loop(work_rx: Receiver<WorkUnit>) {
-        let platform = match u2fhid::platform::open_platform_manager() {
-            Ok(v) => v,
-            Err(e) => panic!("Failure to open platform HID support: {}", e),
-        };
-
-        let mut current_job : Option<WorkUnit> = None;
-        loop {
-            println!("Doing work");
-
-            // Get new work
-            match work_rx.recv_timeout(Duration::from_millis(100)) {
-                Ok(v) => {
-                    // TODO: Cancel existing job?
-                    current_job = Some(v)
-                },
-                Err(e) => {
-                    if e != RecvTimeoutError::Timeout {
-                        panic!("whoa now {}", e);
-                    }
-                },
-            };
-
-            current_job = match current_job {
-                Some(job) => {
-                    let mut done = false;
-                    let security_keys = match platform.find_keys() {
-                        Ok(v) => v,
-                        Err(e) => panic!("Problem enumerating keys, {}", e),
-                    };
-
-                    for mut device_obj in security_keys {
-                        println!("iterating now");
-                        if let Ok(_) = U2FManager::perform_job_for_key(&mut device_obj, &job) {
-                            done = true;
-                            break;
-                        }
-                    }
-
-                    if job.start_time.elapsed() > job.timeout {
-                        job.result_tx.send(Err(io::Error::new(io::ErrorKind::TimedOut, "Timed out")));
-                        done = true;
-                    }
-
-                    if done {
-                        None
-                    } else {
-                        Some(job)
-                    }
-                },
-                None => None, // Nothing to do
-            }
-        }
-    }
-
-    pub fn perform_job_for_key<T>(dev: &mut T, job: &WorkUnit) -> io::Result<()>
-        where T: U2FDevice + Read + Write
-    {
-        let result = match job.command {
-            Command::Register => {
-                u2fhid::u2f_register(dev, &job.challenge, &job.application)
-            },
-            Command::Sign => {
-                // It'd be an error if key_handle was None here
-                let keybytes = job.key_handle.as_ref().unwrap();
-                u2fhid::u2f_sign(dev, &job.challenge, &job.application, keybytes)
-            },
-        };
-
-        match result {
-            Ok(bytes) => {
-                job.result_tx.send(Ok(bytes));
-                Ok(())
-            },
-            Err(e) => Err(e),
-        }
+    pub fn new() -> U2FManager {
+        U2FManager{}
     }
 
     pub fn register<F>(&self, timeout_sec: u8, challenge: Vec<u8>, application: Vec<u8>, callback: F)
@@ -134,24 +27,14 @@ impl U2FManager {
             return;
         }
 
-        let (result_tx, result_rx) = channel::<io::Result<Vec<u8>>>();
+        let timeout = Duration::from_secs(timeout_sec as u64);
 
-        if let Err(e) = self.work_tx.send(WorkUnit{
-            timeout: Duration::from_secs(timeout_sec as u64),
-            start_time: Instant::now(),
-            command: Command::Register,
-            challenge: challenge,
-            application: application,
-            key_handle: None,
-            result_tx: result_tx,
+        if let Err(e) = thread::Builder::new().name("Register Runloop".to_string()).spawn(move || {
+            let manager = u2fhid::platform::new();
+            let result = manager.register(timeout, challenge, application);
+            callback(result);
         }) {
-            callback(Err(io::Error::new(io::ErrorKind::Other, format!("Send error {}", e))));
-            return;
-        }
-
-        match result_rx.recv() {
-            Ok(v) => callback(v),
-            Err(e) => callback(Err(io::Error::new(io::ErrorKind::Other, e))),
+            callback(Err(e));
         }
     }
 
@@ -194,7 +77,7 @@ fn main() {
     application.result(&mut app_bytes);
 
     let (tx, rx) = channel();
-    let manager = open_u2f_manager().unwrap();
+    let manager = U2FManager::new();
 
     manager.register(15, chall_bytes, app_bytes, move |result| {
         // Ship back to the main thread
