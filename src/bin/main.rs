@@ -44,6 +44,13 @@ impl U2FManager {
             return;
         }
 
+        let timeout = Duration::from_secs(timeout_sec as u64);
+
+        thread::Builder::new().name("Sign Runloop".to_string()).spawn(move || {
+            let mut manager = u2fhid::platform::new();
+            let result = manager.sign(timeout, challenge, application, key_handle);
+            callback(result);
+        });
     }
 }
 
@@ -74,38 +81,44 @@ fn main() {
     let mut app_bytes: Vec<u8> = vec![0; application.output_bytes()];
     application.result(&mut app_bytes);
 
-    let (tx, rx) = channel();
     let manager = U2FManager::new();
 
-    manager.register(15, chall_bytes, app_bytes, move |result| {
+    let (reg_tx, reg_rx) = channel();
+    manager.register(15, chall_bytes, app_bytes, move |reg_result| {
         // Ship back to the main thread
-        if let Err(e) = tx.send(result) {
+        if let Err(e) = reg_tx.send(reg_result) {
             panic!("Could not send: {}", e);
         }
     });
 
-    let thread_result = match rx.recv() {
-        Ok(v) => v,
-        Err(e) => panic!("Couldn't read data: {}", e),
-    };
-
-    let register_data = match thread_result {
+    let register_data = match reg_rx.recv().expect("Should not error on register receive") {
         Ok(v) => v,
         Err(e) => panic!("Register failure: {}", e),
     };
 
     println!("Register result: {}", base64::encode(&register_data));
 
-    // let key_handle = u2f_get_key_handle_from_register_response(&register_data).unwrap();
+    let key_handle = u2f_get_key_handle_from_register_response(&register_data).unwrap();
 
-    // let mut chall_bytes: Vec<u8> = vec![0; challenge.output_bytes()];
-    // challenge.result(&mut chall_bytes);
-    // let mut app_bytes: Vec<u8> = vec![0; application.output_bytes()];
-    // application.result(&mut app_bytes);
+    let mut chall_bytes: Vec<u8> = vec![0; challenge.output_bytes()];
+    challenge.result(&mut chall_bytes);
+    let mut app_bytes: Vec<u8> = vec![0; application.output_bytes()];
+    application.result(&mut app_bytes);
 
-    // manager.sign(15, chall_bytes, app_bytes, key_handle, move|result| {
-    //     println!("Sign result: {}", base64::encode(&result.unwrap()));
-    // });
+    let (sig_tx, sig_rx) = channel();
+    manager.sign(15, chall_bytes, app_bytes, key_handle, move|sig_result| {
+        // Ship back to the main thread
+        if let Err(e) = sig_tx.send(sig_result) {
+            panic!("Could not send: {}", e);
+        }
+    });
+
+    let sign_data = match sig_rx.recv().expect("Should not error on signature receive") {
+        Ok(v) => v,
+        Err(e) => panic!("Sign failure: {}", e),
+    };
+
+    println!("Sign result: {}", base64::encode(&sign_data));
 
     println!("Done.");
 }

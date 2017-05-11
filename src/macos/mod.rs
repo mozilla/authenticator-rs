@@ -12,11 +12,10 @@ use std::ptr;
 use std::sync::{Arc, Barrier, Condvar, Mutex, RwLock};
 use std::sync::mpsc::{channel, Sender, Receiver, RecvTimeoutError};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use libc::{c_char, c_void};
 
-// use mach::port::{mach_port_t,MACH_PORT_NULL};
 use mach::kern_return::KERN_SUCCESS;
 
 use core_foundation_sys::base::*;
@@ -24,6 +23,10 @@ use core_foundation_sys::string::*;
 use core_foundation_sys::number::*;
 use core_foundation_sys::set::*;
 use core_foundation_sys::runloop::*;
+
+mod monitor;
+use self::monitor::Monitor;
+use std::collections::HashMap;
 
 use consts::{CID_BROADCAST, FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID, HID_RPT_SIZE};
 use U2FDevice;
@@ -36,7 +39,7 @@ pub struct Report {
 unsafe impl Send for Report {}
 unsafe impl Sync for Report {}
 
-pub struct InternalDevice {
+pub struct Device {
     pub name: String,
     pub device_ref: IOHIDDeviceRef,
     // Channel ID for U2F HID communication. Needed to implement U2FDevice
@@ -46,45 +49,23 @@ pub struct InternalDevice {
     pub report_send_void: *mut libc::c_void,
 }
 
-impl fmt::Display for InternalDevice {
+impl fmt::Display for Device {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "InternalDevice({}, ref:{:?}, cid: {:02x}{:02x}{:02x}{:02x})", self.name,
                self.device_ref, self.cid[0], self.cid[1], self.cid[2], self.cid[3])
     }
 }
 
-struct AddedDevice {
-    pub raw_handle: u64,
-    pub report_tx: Sender<Report>,
-    pub is_started: Arc<(Mutex<bool>, Condvar)>,
-}
-
-#[derive(Clone)]
-pub struct Device {
-    pub device: Arc<RwLock<InternalDevice>>,
-}
-
-impl fmt::Display for Device {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let int_device = self.device.read().unwrap();
-        write!(f, "Device({})", *int_device)
-    }
-}
-
 impl PartialEq for Device {
-    fn eq(&self, other: &Device) -> bool {
-        let int_device = self.device.read().unwrap();
-        let other_device = other.device.read().unwrap();
-        int_device.device_ref == other_device.device_ref
+    fn eq(&self, other_device: &Device) -> bool {
+        self.device_ref == other_device.device_ref
     }
 }
 
 impl Read for Device {
     fn read(&mut self, mut bytes: &mut [u8]) -> io::Result<usize> {
-        let int_device = self.device.write().unwrap();
-        println!("Reading {}", *int_device);
         let timeout = Duration::from_secs(READ_TIMEOUT);
-        let report_data = match int_device.report_recv.recv_timeout(timeout) {
+        let report_data = match self.report_recv.recv_timeout(timeout) {
             Ok(v) => v,
             Err(e) => {
                 if e == RecvTimeoutError::Timeout {
@@ -100,9 +81,8 @@ impl Read for Device {
 
 impl Write for Device {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        let int_device = self.device.write().unwrap();
-        println!("Sending on {}", *int_device);
-        unsafe { set_report(int_device.device_ref, kIOHIDReportTypeOutput, bytes) }
+        println!("Sending on {}", self);
+        unsafe { set_report(self.device_ref, kIOHIDReportTypeOutput, bytes) }
     }
 
     // USB HID writes don't buffer, so this will be a nop.
@@ -113,140 +93,123 @@ impl Write for Device {
 
 impl U2FDevice for Device {
     fn get_cid(&self) -> [u8; 4] {
-        let int_device = self.device.read().unwrap();
-        return int_device.cid.clone();
+        return self.cid.clone();
     }
     fn set_cid(&mut self, cid: &[u8; 4]) {
-        let mut int_device = self.device.write().unwrap();
-        int_device.cid.clone_from(cid);
+        self.cid.clone_from(cid);
     }
 }
 
 pub struct PlatformManager {
-    pub hid_manager: IOHIDManagerRef,
-    known_devices: Vec<Device>,
 }
 
-pub fn open_platform_manager() -> io::Result<PlatformManager> {
-    let hid_manager: IOHIDManagerRef;
-    unsafe {
-        hid_manager = IOHIDManagerCreate(kCFAllocatorDefault, kIOHIDManagerOptionNone);
-        IOHIDManagerSetDeviceMatching(hid_manager, ptr::null());
-
-        let result = IOHIDManagerOpen(hid_manager, kIOHIDManagerOptionNone);
-        if result != KERN_SUCCESS {
-            return Err(io::Error::from_raw_os_error(result));
-        }
-    }
-
-    let hid_manager_ptr: u64 = unsafe { ::std::mem::transmute(hid_manager) };
-    let thread = match thread::Builder::new().name("HID Runloop".to_string()).spawn(move || {
-    unsafe {
-        let (mut removal_tx, removal_rx) = channel::<IOHIDDeviceRef>();
-        let (mut added_tx, added_rx) = channel::<IOHIDDeviceRef>();
-
-        let hid_manager: IOHIDManagerRef = ::std::mem::transmute(hid_manager_ptr);
-
-        let boxed_removal_tx = Box::new(removal_tx);
-        let removal_tx_ptr: *mut libc::c_void = unsafe { Box::into_raw(boxed_removal_tx) as *mut libc::c_void };
-        IOHIDManagerRegisterDeviceRemovalCallback(hid_manager, device_register_cb, removal_tx_ptr);
-
-        let boxed_added_tx = Box::new(added_tx);
-        let added_tx_ptr: *mut libc::c_void = unsafe { Box::into_raw(boxed_added_tx) as *mut libc::c_void };
-        IOHIDManagerRegisterDeviceMatchingCallback(hid_manager, device_register_cb, added_tx_ptr);
-
-        // Start the manager
-        IOHIDManagerScheduleWithRunLoop(hid_manager, CFRunLoopGetCurrent(), kCFRunLoopDefaultMode);
-
-        // Run the Event Loop. CFRunLoopRunInMode() will dispatch HID input reports into the
-        // read_new_data_cb() callback.
-        loop {
-            println!("Run loop running, handle={:?}", thread::current());
-
-            #[allow(non_upper_case_globals)]
-            match CFRunLoopRunInMode(kCFRunLoopDefaultMode, 1.0, 0) {
-                kCFRunLoopRunStopped => {
-                    println!("Device stopped.");
-                    // TODO: drop the removal_tx_ptr
-                    return;
-                },
-                _ => {},
-            }
-
-            // TODO: When we deregister a device, also drop the report_send_void
-        }
-    }}) {
-        Ok(t) => Some(t),
-        Err(e) => return Err(e),
-    };
-
-    println!("Finding ... ");
-    let mut device_refs: Vec<IOHIDDeviceRef> = Vec::new();
-
-
-    let scratch_buf = [0; HID_RPT_SIZE];
-
-    let mut devices: Vec<Device> = Vec::new();
-    for device_ref in device_refs {
-        let (mut report_tx, report_rx) = channel::<Report>();
-
-        let started_conditon = Arc::new((Mutex::new(false), Condvar::new()));
-
-        let boxed_report_tx = Box::new(report_tx);
-        let report_tx_ptr: *mut libc::c_void = unsafe { Box::into_raw(boxed_report_tx) as *mut libc::c_void };
-
-        let int_device = InternalDevice {
-            name: get_name(device_ref),
-            device_ref: device_ref,
-            cid: CID_BROADCAST,
-            report_recv: report_rx,
-            report_send_void: report_tx_ptr,
-        };
-
-        let mut device = Device {
-            device: Arc::new(RwLock::new(int_device)),
-        };
-
-        unsafe {
-            IOHIDDeviceRegisterInputReportCallback(device_ref, scratch_buf.as_ptr(),
-                                                   scratch_buf.len() as CFIndex,
-                                                   read_new_data_cb, report_tx_ptr);
-        }
-
-        if let Err(_) = super::init_device(&mut device) {
-            continue;
-        }
-        if let Err(_) = super::ping_device(&mut device) {
-            continue;
-        }
-        if let Err(_) = super::u2f_version_is_v2(&mut device) {
-            continue;
-        }
-
-        println!("Readied {}", device);
-        devices.push(device);
-    }
-
-    Ok(PlatformManager {
-        hid_manager: hid_manager,
-        known_devices: devices,
-    })
+pub fn new() -> PlatformManager {
+    PlatformManager {}
 }
 
 impl PlatformManager {
-    pub fn close(&self) {
-        unsafe {
-            let result = IOHIDManagerClose(self.hid_manager, kIOHIDManagerOptionNone);
-            if result != KERN_SUCCESS {
-                panic!("ERROR: {}", result);
-            }
-        }
-        println!("U2FManager closing...");
+    pub fn find_keys(&self) -> io::Result<Vec<Device>> {
+        Ok(Vec::new())
     }
 
-    pub fn find_keys(&self) -> io::Result<Vec<Device>>
-    {
-        Ok(self.known_devices.clone())
+    pub fn register(&mut self, timeout: Duration, challenge: Vec<u8>, application: Vec<u8>) -> io::Result<Vec<u8>> {
+        self.run_and_block(timeout, challenge, application, None)
+    }
+
+    pub fn sign(&mut self, timeout: Duration, challenge: Vec<u8>, application: Vec<u8>, key_handle: Vec<u8>) -> io::Result<Vec<u8>> {
+        self.run_and_block(timeout, challenge, application, Some(key_handle))
+    }
+
+    fn run_and_block(&mut self, timeout: Duration, challenge: Vec<u8>, application: Vec<u8>, key_handle: Option<Vec<u8>>) -> io::Result<Vec<u8>> {
+        let mut monitor = Monitor::new();
+        let mut devices = HashMap::new();
+
+        let start_time = Instant::now();
+
+        monitor.start()?;
+        while start_time.elapsed() < timeout {
+            for event in monitor.events() {
+                process_event(&mut devices, event);
+            }
+
+            for device in devices.values_mut() {
+                if key_handle.as_ref().is_some() {
+                    let key = key_handle.as_ref().unwrap();
+                    if let Ok(bytes) = super::u2f_sign(device, &challenge, &application, key) {
+                        monitor.stop();
+                        return Ok(bytes);
+                    }
+                } else {
+                    if let Ok(bytes) = super::u2f_register(device, &challenge, &application) {
+                        monitor.stop();
+                        return Ok(bytes);
+                    }
+                }
+            }
+
+            thread::sleep(Duration::from_millis(100));
+        }
+
+        monitor.stop();
+        Err(io::Error::new(io::ErrorKind::TimedOut, "Timed out"))
+    }
+}
+
+fn maybe_add_device(devs: &mut HashMap<IOHIDDeviceRef, Device>, device_ref: IOHIDDeviceRef) {
+    if devs.contains_key(&device_ref) {
+        return;
+    }
+
+    unsafe {
+        if is_u2f_device(device_ref) {
+            let scratch_buf = [0; HID_RPT_SIZE];
+            let (mut report_tx, report_rx) = channel::<Report>();
+
+            let boxed_report_tx = Box::new(report_tx);
+            let report_tx_ptr: *mut libc::c_void = unsafe { Box::into_raw(boxed_report_tx) as *mut libc::c_void };
+
+            let mut dev = Device {
+                name: get_name(device_ref),
+                device_ref: device_ref,
+                cid: CID_BROADCAST,
+                report_recv: report_rx,
+                report_send_void: report_tx_ptr,
+            };
+
+            IOHIDDeviceRegisterInputReportCallback(device_ref, scratch_buf.as_ptr(),
+                                                   scratch_buf.len() as CFIndex,
+                                                   read_new_data_cb, report_tx_ptr);
+
+            if let Err(_) = super::init_device(&mut dev) {
+                return;
+            }
+            if let Err(_) = super::ping_device(&mut dev) {
+                return;
+            }
+            if let Err(_) = super::u2f_version_is_v2(&mut dev) {
+                return;
+            }
+
+            println!("added U2F device {}", dev);
+            devs.insert(device_ref, dev);
+        } else {
+            println!("ignored non-U2F device {:?}", device_ref);
+        }
+    }
+}
+
+fn maybe_remove_device(devs: &mut HashMap<IOHIDDeviceRef, Device>, device_ref: IOHIDDeviceRef) {
+    // TODO: When we deregister a device, also drop the report_send_void
+    match devs.remove(&device_ref) {
+        Some(dev) => { println!("removing U2F device {}", dev); },
+        None => { println!("Couldn't remove {:?}", device_ref); },
+    }
+}
+
+fn process_event(devs: &mut HashMap<IOHIDDeviceRef, Device>, event: monitor::Event) {
+    match event {
+        monitor::Event::Add { device_id } => maybe_add_device(devs, device_id.as_ref()),
+        monitor::Event::Remove { device_id } => maybe_remove_device(devs, device_id.as_ref()),
     }
 }
 
@@ -369,40 +332,3 @@ extern "C" fn read_new_data_cb(context: *mut c_void,
     }
 }
 
-// This is called from the RunLoop thread
-extern "C" fn device_register_cb(context: *mut c_void,
-                                 result: IOReturn,
-                                 _: *mut c_void,
-                                 device: IOHIDDeviceRef) {
-    unsafe {
-        let tx: &mut Sender<IOHIDDeviceRef> = &mut *(context as *mut Sender<IOHIDDeviceRef>);
-
-        // context contains a Device which we populate as the out variable
-        // let device: &mut Device = &mut *(context as *mut Device);
-
-        // let device_ref = void_ref as IOHIDDeviceRef;
-        println!("{:?} device_register_cb context={:?} result={:?} device_ref={:?}",
-                 thread::current(), context, result, device);
-
-        if let Err(e) = tx.send(device) {
-            // TOOD: This happens when the channel closes before this thread
-            // does. This is pretty common, but let's deal with stopping
-            // properly later.
-            println!("Problem returning device_register_cb data for thread: {}", e);
-        };
-    }
-}
-// This method is called in the same thread
-extern "C" fn locate_hid_devices_cb(void_ref: CFTypeRef, context: *const c_void) {
-    unsafe {
-        // context contains a Vec<Device> which we populate as the out variable
-        let devices: &mut Vec<IOHIDDeviceRef> = &mut *(context as *mut Vec<IOHIDDeviceRef>);
-
-        let device_ref = void_ref as IOHIDDeviceRef;
-
-        if is_u2f_device(device_ref) {
-            println!("Found U2F Device, passing it back...");
-            devices.push(device_ref);
-        }
-    }
-}
