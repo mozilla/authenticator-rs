@@ -5,14 +5,24 @@ use crypto::sha2::Sha256;
 extern crate base64;
 extern crate u2fhid;
 use std::{io, thread, time};
+use std::io::{Read, Write};
 use std::sync::mpsc::{channel, Sender, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+use u2fhid::U2FDevice;
 
 const PARAMETER_SIZE : usize = 32;
 
+enum Command {
+    Register,
+    Sign,
+}
+
 pub struct WorkUnit
 {
-    timeout_sec: u8,
+    timeout: Duration,
+    start_time: Instant,
+    command: Command,
     challenge: Vec<u8>,
     application: Vec<u8>,
     key_handle: Option<Vec<u8>>,
@@ -56,60 +66,85 @@ impl U2FManager {
                 continue
             }
             println!("Device pinged {}", device_obj);
-            if let Err(_) = u2fhid::u2f_version_is_v2(&mut device_obj){
+            if let Err(_) = u2fhid::u2f_version_is_v2(&mut device_obj) {
                 continue
             }
             println!("Device initialized {}", device_obj);
             security_keys.push(device_obj);
         }
 
+        let mut current_job : Option<WorkUnit> = None;
+
         loop {
-            println!("Doing work!");
-            let work = match work_rx.recv() {
-                Ok(v) => v,
-                Err(e) => panic!("Receiver failed {}", e),
+            println!("Doing work");
+
+            // Add new devices
+
+            // Get new work
+            match work_rx.recv_timeout(Duration::from_millis(100)) {
+                Ok(v) => {
+                    // TODO: Cancel existing job?
+                    current_job = Some(v)
+                },
+                Err(e) => {
+                    if e != RecvTimeoutError::Timeout {
+                        panic!("whoa now {}", e);
+                    }
+                },
             };
 
-            work.result_tx.send(Ok(Vec::new()));
+            current_job = match current_job {
+                Some(job) => {
+                    let mut done = false;
+                    for idx in 0..security_keys.len() {
+                        println!("iterating now");
+
+                        if let Ok(_) = U2FManager::perform_job_for_key(&mut security_keys[idx], &job) {
+                            done = true;
+                            break;
+                        }
+                    }
+
+                    if done || job.start_time.elapsed() > job.timeout {
+                        None
+                    } else {
+                        Some(job)
+                    }
+                },
+                None => None, // Nothing to do
+            }
+
         }
 
-        // let mut iteration_count = 0;
-        // while iteration_count < timeout_sec {
-        //     if let Ok(ref mut list) = devices.lock() {
-        //         // This indexing is because I don't know how to use .iter() and
-        //         // keep the U2FDevice traits
-        //         for idx in 0..list.len() {
-        //             println!("Register {}", list[idx]);
-        //             match u2fhid::u2f_register(&mut list[idx], challenge, application) {
-        //                 Ok(v) => {
-        //                     println!("Register OK {:?}", v);
-        //                     // First to complete, we return
-        //                     // TODO: Cancel the others?
-        //                     for cancel_idx in 0..list.len() {
-        //                         if cancel_idx == idx {
-        //                             continue;
-        //                         }
-        //                         let _ = u2fhid::u2f_cancel(&mut list[cancel_idx]);
-        //                     }
-        //                     return Ok(v)
-        //                 },
-        //                 Err(_) => continue,
-        //             }
-        //         }
-        //     }
-
-        //     // We've tried all attached security keys
-        //     iteration_count += 1;
-        //     thread::sleep(time::Duration::from_secs(1));
-        // }
-
-        // if let Ok(ref mut list) = devices.lock() {
-        //     for cancel_idx in 0..list.len() {
-        //         let _ = u2fhid::u2f_cancel(&mut list[cancel_idx]);
-        //     }
-        // }
-
         // Err(io::Error::new(io::ErrorKind::TimedOut, "Timed out"))
+    }
+
+    pub fn perform_job_for_key<T>(dev: &mut T, job: &WorkUnit) -> io::Result<()>
+        where T: U2FDevice + Read + Write
+    {
+        match job.command {
+            Command::Register => {
+                if let Ok(bytes) = u2fhid::u2f_register(dev, &job.challenge, &job.application) {
+                    println!("Register OK {:?}", bytes);
+                    // First to complete, we return
+                    job.result_tx.send(Ok(bytes));
+                    return Ok(())
+                }
+            },
+            Command::Sign => {
+                // It'd be an error if key_handle was None here
+                let keybytes = job.key_handle.as_ref().unwrap();
+
+                if let Ok(bytes) = u2fhid::u2f_sign(dev, &job.challenge, &job.application, keybytes) {
+                    println!("Sign OK {:?}", bytes);
+                    // First to complete, we return
+                    job.result_tx.send(Ok(bytes));
+                    return Ok(())
+                }
+            },
+        };
+
+        Ok(())
     }
 
     pub fn register<F>(&self, timeout_sec: u8, challenge: Vec<u8>, application: Vec<u8>, callback: F)
@@ -123,7 +158,9 @@ impl U2FManager {
         let (result_tx, result_rx) = channel::<io::Result<Vec<u8>>>();
 
         if let Err(e) = self.work_tx.send(WorkUnit{
-            timeout_sec: timeout_sec,
+            timeout: Duration::from_secs(timeout_sec as u64),
+            start_time: Instant::now(),
+            command: Command::Register,
             challenge: challenge,
             application: application,
             key_handle: None,
@@ -139,64 +176,6 @@ impl U2FManager {
         }
     }
 
-    fn sign_thread(platform: &u2fhid::platform::PlatformManager, timeout_sec: u8,
-                       challenge: &Vec<u8>, application: &Vec<u8>, key_handle: &Vec<u8>) -> io::Result<Vec<u8>>
-    {
-        let device_mutex: Arc<Mutex<Vec<u2fhid::platform::Device>>> = Arc::new(Mutex::new(Vec::new()));
-        let devices = device_mutex.clone();
-
-        if let Ok(ref mut list) = devices.lock() {
-            for mut device_obj in try!(platform.find_keys()) {
-                if let Err(_) = u2fhid::init_device(&mut device_obj) {
-                    continue
-                }
-                if let Err(_) = u2fhid::ping_device(&mut device_obj) {
-                    continue
-                }
-                if let Err(_) = u2fhid::u2f_version_is_v2(&mut device_obj){
-                    continue
-                }
-                list.push(device_obj);
-            }
-        }
-
-        let mut iteration_count = 0;
-        while iteration_count < timeout_sec {
-            if let Ok(ref mut list) = devices.lock() {
-                // This indexing is because I don't know how to use .iter() and
-                // keep the U2FDevice traits
-                for idx in 0..list.len() {
-                    match u2fhid::u2f_sign(&mut list[idx], challenge, application, key_handle) {
-                        Ok(v) => {
-                            // First to complete, we return
-                            // TODO: Cancel the others?
-                            for cancel_idx in 0..list.len() {
-                                if cancel_idx == idx {
-                                    continue;
-                                }
-                                let _ = u2fhid::u2f_cancel(&mut list[cancel_idx]);
-                            }
-                            return Ok(v)
-                        },
-                        Err(_) => continue,
-                    }
-                }
-            }
-
-            // We've tried all attached security keys
-            iteration_count += 1;
-            thread::sleep(time::Duration::from_secs(1));
-        }
-
-        if let Ok(ref mut list) = devices.lock() {
-            for cancel_idx in 0..list.len() {
-                let _ = u2fhid::u2f_cancel(&mut list[cancel_idx]);
-            }
-        }
-
-        Err(io::Error::new(io::ErrorKind::TimedOut, "Timed out"))
-    }
-
     pub fn sign<F>(&self, timeout_sec: u8, challenge: Vec<u8>, application: Vec<u8>, key_handle: Vec<u8>, callback: F)
         where F: FnOnce(io::Result<Vec<u8>>), F: Send + 'static
     {
@@ -205,18 +184,6 @@ impl U2FManager {
             return;
         }
 
-        if let Err(e) = thread::Builder::new().spawn(move || {
-            let platform = match u2fhid::platform::open_platform_manager() {
-                Ok(v) => v,
-                Err(e) => panic!("Failure to open platform HID support: {}", e),
-            };
-
-            let result = U2FManager::sign_thread(&platform, timeout_sec, &challenge, &application, &key_handle);
-            platform.close();
-            callback(result);
-        }) {
-            panic!("Failed to spawn thread: {}", e);
-        }
     }
 }
 
@@ -237,7 +204,6 @@ fn u2f_get_key_handle_from_register_response(register_response: &Vec<u8>) -> io:
 fn main() {
     println!("Searching for keys...");
 
-
     let mut challenge = Sha256::new();
     challenge.input_str(r#"{"challenge": "1vQ9mxionq0ngCnjD-wTsv1zUSrGRtFqG2xP09SbZ70", "version": "U2F_V2", "appId": "http://demo.yubico.com"}"#);
     let mut chall_bytes: Vec<u8> = vec![0; challenge.output_bytes()];
@@ -247,7 +213,6 @@ fn main() {
     application.input_str("http://demo.yubico.com");
     let mut app_bytes: Vec<u8> = vec![0; application.output_bytes()];
     application.result(&mut app_bytes);
-
 
     let (tx, rx) = channel();
     let manager = open_u2f_manager().unwrap();
