@@ -109,29 +109,24 @@ impl U2FManager {
     pub fn perform_job_for_key<T>(dev: &mut T, job: &WorkUnit) -> io::Result<()>
         where T: U2FDevice + Read + Write
     {
-        match job.command {
+        let result = match job.command {
             Command::Register => {
-                if let Ok(bytes) = u2fhid::u2f_register(dev, &job.challenge, &job.application) {
-                    println!("Register OK {:?}", bytes);
-                    // First to complete, we return
-                    job.result_tx.send(Ok(bytes));
-                    return Ok(())
-                }
+                u2fhid::u2f_register(dev, &job.challenge, &job.application)
             },
             Command::Sign => {
                 // It'd be an error if key_handle was None here
                 let keybytes = job.key_handle.as_ref().unwrap();
-
-                if let Ok(bytes) = u2fhid::u2f_sign(dev, &job.challenge, &job.application, keybytes) {
-                    println!("Sign OK {:?}", bytes);
-                    // First to complete, we return
-                    job.result_tx.send(Ok(bytes));
-                    return Ok(())
-                }
+                u2fhid::u2f_sign(dev, &job.challenge, &job.application, keybytes)
             },
         };
 
-        Ok(())
+        match result {
+            Ok(bytes) => {
+                job.result_tx.send(Ok(bytes));
+                Ok(())
+            },
+            Err(e) => Err(e),
+        }
     }
 
     pub fn register<F>(&self, timeout_sec: u8, challenge: Vec<u8>, application: Vec<u8>, callback: F)
