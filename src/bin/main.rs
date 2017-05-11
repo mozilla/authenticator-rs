@@ -81,9 +81,6 @@ impl U2FManager {
 
                     for mut device_obj in security_keys {
                         println!("iterating now");
-                        if let Err(_) = u2fhid::u2f_device_ready(&mut device_obj) {
-                            continue
-                        }
                         if let Ok(_) = U2FManager::perform_job_for_key(&mut device_obj, &job) {
                             done = true;
                             break;

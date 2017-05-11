@@ -28,17 +28,9 @@ use std::{ffi, mem, io, slice};
 use std::io::{Read, Write};
 use std::ffi::CString;
 
-#[derive(Clone, Debug)]
-pub enum U2FStatus {
-    Initialized,
-    NotInitialized,
-    Error,
-}
-
 // Trait for representing U2F HID Devices. Requires getters/setters for the
 // channel ID, created during device initialization.
 pub trait U2FDevice {
-    fn status(&self) -> U2FStatus;
     fn get_cid(&self) -> [u8; 4];
     fn set_cid(&mut self, cid: &[u8; 4]);
 }
@@ -178,23 +170,6 @@ fn status_word_to_error(status_word_high: u8, status_word_low: u8) -> Option<io:
         SW_CONDITIONS_NOT_SATISFIED => Some(io::Error::new(io::ErrorKind::TimedOut, "Conditions not satisfied")),
         _ => Some(io::Error::new(io::ErrorKind::Other, format!("Problem Status: {:?}", status_word))),
     }
-}
-
-pub fn u2f_device_ready<T>(dev: &mut T) -> io::Result<()>
-    where T: U2FDevice + Read + Write
-{
-    match dev.status() {
-        U2FStatus::NotInitialized => {
-            try!(init_device(dev));
-            try!(ping_device(dev));
-            try!(u2f_version_is_v2(dev));
-        },
-        U2FStatus::Initialized => {},
-        U2FStatus::Error => {
-            return Err(io::Error::new(io::ErrorKind::Other, "Device error"));
-        },
-    };
-    Ok(())
 }
 
 pub fn u2f_version<T>(dev: &mut T) -> io::Result<std::ffi::CString>

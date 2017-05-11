@@ -26,7 +26,7 @@ use core_foundation_sys::set::*;
 use core_foundation_sys::runloop::*;
 
 use consts::{CID_BROADCAST, FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID, HID_RPT_SIZE};
-use {U2FDevice, U2FStatus};
+use U2FDevice;
 
 const READ_TIMEOUT: u64 = 15;
 
@@ -44,13 +44,12 @@ pub struct InternalDevice {
     pub cid: [u8; 4],
     pub report_recv: Receiver<Report>,
     pub report_send_void: *mut libc::c_void,
-    pub status: U2FStatus,
 }
 
 impl fmt::Display for InternalDevice {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "InternalDevice({} {:?}, ref:{:?}, cid: {:02x}{:02x}{:02x}{:02x})", self.name,
-               self.status, self.device_ref, self.cid[0], self.cid[1], self.cid[2], self.cid[3])
+        write!(f, "InternalDevice({}, ref:{:?}, cid: {:02x}{:02x}{:02x}{:02x})", self.name,
+               self.device_ref, self.cid[0], self.cid[1], self.cid[2], self.cid[3])
     }
 }
 
@@ -120,11 +119,6 @@ impl U2FDevice for Device {
     fn set_cid(&mut self, cid: &[u8; 4]) {
         let mut int_device = self.device.write().unwrap();
         int_device.cid.clone_from(cid);
-        int_device.status = U2FStatus::Initialized;
-    }
-    fn status(&self) -> U2FStatus {
-        let int_device = self.device.read().unwrap();
-        return int_device.status.clone();
     }
 }
 
@@ -215,10 +209,9 @@ pub fn open_platform_manager() -> io::Result<PlatformManager> {
             cid: CID_BROADCAST,
             report_recv: report_rx,
             report_send_void: report_tx_ptr,
-            status: U2FStatus::NotInitialized,
         };
 
-        let device = Device {
+        let mut device = Device {
             device: Arc::new(RwLock::new(int_device)),
         };
 
@@ -226,6 +219,16 @@ pub fn open_platform_manager() -> io::Result<PlatformManager> {
             IOHIDDeviceRegisterInputReportCallback(device_ref, scratch_buf.as_ptr(),
                                                    scratch_buf.len() as CFIndex,
                                                    read_new_data_cb, report_tx_ptr);
+        }
+
+        if let Err(_) = super::init_device(&mut device) {
+            continue;
+        }
+        if let Err(_) = super::ping_device(&mut device) {
+            continue;
+        }
+        if let Err(_) = super::u2f_version_is_v2(&mut device) {
+            continue;
         }
 
         println!("Readied {}", device);
