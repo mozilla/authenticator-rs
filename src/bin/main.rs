@@ -29,13 +29,11 @@ impl U2FManager {
 
         let timeout = Duration::from_secs(timeout_sec as u64);
 
-        if let Err(e) = thread::Builder::new().name("Register Runloop".to_string()).spawn(move || {
-            let manager = u2fhid::platform::new();
+        thread::Builder::new().name("Register Runloop".to_string()).spawn(move || {
+            let mut manager = u2fhid::platform::new();
             let result = manager.register(timeout, challenge, application);
             callback(result);
-        }) {
-            callback(Err(e));
-        }
+        });
     }
 
     pub fn sign<F>(&self, timeout_sec: u8, challenge: Vec<u8>, application: Vec<u8>, key_handle: Vec<u8>, callback: F)
