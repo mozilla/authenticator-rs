@@ -49,36 +49,14 @@ pub fn open_u2f_manager() -> io::Result<U2FManager> {
 
 impl U2FManager {
     fn worker_loop(work_rx: Receiver<WorkUnit>) {
-        let mut security_keys = Vec::new();
-
         let platform = match u2fhid::platform::open_platform_manager() {
             Ok(v) => v,
             Err(e) => panic!("Failure to open platform HID support: {}", e),
         };
 
-        for mut device_obj in platform.find_keys().unwrap() {
-            println!("Device seen {}", device_obj);
-            if let Err(_) = u2fhid::init_device(&mut device_obj) {
-                continue
-            }
-            println!("Device inited {}", device_obj);
-            if let Err(_) = u2fhid::ping_device(&mut device_obj) {
-                continue
-            }
-            println!("Device pinged {}", device_obj);
-            if let Err(_) = u2fhid::u2f_version_is_v2(&mut device_obj) {
-                continue
-            }
-            println!("Device initialized {}", device_obj);
-            security_keys.push(device_obj);
-        }
-
         let mut current_job : Option<WorkUnit> = None;
-
         loop {
             println!("Doing work");
-
-            // Add new devices
 
             // Get new work
             match work_rx.recv_timeout(Duration::from_millis(100)) {
@@ -96,16 +74,28 @@ impl U2FManager {
             current_job = match current_job {
                 Some(job) => {
                     let mut done = false;
-                    for idx in 0..security_keys.len() {
-                        println!("iterating now");
+                    let security_keys = match platform.find_keys() {
+                        Ok(v) => v,
+                        Err(e) => panic!("Problem enumerating keys, {}", e),
+                    };
 
-                        if let Ok(_) = U2FManager::perform_job_for_key(&mut security_keys[idx], &job) {
+                    for mut device_obj in security_keys {
+                        println!("iterating now");
+                        if let Err(_) = u2fhid::u2f_device_ready(&mut device_obj) {
+                            continue
+                        }
+                        if let Ok(_) = U2FManager::perform_job_for_key(&mut device_obj, &job) {
                             done = true;
                             break;
                         }
                     }
 
-                    if done || job.start_time.elapsed() > job.timeout {
+                    if job.start_time.elapsed() > job.timeout {
+                        job.result_tx.send(Err(io::Error::new(io::ErrorKind::TimedOut, "Timed out")));
+                        done = true;
+                    }
+
+                    if done {
                         None
                     } else {
                         Some(job)
@@ -113,10 +103,7 @@ impl U2FManager {
                 },
                 None => None, // Nothing to do
             }
-
         }
-
-        // Err(io::Error::new(io::ErrorKind::TimedOut, "Timed out"))
     }
 
     pub fn perform_job_for_key<T>(dev: &mut T, job: &WorkUnit) -> io::Result<()>
