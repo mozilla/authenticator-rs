@@ -108,10 +108,6 @@ pub fn new() -> PlatformManager {
 }
 
 impl PlatformManager {
-    pub fn find_keys(&self) -> io::Result<Vec<Device>> {
-        Ok(Vec::new())
-    }
-
     pub fn register(&mut self, timeout: Duration, challenge: Vec<u8>, application: Vec<u8>) -> io::Result<Vec<u8>> {
         self.run_and_block(timeout, challenge, application, None)
     }
