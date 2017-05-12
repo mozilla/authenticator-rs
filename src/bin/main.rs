@@ -5,11 +5,20 @@ use crypto::sha2::Sha256;
 extern crate base64;
 extern crate u2fhid;
 use std::{io, thread, time};
-use std::sync::mpsc::channel;
+use std::sync::mpsc::{channel, Sender, Receiver, RecvTimeoutError, TryRecvError};
 use std::time::Duration;
 use u2fhid::U2FDevice;
 
 const PARAMETER_SIZE : usize = 32;
+
+struct WorkUnit {
+    timeout: Duration,
+    challenge: Vec<u8>,
+    application: Vec<u8>,
+    key_handle: Option<Vec<u8>>,
+    result_tx: Sender<io::Result<Vec<u8>>>,
+    cancel_rx: Receiver<()>,
+}
 
 pub struct U2FManager {
 }
@@ -19,6 +28,7 @@ impl U2FManager {
         U2FManager{}
     }
 
+    // Cannot block.
     pub fn register<F>(&self, timeout_sec: u8, challenge: Vec<u8>, application: Vec<u8>, callback: F)
         where F: FnOnce(io::Result<Vec<u8>>), F: Send + 'static
     {
@@ -36,6 +46,7 @@ impl U2FManager {
         });
     }
 
+    // Cannot block.
     pub fn sign<F>(&self, timeout_sec: u8, challenge: Vec<u8>, application: Vec<u8>, key_handle: Vec<u8>, callback: F)
         where F: FnOnce(io::Result<Vec<u8>>), F: Send + 'static
     {
@@ -51,6 +62,10 @@ impl U2FManager {
             let result = manager.sign(timeout, challenge, application, key_handle);
             callback(result);
         });
+    }
+
+    // Cannot block. Cancels a single operation.
+    pub fn cancel<F>(&self) {
     }
 }
 

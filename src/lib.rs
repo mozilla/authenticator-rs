@@ -253,10 +253,18 @@ pub fn u2f_sign<T>(dev: &mut T, challenge: &Vec<u8>, application: &Vec<u8>, key_
     }
 }
 
+pub fn u2f_is_keyhandle_valid<T>(dev: &mut T, key_handle: &Vec<u8>) -> io::Result<bool>
+    where T: U2FDevice + Read + Write
+{
+    // TODO: What do actually do here to cancel? Sending a new query seems OK.
+    let _ = try!(u2f_version(dev));
+    Ok(true)
+}
+
 pub fn u2f_cancel<T>(dev: &mut T) -> io::Result<()>
     where T: U2FDevice + Read + Write
 {
-    // TOOD: What do actually do here to cancel? Sending a new query seems OK.
+    // TODO: What do actually do here to cancel? Sending a new query seems OK.
     let _ = try!(u2f_version(dev));
     Ok(())
 }

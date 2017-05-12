@@ -10,7 +10,7 @@ use std::fmt;
 use std::mem;
 use std::ptr;
 use std::sync::{Arc, Barrier, Condvar, Mutex, RwLock};
-use std::sync::mpsc::{channel, Sender, Receiver, RecvTimeoutError};
+use std::sync::mpsc::{channel, Sender, Receiver, RecvTimeoutError, TryRecvError};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -101,17 +101,26 @@ impl U2FDevice for Device {
 }
 
 pub struct PlatformManager {
+  // Send 'stop' commands to the thread.
+  tx: Option<Sender<()>>,
 }
 
 pub fn new() -> PlatformManager {
-    PlatformManager {}
+    PlatformManager { tx: None }
 }
 
 impl PlatformManager {
+    // Can block
+    pub fn cancel(&self) {
+        self.tx.as_ref().expect("Should be already running").send(());
+    }
+
+    // Non-blocking, must return data on the provided channel
     pub fn register(&mut self, timeout: Duration, challenge: Vec<u8>, application: Vec<u8>) -> io::Result<Vec<u8>> {
         self.run_and_block(timeout, challenge, application, None)
     }
 
+    // Non-blocking, must return data on the provided channel
     pub fn sign(&mut self, timeout: Duration, challenge: Vec<u8>, application: Vec<u8>, key_handle: Vec<u8>) -> io::Result<Vec<u8>> {
         self.run_and_block(timeout, challenge, application, Some(key_handle))
     }
@@ -122,20 +131,48 @@ impl PlatformManager {
 
         let start_time = Instant::now();
 
+        let (tx, stop_rx) = channel();
+        self.tx = Some(tx);
+
         monitor.start()?;
         while start_time.elapsed() < timeout {
+            if let Ok(_) = stop_rx.try_recv() {
+                monitor.stop();
+                return Err(io::Error::new(io::ErrorKind::Interrupted, "Cancelled"));
+            }
+
             for event in monitor.events() {
                 process_event(&mut devices, event);
             }
 
             for device in devices.values_mut() {
                 if key_handle.as_ref().is_some() {
+                    // Caller gave us a key handle, so we want to sign.
                     let key = key_handle.as_ref().unwrap();
-                    if let Ok(bytes) = super::u2f_sign(device, &challenge, &application, key) {
-                        monitor.stop();
-                        return Ok(bytes);
+
+                    // Determine if this key handle belongs to this token
+                    let is_valid = match super::u2f_is_keyhandle_valid(device, key) {
+                        Err(_) => continue,
+                        Ok(result) => result,
+                    };
+
+                    if is_valid {
+                        // It does, we can sign
+                        if let Ok(bytes) = super::u2f_sign(device, &challenge, &application, key) {
+                            monitor.stop();
+                            return Ok(bytes);
+                        }
+                    } else {
+                        // If doesn't, so blink anyway
+                        // TODO: transmit garbage challenge and application
+                        if let Ok(bytes) = super::u2f_register(device, &challenge, &application) {
+                            monitor.stop();
+                            // If the user selects this token that can't satisfy, it's an error
+                            return Err(io::Error::new(io::ErrorKind::ConnectionRefused, "User chose invalid key"));
+                        }
                     }
                 } else {
+                    // Caller asked us to register, so the first token that does wins
                     if let Ok(bytes) = super::u2f_register(device, &challenge, &application) {
                         monitor.stop();
                         return Ok(bytes);
