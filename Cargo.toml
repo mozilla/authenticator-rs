@@ -1,7 +1,7 @@
 [package]
 name = "u2fhid"
 version = "0.1.0"
-authors = ["Kyle Machulis <kyle@nonpolynomial.com>", "J.C. Jones <jc@mozilla.org>"]
+authors = ["Kyle Machulis <kyle@nonpolynomial.com>", "J.C. Jones <jc@mozilla.org>", "Tim Taubert <ttaubert@mozilla.com>"]
 build = "build.rs"
 
 [target.'cfg(unix)'.dependencies]

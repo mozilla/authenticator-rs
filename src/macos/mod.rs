@@ -102,14 +102,14 @@ impl U2FDevice for Device {
 
 pub struct PlatformManager {
   // Send 'stop' commands to the thread.
-  tx: Option<Sender<()>>,
-}
-
-pub fn new() -> PlatformManager {
-    PlatformManager { tx: None }
+  tx: Option<Sender<()>>
 }
 
 impl PlatformManager {
+    pub fn new() -> Self {
+        Self { tx: None }
+    }
+
     // Can block
     pub fn cancel(&self) {
         self.tx.as_ref().expect("Should be already running").send(());

@@ -327,7 +327,7 @@ pub fn sendrecv<T>(dev: &mut T,
     let mut data : Vec<u8>;
 
     // TODO Check the status of the read, figure out how we'll deal with timeouts.
-    dev.read(&mut frame).unwrap();
+    dev.read(&mut frame)?;
     let mut recvlen = INIT_DATA_SIZE;
 
     // We'll get an init packet back from USB, open it to see how much we'll be
@@ -352,7 +352,7 @@ pub fn sendrecv<T>(dev: &mut T,
     while recvlen < datalen {
         // Reset frame value
         frame = [0u8; HID_RPT_SIZE];
-        dev.read(&mut frame).unwrap();
+        dev.read(&mut frame)?;
         let cont_frame : &U2FHIDCont;
         cont_frame = from_u8_array(&frame);
         if cont_frame.cid != dev.get_cid() {

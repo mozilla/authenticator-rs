@@ -40,7 +40,7 @@ impl U2FManager {
         let timeout = Duration::from_secs(timeout_sec as u64);
 
         thread::Builder::new().name("Register Runloop".to_string()).spawn(move || {
-            let mut manager = u2fhid::platform::new();
+            let mut manager = u2fhid::platform::PlatformManager::new();
             let result = manager.register(timeout, challenge, application);
             callback(result);
         });
@@ -58,7 +58,7 @@ impl U2FManager {
         let timeout = Duration::from_secs(timeout_sec as u64);
 
         thread::Builder::new().name("Sign Runloop".to_string()).spawn(move || {
-            let mut manager = u2fhid::platform::new();
+            let mut manager = u2fhid::platform::PlatformManager::new();
             let result = manager.sign(timeout, challenge, application, key_handle);
             callback(result);
         });

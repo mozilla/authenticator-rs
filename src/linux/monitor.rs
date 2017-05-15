@@ -1,0 +1,108 @@
+use libudev;
+use libudev::EventType;
+
+use libc::{c_int, c_short, c_ulong};
+
+use std::io;
+use std::os::unix::io::AsRawFd;
+use std::path::PathBuf;
+use std::sync::mpsc::{channel, Receiver, TryIter};
+
+use ::platform::runloop::RunLoop;
+use ::platform::util::to_io_err;
+
+const UDEV_SUBSYSTEM: &'static str = "hidraw";
+const POLLIN: c_short = 0x0001;
+const POLL_TIMEOUT: c_int = 10;
+
+fn poll(fds: &mut Vec<::libc::pollfd>) -> io::Result<()> {
+    let nfds = fds.len() as c_ulong;
+
+    let rv = unsafe {
+        ::libc::poll((&mut fds[..]).as_mut_ptr(), nfds, POLL_TIMEOUT)
+    };
+
+    if rv < 0 {
+        Err(io::Error::from_raw_os_error(rv))
+    } else {
+        Ok(())
+    }
+}
+
+pub enum Event {
+    Add { path: PathBuf },
+    Remove { path: PathBuf }
+}
+
+impl Event {
+    fn from_udev(event: libudev::Event) -> Option<Self> {
+        let path = event.device().devnode().map(|dn| dn.to_path_buf());
+
+        match (event.event_type(), path) {
+            (EventType::Add, Some(path)) => Some(Event::Add { path }),
+            (EventType::Remove, Some(path)) => Some(Event::Remove { path }),
+            _ => None
+        }
+    }
+}
+
+pub struct Monitor {
+    // Receive events from the thread.
+    rx: Receiver<Event>,
+    // Handle to the thread loop.
+    thread: RunLoop
+}
+
+impl Monitor {
+    pub fn new() -> io::Result<Self> {
+        // A channel to notify the controlling thread.
+        let (thread_tx, rx) = channel();
+
+        let thread = RunLoop::new(move |alive| {
+            let ctx = libudev::Context::new()?;
+            let mut enumerator = libudev::Enumerator::new(&ctx)?;
+            enumerator.match_subsystem(UDEV_SUBSYSTEM)?;
+
+            // Iterate all existing devices.
+            for dev in enumerator.scan_devices()? {
+                if let Some(path) = dev.devnode().map(|p| p.to_owned()) {
+                    thread_tx.send(Event::Add { path }).map_err(to_io_err)?;
+                }
+            }
+
+            let mut monitor = libudev::Monitor::new(&ctx)?;
+            monitor.match_subsystem(UDEV_SUBSYSTEM)?;
+
+            // Start listening for new devices.
+            let mut socket = monitor.listen()?;
+            let mut fds = vec!(::libc::pollfd {
+                fd: socket.as_raw_fd(), events: POLLIN, revents: 0
+            });
+
+            // Loop until we're stopped by the controlling thread, or fail.
+            while alive() {
+                // Wait for new events, break on failure.
+                poll(&mut fds)?;
+
+                // Send the event over.
+                let udev_event = socket.receive_event();
+                if let Some(event) = udev_event.and_then(Event::from_udev) {
+                    thread_tx.send(event).map_err(to_io_err)?;
+                }
+            }
+
+            Ok(())
+        }, 0 /* no timeout */)?;
+
+        Ok(Self { rx, thread })
+    }
+
+    pub fn events<'a>(&'a self) -> TryIter<'a, Event> {
+        self.rx.try_iter()
+    }
+
+    // This might block.
+    pub fn stop(&mut self) {
+        self.thread.cancel();
+    }
+}
