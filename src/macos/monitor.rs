@@ -74,20 +74,16 @@ impl Monitor {
                 println!("Run loop running, handle={:?}", thread::current());
 
                 for device_ref in added_rx.try_iter() {
-                    tx.send(Event::Add { device_id: IOHIDDeviceID::from_ref(device_ref) });
+                    tx.send(Event::Add { device_id: IOHIDDeviceID::from_ref(device_ref) }).unwrap();
                 }
                 for device_ref in removal_rx.try_iter() {
-                    tx.send(Event::Remove { device_id: IOHIDDeviceID::from_ref(device_ref) });
+                    tx.send(Event::Remove { device_id: IOHIDDeviceID::from_ref(device_ref) }).unwrap();
                 }
 
-                #[allow(non_upper_case_globals)]
-                match unsafe { CFRunLoopRunInMode(kCFRunLoopDefaultMode, 1.0, 0) } {
-                    kCFRunLoopRunStopped => {
-                        println!("Device stopped.");
-                        // TODO: drop the removal_tx_ptr
-                        break;
-                    },
-                    _ => {},
+                if unsafe { CFRunLoopRunInMode(kCFRunLoopDefaultMode, 1.0, 0) } == kCFRunLoopRunStopped {
+                    println!("Device stopped.");
+                    // TODO: drop the removal_tx_ptr
+                    break;
                 }
             }
 
