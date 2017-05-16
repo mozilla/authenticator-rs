@@ -5,8 +5,6 @@ use std::thread;
 use std::thread::JoinHandle;
 use std::time::Instant;
 
-use ::platform::util::to_io_err;
-
 struct Canary {
     alive: AtomicBool,
     thread: Mutex<Option<JoinHandle<()>>>
@@ -24,7 +22,7 @@ pub struct RunLoop {
 
 impl RunLoop {
     pub fn new<F>(fun: F, timeout: u64) -> io::Result<Self>
-        where F: Fn(&Fn() -> bool) -> io::Result<()>, F: Send + 'static
+        where F: FnOnce(&Fn() -> bool) -> io::Result<()>, F: Send + 'static
     {
         let flag = Arc::new(Canary::new());
         let flag_ = flag.clone();
@@ -46,7 +44,9 @@ impl RunLoop {
         })?;
 
         // We really should never fail to lock here.
-        let mut guard = (*flag_).thread.lock().map_err(to_io_err)?;
+        let mut guard = (*flag_).thread.lock().map_err(|_| {
+            io::Error::new(io::ErrorKind::Other, "failed to lock")
+        })?;
 
         // Store the thread handle so we can join later.
         *guard = Some(thread);

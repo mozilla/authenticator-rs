@@ -9,10 +9,9 @@ use std::io;
 use std::fmt;
 use std::mem;
 use std::ptr;
-use std::sync::{Arc, Barrier, Condvar, Mutex, RwLock};
-use std::sync::mpsc::{channel, Sender, Receiver, RecvTimeoutError, TryRecvError};
+use std::sync::mpsc::{channel, Sender, Receiver, RecvTimeoutError};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use libc::{c_char, c_void};
 
@@ -21,12 +20,11 @@ use mach::kern_return::KERN_SUCCESS;
 use core_foundation_sys::base::*;
 use core_foundation_sys::string::*;
 use core_foundation_sys::number::*;
-use core_foundation_sys::set::*;
-use core_foundation_sys::runloop::*;
 
 mod monitor;
 use self::monitor::Monitor;
 use std::collections::HashMap;
+use runloop::RunLoop;
 
 use consts::{CID_BROADCAST, FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID, HID_RPT_SIZE};
 use U2FDevice;
@@ -101,90 +99,95 @@ impl U2FDevice for Device {
 }
 
 pub struct PlatformManager {
-  // Send 'stop' commands to the thread.
-  tx: Option<Sender<()>>
+  // Handle to the thread loop.
+  thread: Option<RunLoop>
 }
 
 impl PlatformManager {
     pub fn new() -> Self {
-        Self { tx: None }
+        Self { thread: None }
+    }
+
+    // Non-blocking
+    pub fn register<F>(&mut self, timeout: u64, challenge: Vec<u8>, application: Vec<u8>, callback: F) -> io::Result<()>
+        where F: FnOnce(io::Result<Vec<u8>>), F: Send + 'static
+    {
+        self.run_thread(timeout, challenge, application, None, callback)
+    }
+
+
+    // Non-blocking
+    pub fn sign<F>(&mut self, timeout: u64, challenge: Vec<u8>, application: Vec<u8>, key_handle: Vec<u8>, callback: F) -> io::Result<()>
+        where F: FnOnce(io::Result<Vec<u8>>), F: Send + 'static
+    {
+        self.run_thread(timeout, challenge, application, Some(key_handle), callback)
     }
 
     // Can block
-    pub fn cancel(&self) {
-        self.tx.as_ref().expect("Should be already running").send(());
+    pub fn cancel(&mut self) {
+        if let Some(mut thread) = self.thread.take() {
+            thread.cancel();
+        }
     }
 
-    // Non-blocking, must return data on the provided channel
-    pub fn register(&mut self, timeout: Duration, challenge: Vec<u8>, application: Vec<u8>) -> io::Result<Vec<u8>> {
-        self.run_and_block(timeout, challenge, application, None)
-    }
+    fn run_thread<F>(&mut self, timeout: u64, challenge: Vec<u8>, application: Vec<u8>, key_handle: Option<Vec<u8>>, callback: F) -> io::Result<()>
+        where F: FnOnce(io::Result<Vec<u8>>), F: Send + 'static
+    {
+        // Abort any prior register/sign calls.
+        self.cancel();
 
-    // Non-blocking, must return data on the provided channel
-    pub fn sign(&mut self, timeout: Duration, challenge: Vec<u8>, application: Vec<u8>, key_handle: Vec<u8>) -> io::Result<Vec<u8>> {
-        self.run_and_block(timeout, challenge, application, Some(key_handle))
-    }
+        self.thread = Some(RunLoop::new(move |alive| {
+            let mut monitor = Monitor::new()?;
+            let mut devices = HashMap::new();
 
-    fn run_and_block(&mut self, timeout: Duration, challenge: Vec<u8>, application: Vec<u8>, key_handle: Option<Vec<u8>>) -> io::Result<Vec<u8>> {
-        let mut monitor = Monitor::new();
-        let mut devices = HashMap::new();
-
-        let start_time = Instant::now();
-
-        let (tx, stop_rx) = channel();
-        self.tx = Some(tx);
-
-        monitor.start()?;
-        while start_time.elapsed() < timeout {
-            if let Ok(_) = stop_rx.try_recv() {
+            // Helper to stop monitor and call back.
+            let complete = |monitor: &mut Monitor, rv| {
                 monitor.stop();
-                return Err(io::Error::new(io::ErrorKind::Interrupted, "Cancelled"));
-            }
+                callback(rv);
+                Ok(())
+            };
 
-            for event in monitor.events() {
-                process_event(&mut devices, event);
-            }
+            while alive() {
+                for event in monitor.events() {
+                    process_event(&mut devices, event);
+                }
 
-            for device in devices.values_mut() {
-                if key_handle.as_ref().is_some() {
-                    // Caller gave us a key handle, so we want to sign.
-                    let key = key_handle.as_ref().unwrap();
+                for device in devices.values_mut() {
+                    if let Some(ref key) = key_handle {
+                        // Determine if this key handle belongs to this token
+                        let is_valid = match super::u2f_is_keyhandle_valid(device, &challenge, &application, key) {
+                            Err(_) => continue,
+                            Ok(result) => result,
+                        };
 
-                    // Determine if this key handle belongs to this token
-                    let is_valid = match super::u2f_is_keyhandle_valid(device, key) {
-                        Err(_) => continue,
-                        Ok(result) => result,
-                    };
-
-                    if is_valid {
-                        // It does, we can sign
-                        if let Ok(bytes) = super::u2f_sign(device, &challenge, &application, key) {
-                            monitor.stop();
-                            return Ok(bytes);
+                        if is_valid {
+                            // It does, we can sign
+                            if let Ok(bytes) = super::u2f_sign(device, &challenge, &application, key) {
+                                return complete(&mut monitor, Ok(bytes));
+                            }
+                        } else {
+                            // If doesn't, so blink anyway
+                            // TODO: transmit garbage challenge and application
+                            if let Ok(_) = super::u2f_register(device, &challenge, &application) {
+                                // If the user selects this token that can't satisfy, it's an error
+                                return complete(&mut monitor, Err(io::Error::new(io::ErrorKind::ConnectionRefused, "User chose invalid key")));
+                            }
                         }
                     } else {
-                        // If doesn't, so blink anyway
-                        // TODO: transmit garbage challenge and application
+                        // Caller asked us to register, so the first token that does wins
                         if let Ok(bytes) = super::u2f_register(device, &challenge, &application) {
-                            monitor.stop();
-                            // If the user selects this token that can't satisfy, it's an error
-                            return Err(io::Error::new(io::ErrorKind::ConnectionRefused, "User chose invalid key"));
+                            return complete(&mut monitor, Ok(bytes));
                         }
                     }
-                } else {
-                    // Caller asked us to register, so the first token that does wins
-                    if let Ok(bytes) = super::u2f_register(device, &challenge, &application) {
-                        monitor.stop();
-                        return Ok(bytes);
-                    }
                 }
+
+                thread::sleep(Duration::from_millis(100));
             }
 
-            thread::sleep(Duration::from_millis(100));
-        }
+            complete(&mut monitor, Err(io::Error::new(io::ErrorKind::TimedOut, "Timed out")))
+        }, timeout)?);
 
-        monitor.stop();
-        Err(io::Error::new(io::ErrorKind::TimedOut, "Timed out"))
+        Ok(())
     }
 }
 
@@ -196,10 +199,10 @@ fn maybe_add_device(devs: &mut HashMap<IOHIDDeviceRef, Device>, device_ref: IOHI
     unsafe {
         if is_u2f_device(device_ref) {
             let scratch_buf = [0; HID_RPT_SIZE];
-            let (mut report_tx, report_rx) = channel::<Report>();
+            let (report_tx, report_rx) = channel::<Report>();
 
             let boxed_report_tx = Box::new(report_tx);
-            let report_tx_ptr: *mut libc::c_void = unsafe { Box::into_raw(boxed_report_tx) as *mut libc::c_void };
+            let report_tx_ptr = Box::into_raw(boxed_report_tx) as *mut libc::c_void;
 
             let mut dev = Device {
                 name: get_name(device_ref),

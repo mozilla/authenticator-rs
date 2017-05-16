@@ -8,12 +8,13 @@ use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, TryIter};
 
-use ::platform::runloop::RunLoop;
+use runloop::RunLoop;
+
 use ::platform::util::to_io_err;
 
 const UDEV_SUBSYSTEM: &'static str = "hidraw";
 const POLLIN: c_short = 0x0001;
-const POLL_TIMEOUT: c_int = 10;
+const POLL_TIMEOUT: c_int = 100;
 
 fn poll(fds: &mut Vec<::libc::pollfd>) -> io::Result<()> {
     let nfds = fds.len() as c_ulong;
@@ -55,8 +56,7 @@ pub struct Monitor {
 
 impl Monitor {
     pub fn new() -> io::Result<Self> {
-        // A channel to notify the controlling thread.
-        let (thread_tx, rx) = channel();
+        let (tx, rx) = channel();
 
         let thread = RunLoop::new(move |alive| {
             let ctx = libudev::Context::new()?;
@@ -66,7 +66,7 @@ impl Monitor {
             // Iterate all existing devices.
             for dev in enumerator.scan_devices()? {
                 if let Some(path) = dev.devnode().map(|p| p.to_owned()) {
-                    thread_tx.send(Event::Add { path }).map_err(to_io_err)?;
+                    tx.send(Event::Add { path }).map_err(to_io_err)?;
                 }
             }
 
@@ -87,7 +87,7 @@ impl Monitor {
                 // Send the event over.
                 let udev_event = socket.receive_event();
                 if let Some(event) = udev_event.and_then(Event::from_udev) {
-                    thread_tx.send(event).map_err(to_io_err)?;
+                    tx.send(event).map_err(to_io_err)?;
                 }
             }
 

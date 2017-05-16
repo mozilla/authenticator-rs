@@ -2,7 +2,6 @@
 #[macro_use]
 extern crate nix;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-#[macro_use]
 extern crate libc;
 
 #[cfg(any(target_os = "linux"))]
@@ -22,6 +21,7 @@ extern crate mach;
 pub mod platform;
 
 mod consts;
+mod runloop;
 
 use consts::*;
 use std::{ffi, mem, io, slice};
@@ -228,11 +228,10 @@ pub fn u2f_sign<T>(dev: &mut T, challenge: &Vec<u8>, application: &Vec<u8>, key_
     if challenge.len() != PARAMETER_SIZE || application.len() != PARAMETER_SIZE {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid parameter sizes"));
     }
-    if key_handle.len() > 0xFF {
+
+    if key_handle.len() > 256 {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "Key handle too large"));
     }
-
-    let flags = 0x00;
 
     let mut sign_data = Vec::with_capacity(2 * PARAMETER_SIZE + 1 + key_handle.len());
     sign_data.extend(challenge);
@@ -240,7 +239,8 @@ pub fn u2f_sign<T>(dev: &mut T, challenge: &Vec<u8>, application: &Vec<u8>, key_
     sign_data.push(key_handle.len() as u8);
     sign_data.extend(key_handle);
 
-    let sign_resp = try!(send_apdu(dev, U2F_AUTHENTICATE, flags | U2F_REQUEST_USER_PRESENCE, &sign_data));
+    let flags = U2F_REQUEST_USER_PRESENCE;
+    let sign_resp = send_apdu(dev, U2F_AUTHENTICATE, flags, &sign_data)?;
 
     if sign_resp.len() != 2 {
         // Real data, let's bail out here
@@ -253,20 +253,30 @@ pub fn u2f_sign<T>(dev: &mut T, challenge: &Vec<u8>, application: &Vec<u8>, key_
     }
 }
 
-pub fn u2f_is_keyhandle_valid<T>(dev: &mut T, key_handle: &Vec<u8>) -> io::Result<bool>
+pub fn u2f_is_keyhandle_valid<T>(dev: &mut T, challenge: &Vec<u8>, application: &Vec<u8>, key_handle: &Vec<u8>) -> io::Result<bool>
     where T: U2FDevice + Read + Write
 {
-    // TODO: What do actually do here to cancel? Sending a new query seems OK.
-    let _ = try!(u2f_version(dev));
-    Ok(true)
-}
+    if challenge.len() != PARAMETER_SIZE ||
+       application.len() != PARAMETER_SIZE {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid parameter sizes"));
+    }
 
-pub fn u2f_cancel<T>(dev: &mut T) -> io::Result<()>
-    where T: U2FDevice + Read + Write
-{
-    // TODO: What do actually do here to cancel? Sending a new query seems OK.
-    let _ = try!(u2f_version(dev));
-    Ok(())
+    if key_handle.len() > 256 {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "Key handle too large"));
+    }
+
+    let mut sign_data = Vec::with_capacity(2 * PARAMETER_SIZE + 1 + key_handle.len());
+    sign_data.extend(challenge);
+    sign_data.extend(application);
+    sign_data.push(key_handle.len() as u8);
+    sign_data.extend(key_handle);
+
+    let flags = U2F_CHECK_IS_REGISTERED;
+    let sign_resp = send_apdu(dev, U2F_AUTHENTICATE, flags, &sign_data)?;
+
+    // Need to use `&sign_resp[0..2]` here due to a compiler bug.
+    // https://github.com/rust-lang/rust/issues/42031
+    Ok(&sign_resp[0..2] == SW_CONDITIONS_NOT_SATISFIED)
 }
 
 ////////////////////////////////////////////////////////////////////////

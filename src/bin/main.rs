@@ -1,71 +1,62 @@
-#[macro_use]
 extern crate crypto;
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
 extern crate base64;
 extern crate u2fhid;
-use std::{io, thread, time};
-use std::sync::mpsc::{channel, Sender, Receiver, RecvTimeoutError, TryRecvError};
-use std::time::Duration;
-use u2fhid::U2FDevice;
+use std::io;
+use std::sync::mpsc::channel;
 
 const PARAMETER_SIZE : usize = 32;
 
-struct WorkUnit {
+/*struct WorkUnit {
     timeout: Duration,
     challenge: Vec<u8>,
     application: Vec<u8>,
     key_handle: Option<Vec<u8>>,
     result_tx: Sender<io::Result<Vec<u8>>>,
     cancel_rx: Receiver<()>,
-}
+}*/
 
 pub struct U2FManager {
+    platform: u2fhid::platform::PlatformManager
 }
 
 impl U2FManager {
-    pub fn new() -> U2FManager {
-        U2FManager{}
+    pub fn new() -> Self {
+        Self { platform: u2fhid::platform::PlatformManager::new() }
     }
 
     // Cannot block.
-    pub fn register<F>(&self, timeout_sec: u8, challenge: Vec<u8>, application: Vec<u8>, callback: F)
+    pub fn register<F>(&mut self, timeout: u64, challenge: Vec<u8>, application: Vec<u8>, callback: F) -> io::Result<()>
         where F: FnOnce(io::Result<Vec<u8>>), F: Send + 'static
     {
-        if challenge.len() != PARAMETER_SIZE || application.len() != PARAMETER_SIZE {
-            callback(Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid parameter sizes")));
-            return;
+        if challenge.len() != PARAMETER_SIZE ||
+           application.len() != PARAMETER_SIZE {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid parameter sizes"));
         }
 
-        let timeout = Duration::from_secs(timeout_sec as u64);
-
-        thread::Builder::new().name("Register Runloop".to_string()).spawn(move || {
-            let mut manager = u2fhid::platform::PlatformManager::new();
-            let result = manager.register(timeout, challenge, application);
-            callback(result);
-        });
+        self.platform.register(timeout, challenge, application, callback)
     }
 
     // Cannot block.
-    pub fn sign<F>(&self, timeout_sec: u8, challenge: Vec<u8>, application: Vec<u8>, key_handle: Vec<u8>, callback: F)
+    pub fn sign<F>(&mut self, timeout: u64, challenge: Vec<u8>, application: Vec<u8>, key_handle: Vec<u8>, callback: F) -> io::Result<()>
         where F: FnOnce(io::Result<Vec<u8>>), F: Send + 'static
     {
-        if challenge.len() != PARAMETER_SIZE || application.len() != PARAMETER_SIZE {
-            callback(Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid parameter sizes")));
-            return;
+        if challenge.len() != PARAMETER_SIZE ||
+           application.len() != PARAMETER_SIZE {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid parameter sizes"));
         }
 
-        let timeout = Duration::from_secs(timeout_sec as u64);
+        if key_handle.len() > 256 {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "Key handle too large"));
+        }
 
-        thread::Builder::new().name("Sign Runloop".to_string()).spawn(move || {
-            let mut manager = u2fhid::platform::PlatformManager::new();
-            let result = manager.sign(timeout, challenge, application, key_handle);
-            callback(result);
-        });
+        self.platform.sign(timeout, challenge, application, key_handle, callback)
     }
 
     // Cannot block. Cancels a single operation.
-    pub fn cancel<F>(&self) {
+    pub fn cancel<F>(&mut self) {
+        self.platform.cancel();
     }
 }
 
@@ -78,7 +69,7 @@ fn u2f_get_key_handle_from_register_response(register_response: &Vec<u8>) -> io:
     let key_handle_len = register_response[66] as usize;
     let mut public_key = register_response.clone();
     let mut key_handle = public_key.split_off(67);
-    // let attestation = key_handle.split_off(key_handle_len);
+    let _attestation = key_handle.split_off(key_handle_len);
 
     Ok(key_handle)
 }
@@ -96,7 +87,7 @@ fn main() {
     let mut app_bytes: Vec<u8> = vec![0; application.output_bytes()];
     application.result(&mut app_bytes);
 
-    let manager = U2FManager::new();
+    let mut manager = U2FManager::new();
 
     let (reg_tx, reg_rx) = channel();
     manager.register(15, chall_bytes, app_bytes, move |reg_result| {
@@ -104,7 +95,7 @@ fn main() {
         if let Err(e) = reg_tx.send(reg_result) {
             panic!("Could not send: {}", e);
         }
-    });
+    }).expect("manager.register() failed");
 
     let register_data = match reg_rx.recv().expect("Should not error on register receive") {
         Ok(v) => v,
@@ -121,12 +112,12 @@ fn main() {
     application.result(&mut app_bytes);
 
     let (sig_tx, sig_rx) = channel();
-    manager.sign(15, chall_bytes, app_bytes, key_handle, move|sig_result| {
+    manager.sign(15, chall_bytes, app_bytes, key_handle, move |sig_result| {
         // Ship back to the main thread
         if let Err(e) = sig_tx.send(sig_result) {
             panic!("Could not send: {}", e);
         }
-    });
+    }).expect("manager.sign() failed");
 
     let sign_data = match sig_rx.recv().expect("Should not error on signature receive") {
         Ok(v) => v,
