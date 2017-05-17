@@ -151,12 +151,6 @@ impl PlatformManager {
                 }
 
                 for device in devices.values_mut() {
-                    // Check to see if monitor.events has any hotplug events that we'll need to handle
-                    if monitor.events().size_hint().0 > 0 {
-                        debug!("Hotplug event; restarting loop");
-                        continue 'top;
-                    }
-
                     if let Some(ref key) = key_handle {
                         // Determine if this key handle belongs to this token
                         let is_valid = match super::u2f_is_keyhandle_valid(device, &challenge, &application, key) {
@@ -183,6 +177,12 @@ impl PlatformManager {
                         if let Ok(bytes) = super::u2f_register(device, &challenge, &application) {
                             return complete(&mut monitor, Ok(bytes));
                         }
+                    }
+
+                    // Check to see if monitor.events has any hotplug events that we'll need to handle
+                    if monitor.events().size_hint().0 > 0 {
+                        debug!("Hotplug event; restarting loop");
+                        continue 'top;
                     }
                 }
 
