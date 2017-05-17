@@ -36,7 +36,7 @@ pub use manager::U2FManager as U2FManager;
 
 // Trait for representing U2F HID Devices. Requires getters/setters for the
 // channel ID, created during device initialization.
-pub trait U2FDevice {
+trait U2FDevice {
     fn get_cid(&self) -> [u8; 4];
     fn set_cid(&mut self, cid: &[u8; 4]);
 }
@@ -114,7 +114,7 @@ fn from_u8_array<T>(arr: &[u8]) -> &T {
     unsafe { &*(arr.as_ptr() as *const T) }
 }
 
-pub fn set_data(data: &mut [u8], itr: &mut std::slice::Iter<u8>, max: usize)
+fn set_data(data: &mut [u8], itr: &mut std::slice::Iter<u8>, max: usize)
 {
     let take_amount;
     let count = itr.size_hint().0;
@@ -133,7 +133,7 @@ pub fn set_data(data: &mut [u8], itr: &mut std::slice::Iter<u8>, max: usize)
 // Device Commands
 ////////////////////////////////////////////////////////////////////////
 
-pub fn init_device<T>(dev: &mut T) -> io::Result<()>
+fn init_device<T>(dev: &mut T) -> io::Result<()>
     where T: U2FDevice + Read + Write
 {
     let mut nonce = [0u8; 8];
@@ -149,7 +149,7 @@ pub fn init_device<T>(dev: &mut T) -> io::Result<()>
     Ok(())
 }
 
-pub fn ping_device<T>(dev: &mut T) -> io::Result<()>
+fn ping_device<T>(dev: &mut T) -> io::Result<()>
     where T: U2FDevice + Read + Write
 {
     let mut random = [0u8; 8];
@@ -175,7 +175,7 @@ fn status_word_to_error(status_word_high: u8, status_word_low: u8) -> Option<io:
     }
 }
 
-pub fn u2f_version<T>(dev: &mut T) -> io::Result<std::ffi::CString>
+fn u2f_version<T>(dev: &mut T) -> io::Result<std::ffi::CString>
     where T: U2FDevice + Read + Write
 {
     let mut version_resp = try!(send_apdu(dev, U2F_VERSION, 0x00, &vec![]));
@@ -188,7 +188,7 @@ pub fn u2f_version<T>(dev: &mut T) -> io::Result<std::ffi::CString>
     }
 }
 
-pub fn u2f_version_is_v2<T>(dev: &mut T) -> io::Result<()>
+fn u2f_version_is_v2<T>(dev: &mut T) -> io::Result<()>
     where T: U2FDevice + Read + Write
 {
     let version_string = try!(u2f_version(dev));
@@ -199,7 +199,7 @@ pub fn u2f_version_is_v2<T>(dev: &mut T) -> io::Result<()>
     Ok(())
 }
 
-pub fn u2f_register<T>(dev: &mut T, challenge: &Vec<u8>, application: &Vec<u8>) -> io::Result<Vec<u8>>
+fn u2f_register<T>(dev: &mut T, challenge: &Vec<u8>, application: &Vec<u8>) -> io::Result<Vec<u8>>
     where T: U2FDevice + Read + Write
 {
     if challenge.len() != PARAMETER_SIZE || application.len() != PARAMETER_SIZE {
@@ -225,7 +225,7 @@ pub fn u2f_register<T>(dev: &mut T, challenge: &Vec<u8>, application: &Vec<u8>) 
     }
 }
 
-pub fn u2f_sign<T>(dev: &mut T, challenge: &Vec<u8>, application: &Vec<u8>, key_handle: &Vec<u8>) -> io::Result<Vec<u8>>
+fn u2f_sign<T>(dev: &mut T, challenge: &Vec<u8>, application: &Vec<u8>, key_handle: &Vec<u8>) -> io::Result<Vec<u8>>
     where T: U2FDevice + Read + Write
 {
     if challenge.len() != PARAMETER_SIZE || application.len() != PARAMETER_SIZE {
@@ -256,7 +256,7 @@ pub fn u2f_sign<T>(dev: &mut T, challenge: &Vec<u8>, application: &Vec<u8>, key_
     }
 }
 
-pub fn u2f_is_keyhandle_valid<T>(dev: &mut T, challenge: &Vec<u8>, application: &Vec<u8>, key_handle: &Vec<u8>) -> io::Result<bool>
+fn u2f_is_keyhandle_valid<T>(dev: &mut T, challenge: &Vec<u8>, application: &Vec<u8>, key_handle: &Vec<u8>) -> io::Result<bool>
     where T: U2FDevice + Read + Write
 {
     if challenge.len() != PARAMETER_SIZE ||
@@ -286,9 +286,7 @@ pub fn u2f_is_keyhandle_valid<T>(dev: &mut T, challenge: &Vec<u8>, application: 
 // Device Communication Functions
 ////////////////////////////////////////////////////////////////////////
 
-pub fn sendrecv<T>(dev: &mut T,
-                   cmd: u8,
-                   send: &[u8]) -> io::Result<Vec<u8>>
+fn sendrecv<T>(dev: &mut T, cmd: u8, send: &[u8]) -> io::Result<Vec<u8>>
     where T: U2FDevice + Read + Write
 {
     let mut sequence: u8 = 0; // Start at 0
@@ -397,10 +395,7 @@ struct U2FAPDUHeader {
     lc : [u8; 3]
 }
 
-pub fn send_apdu<T>(dev: &mut T,
-                    cmd: u8,
-                    p1: u8,
-                    send: &Vec<u8>) -> io::Result<Vec<u8>>
+fn send_apdu<T>(dev: &mut T, cmd: u8, p1: u8, send: &Vec<u8>) -> io::Result<Vec<u8>>
     where T: U2FDevice + Read + Write
 {
     // TODO: Check send length to make sure it's < 2^16
