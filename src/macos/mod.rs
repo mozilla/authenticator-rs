@@ -5,9 +5,10 @@ pub use self::iokit::*;
 mod iokit;
 mod iohid;
 
+use rand::{thread_rng, Rng};
+use std::fmt;
 use std::io::{Read, Write};
 use std::io;
-use std::fmt;
 use std::ptr;
 use std::sync::mpsc::{channel, Sender, Receiver, RecvTimeoutError};
 use std::thread;
@@ -213,10 +214,15 @@ fn maybe_add_device(devs: &mut HashMap<IOHIDDeviceRef, Device>, device_ref: IOHI
                                                     read_new_data_cb,
                                                     report_tx_ptr) };
 
-    if let Err(_) = super::init_device(&mut dev) {
+    let mut nonce = [0u8; 8];
+    thread_rng().fill_bytes(&mut nonce);
+    if let Err(_) = super::init_device(&mut dev, nonce) {
         return;
     }
-    if let Err(_) = super::ping_device(&mut dev) {
+
+    let mut random = [0u8; 8];
+    thread_rng().fill_bytes(&mut random);
+    if let Err(_) = super::ping_device(&mut dev, random) {
         return;
     }
     if let Err(_) = super::u2f_version_is_v2(&mut dev) {

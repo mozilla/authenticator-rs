@@ -27,7 +27,6 @@ mod manager;
 mod runloop;
 
 use consts::*;
-use rand::{thread_rng, Rng};
 use std::{ffi, mem, io, slice};
 use std::io::{Read, Write};
 use std::ffi::CString;
@@ -133,11 +132,9 @@ fn set_data(data: &mut [u8], itr: &mut std::slice::Iter<u8>, max: usize)
 // Device Commands
 ////////////////////////////////////////////////////////////////////////
 
-fn init_device<T>(dev: &mut T) -> io::Result<()>
+fn init_device<T>(dev: &mut T, nonce: [u8; 8]) -> io::Result<()>
     where T: U2FDevice + Read + Write
 {
-    let mut nonce = [0u8; 8];
-    thread_rng().fill_bytes(&mut nonce);
     let raw = sendrecv(dev, U2FHID_INIT, &nonce)?;
 
     let r : &U2FHIDInitResp = from_u8_array(&raw);
@@ -149,12 +146,9 @@ fn init_device<T>(dev: &mut T) -> io::Result<()>
     Ok(())
 }
 
-fn ping_device<T>(dev: &mut T) -> io::Result<()>
+fn ping_device<T>(dev: &mut T, random: [u8; 8]) -> io::Result<()>
     where T: U2FDevice + Read + Write
 {
-    let mut random = [0u8; 8];
-    thread_rng().fill_bytes(&mut random);
-
     if sendrecv(dev, U2FHID_PING, &random)? != random {
         return Err(io::Error::new(io::ErrorKind::Other, "Ping was corrupted!"));
     }
@@ -496,6 +490,8 @@ fn send_apdu<T>(dev: &mut T, cmd: u8, p1: u8, send: &Vec<u8>) -> io::Result<Vec<
     #[test]
     fn test_init_device() {
         let mut device = platform::TestDevice::new();
+        let nonce = [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01];
+
         device.add_write(&vec![0xff, 0xff, 0xff, 0xff, 0x86, 0x00, 0x08, 0x08,
                                0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01],
                          0);
@@ -503,7 +499,7 @@ fn send_apdu<T>(dev: &mut T, cmd: u8, p1: u8, send: &Vec<u8>) -> io::Result<Vec<
                               0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01, 0x00,
                               0x03, 0x00, 0x14, 0x02, 0x04, 0x01, 0x08, 0x01],
                         0);
-        if let Err(e) = init_device(&mut device) {
+        if let Err(e) = init_device(&mut device, nonce) {
             assert!(true, format!("Init device returned an error! {:?}", e.description()));
         }
         assert_eq!(device.get_cid(), [0x00, 0x03, 0x00, 0x14]);

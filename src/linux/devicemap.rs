@@ -1,5 +1,6 @@
-use std::collections::HashMap;
+use rand::{thread_rng, Rng};
 use std::collections::hash_map::ValuesMut;
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use ::platform::device::Device;
@@ -37,10 +38,15 @@ impl DeviceMap {
             }
 
             // Do a few U2F device checks.
-            if let Err(_) = ::init_device(&mut dev) {
+            let mut nonce = [0u8; 8];
+            thread_rng().fill_bytes(&mut nonce);
+            if let Err(_) = ::init_device(&mut dev, nonce) {
                 return;
             }
-            if let Err(_) = ::ping_device(&mut dev) {
+
+            let mut random = [0u8; 8];
+            thread_rng().fill_bytes(&mut random);
+            if let Err(_) = ::ping_device(&mut dev, random) {
                 return;
             }
             if let Err(_) = ::u2f_version_is_v2(&mut dev) {
