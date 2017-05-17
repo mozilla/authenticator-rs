@@ -197,6 +197,7 @@ fn maybe_add_device(devs: &mut HashMap<IOHIDDeviceRef, Device>, device_ref: IOHI
     let (report_tx, report_rx) = channel::<Report>();
 
     let boxed_report_tx = Box::new(report_tx);
+    // report_tx_ptr is deallocated by maybe_remove_device
     let report_tx_ptr = Box::into_raw(boxed_report_tx) as *mut libc::c_void;
 
     let mut dev = Device {
@@ -227,9 +228,12 @@ fn maybe_add_device(devs: &mut HashMap<IOHIDDeviceRef, Device>, device_ref: IOHI
 }
 
 fn maybe_remove_device(devs: &mut HashMap<IOHIDDeviceRef, Device>, device_ref: IOHIDDeviceRef) {
-    // TODO: When we deregister a device, also drop the report_send_void
     match devs.remove(&device_ref) {
-        Some(dev) => { println!("removing U2F device {}", dev); },
+        Some(dev) => {
+            println!("removing U2F device {}", dev);
+            // Re-allocate this raw pointer for destruction
+            let _ = unsafe { Box::from_raw(dev.report_send_void) };
+        },
         None => { println!("Couldn't remove {:?}", device_ref); },
     }
 }
