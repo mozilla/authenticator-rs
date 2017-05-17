@@ -57,7 +57,7 @@ impl IOHIDDeviceMatcher {
     }
 
     fn cf_number(number: i32) -> CFNumberRef {
-        let nbox = Box::new(number as i32);
+        let nbox = Box::new(number);
         let nptr = Box::into_raw(nbox) as *mut libc::c_void;
 
         unsafe {
