@@ -23,6 +23,7 @@ extern crate rand;
 pub mod platform;
 
 mod consts;
+mod manager;
 mod runloop;
 
 use consts::*;
@@ -30,6 +31,8 @@ use rand::{thread_rng, Rng};
 use std::{ffi, mem, io, slice};
 use std::io::{Read, Write};
 use std::ffi::CString;
+
+pub use manager::U2FManager as U2FManager;
 
 // Trait for representing U2F HID Devices. Requires getters/setters for the
 // channel ID, created during device initialization.
