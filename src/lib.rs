@@ -413,7 +413,7 @@ fn send_apdu<T>(dev: &mut T, cmd: u8, p1: u8, send: &Vec<u8>) -> io::Result<Vec<
 
 #[cfg(test)]
     mod tests {
-    use ::{U2FDevice, init_device, sendrecv, send_apdu};
+    use ::{U2FDevice, init_device, ping_device, sendrecv, send_apdu};
     use std::error::Error;
     use consts::{U2FHID_PING, U2FHID_MSG, U2FAPDUHEADER_SIZE};
     mod platform {
@@ -555,6 +555,25 @@ fn send_apdu<T>(dev: &mut T, cmd: u8, p1: u8, send: &Vec<u8>) -> io::Result<Vec<
         // Only expect data from APDU back
         device.add_read(&vec![0x01, 0x02, 0x03, 0x04, U2FHID_MSG, 0x00, 0x05,
                               0x01, 0x02, 0x03, 0x04, 0x05], 0);
-        send_apdu(&mut device, U2FHID_PING, 0xaa, &vec![1, 2, 3, 4, 5]);
+        assert!(send_apdu(&mut device, U2FHID_PING, 0xaa, &vec![1, 2, 3, 4, 5]).is_ok());
+    }
+
+    #[test]
+    fn test_ping_device() {
+        let mut device = platform::TestDevice::new();
+        device.set_cid(&[1, 2, 3, 4]);
+        device.add_write(&vec![// apdu header
+                               0x01, 0x02, 0x03, 0x04, U2FHID_PING, 0x00, 0x08,
+                               // ping nonce
+                               0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08], 0);
+        // Only expect data from APDU back
+        device.add_read(&vec![0x01, 0x02, 0x03, 0x04, U2FHID_MSG, 0x00, 0x08,
+                              0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08], 0);
+
+        let random = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
+
+        if let Err(e) = ping_device(&mut device, random) {
+            assert!(true, format!("Init device returned an error! {:?}", e.description()));
+        }
     }
 }
