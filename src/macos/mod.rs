@@ -145,12 +145,18 @@ impl PlatformManager {
                 Ok(())
             };
 
-            while alive() {
+            'top: while alive() {
                 for event in monitor.events() {
                     process_event(&mut devices, event);
                 }
 
                 for device in devices.values_mut() {
+                    // Check to see if monitor.events has any hotplug events that we'll need to handle
+                    if monitor.events().size_hint().0 > 0 {
+                        println!("Hotplug event; restarting loop");
+                        continue 'top;
+                    }
+
                     if let Some(ref key) = key_handle {
                         // Determine if this key handle belongs to this token
                         let is_valid = match super::u2f_is_keyhandle_valid(device, &challenge, &application, key) {
