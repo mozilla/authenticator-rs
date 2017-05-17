@@ -16,6 +16,8 @@ extern crate core_foundation_sys;
 #[cfg(any(target_os = "macos"))]
 extern crate mach;
 
+extern crate rand;
+
 #[cfg(any(target_os = "macos"))]
 #[path="macos/mod.rs"]
 pub mod platform;
@@ -24,6 +26,7 @@ mod consts;
 mod runloop;
 
 use consts::*;
+use rand::{thread_rng, Rng};
 use std::{ffi, mem, io, slice};
 use std::io::{Read, Write};
 use std::ffi::CString;
@@ -130,20 +133,15 @@ pub fn set_data(data: &mut [u8], itr: &mut std::slice::Iter<u8>, max: usize)
 pub fn init_device<T>(dev: &mut T) -> io::Result<()>
     where T: U2FDevice + Read + Write
 {
-    // TODO This is not a nonce. This is the opposite of a nonce.
-    let nonce = vec![0x8, 0x7, 0x6, 0x5, 0x4, 0x3, 0x2, 0x1];
-    let raw : Vec<u8>;
+    let mut nonce = [0u8; 8];
+    thread_rng().fill_bytes(&mut nonce);
+    let raw = sendrecv(dev, U2FHID_INIT, &nonce)?;
 
-    match sendrecv(dev, U2FHID_INIT, &nonce) {
-        Ok(st) => raw = st,
-        Err(e) => {
-            return Err(e);
-        }
-    }
     let r : &U2FHIDInitResp = from_u8_array(&raw);
-    if nonce != r.nonce {
+    if r.nonce != nonce {
         return Err(io::Error::new(io::ErrorKind::Other, "Nonces do not match!"));
     }
+
     dev.set_cid(&r.cid);
     Ok(())
 }
@@ -151,11 +149,13 @@ pub fn init_device<T>(dev: &mut T) -> io::Result<()>
 pub fn ping_device<T>(dev: &mut T) -> io::Result<()>
     where T: U2FDevice + Read + Write
 {
-    let nums : Vec<u8> = (0..).take(10).collect();
-    let responses = try!(sendrecv(dev, U2FHID_PING, &nums));
-    if responses != nums {
+    let mut random = [0u8; 8];
+    thread_rng().fill_bytes(&mut random);
+
+    if sendrecv(dev, U2FHID_PING, &random)? != random {
         return Err(io::Error::new(io::ErrorKind::Other, "Ping was corrupted!"));
     }
+
     Ok(())
 }
 
@@ -285,7 +285,7 @@ pub fn u2f_is_keyhandle_valid<T>(dev: &mut T, challenge: &Vec<u8>, application: 
 
 pub fn sendrecv<T>(dev: &mut T,
                    cmd: u8,
-                   send: &Vec<u8>) -> io::Result<Vec<u8>>
+                   send: &[u8]) -> io::Result<Vec<u8>>
     where T: U2FDevice + Read + Write
 {
     let mut sequence: u8 = 0; // Start at 0
