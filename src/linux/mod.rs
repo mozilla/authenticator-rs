@@ -8,6 +8,7 @@ mod hidraw;
 mod monitor;
 mod util;
 
+use consts::PARAMETER_SIZE;
 use runloop::RunLoop;
 
 use self::devicemap::DeviceMap;
@@ -96,13 +97,13 @@ impl PlatformManager {
 
                     if is_valid {
                         // If yes, try to sign.
-                        // TODO: transmit garbage challenge and application
                         if let Ok(bytes) = super::u2f_sign(device, &challenge, &application, &key_handle) {
                             return complete(&mut monitor, Ok(bytes))
                         }
                     } else {
-                        // If no, keep registering and blinking.
-                        if let Ok(_) = super::u2f_register(device, &challenge, &application) {
+                        // If no, keep registering and blinking with bogus data
+                        let blank = vec![0u8; PARAMETER_SIZE];
+                        if let Ok(_) = super::u2f_register(device, &blank, &blank) {
                             return complete(&mut monitor, Err(util::io_err("invalid key")))
                         }
                     }

@@ -25,7 +25,7 @@ use self::monitor::Monitor;
 use std::collections::HashMap;
 use runloop::RunLoop;
 
-use consts::{CID_BROADCAST, HID_RPT_SIZE};
+use consts::{CID_BROADCAST, HID_RPT_SIZE, PARAMETER_SIZE};
 use U2FDevice;
 
 const READ_TIMEOUT: u64 = 15;
@@ -164,9 +164,10 @@ impl PlatformManager {
                                 return complete(&mut monitor, Ok(bytes));
                             }
                         } else {
-                            // If doesn't, so blink anyway
-                            // TODO: transmit garbage challenge and application
-                            if let Ok(_) = super::u2f_register(device, &challenge, &application) {
+                            // If doesn't, so blink anyway (using bogus data)
+                            let blank = vec![0u8; PARAMETER_SIZE];
+
+                            if let Ok(_) = super::u2f_register(device, &blank, &blank) {
                                 // If the user selects this token that can't satisfy, it's an error
                                 return complete(&mut monitor, Err(io::Error::new(io::ErrorKind::ConnectionRefused, "User chose invalid key")));
                             }
