@@ -16,11 +16,13 @@ extern crate core_foundation_sys;
 #[cfg(any(target_os = "macos"))]
 extern crate mach;
 
+#[macro_use] extern crate log;
 extern crate rand;
 
 #[cfg(any(target_os = "macos"))]
 #[path="macos/mod.rs"]
 pub mod platform;
+
 
 mod consts;
 mod manager;
@@ -313,11 +315,12 @@ fn sendrecv<T>(dev: &mut T, cmd: u8, send: &[u8]) -> io::Result<Vec<u8>>
             frame[1..].clone_from_slice(to_u8_array(&uf));
         }
 
-        print!("USB send: ");
-        for &byte in frame.iter() {
-            print!("{:02x}", byte);
+        if log_enabled!(log::LogLevel::Trace) {
+            let parts: Vec<String> = frame.iter().map(|byte| {
+                format!("{:02x}", byte)
+            }).collect();
+            trace!("USB send: {}", parts.join(""));
         }
-        println!();
 
         if let Err(er) = dev.write(&frame) {
             return Err(er);

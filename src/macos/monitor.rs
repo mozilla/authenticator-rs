@@ -7,6 +7,7 @@ use super::iokit::*;
 use core_foundation_sys::runloop::*;
 use runloop::RunLoop;
 
+extern crate log;
 extern crate libc;
 use libc::c_void;
 
@@ -51,10 +52,10 @@ impl Monitor {
             // Run the Event Loop. CFRunLoopRunInMode() will dispatch HID
             // input reports into the various callbacks
             while alive() {
-                println!("Run loop running, handle={:?}", thread::current());
+                trace!("OSX Runloop running, handle={:?}", thread::current());
 
                 if unsafe { CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.1, 0) } == kCFRunLoopRunStopped {
-                    println!("Device stopped.");
+                    info!("OSX Runloop device stopped.");
                     break;
                 }
             }

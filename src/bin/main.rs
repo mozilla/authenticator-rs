@@ -7,6 +7,9 @@ use std::io;
 use std::sync::mpsc::channel;
 use u2fhid::U2FManager;
 
+#[macro_use] extern crate log;
+extern crate env_logger;
+
 fn u2f_get_key_handle_from_register_response(register_response: &Vec<u8>) -> io::Result<Vec<u8>>
 {
     if register_response[0] != 0x05 {
@@ -22,8 +25,9 @@ fn u2f_get_key_handle_from_register_response(register_response: &Vec<u8>) -> io:
 }
 
 fn main() {
-    println!("Searching for keys...");
+    env_logger::init().expect("Cannot start logger");
 
+    println!("Asking a security key to register now...");
     let mut challenge = Sha256::new();
     challenge.input_str(r#"{"challenge": "1vQ9mxionq0ngCnjD-wTsv1zUSrGRtFqG2xP09SbZ70", "version": "U2F_V2", "appId": "http://demo.yubico.com"}"#);
     let mut chall_bytes: Vec<u8> = vec![0; challenge.output_bytes()];
@@ -48,9 +52,9 @@ fn main() {
         Ok(v) => v,
         Err(e) => panic!("Register failure: {}", e),
     };
-
     println!("Register result: {}", base64::encode(&register_data));
 
+    println!("Asking a security key to sign now, with the data from the register...");
     let key_handle = u2f_get_key_handle_from_register_response(&register_data).unwrap();
 
     let mut chall_bytes: Vec<u8> = vec![0; challenge.output_bytes()];
@@ -70,7 +74,6 @@ fn main() {
         Ok(v) => v,
         Err(e) => panic!("Sign failure: {}", e),
     };
-
     println!("Sign result: {}", base64::encode(&sign_data));
 
     println!("Done.");

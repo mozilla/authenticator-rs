@@ -7,6 +7,7 @@ use core_foundation_sys::number::*;
 use core_foundation_sys::runloop::*;
 use core_foundation_sys::string::*;
 
+extern crate log;
 extern crate libc;
 extern crate mach;
 use mach::kern_return::KERN_SUCCESS;
@@ -126,7 +127,7 @@ impl Drop for IOHIDManager {
         let rv = unsafe { IOHIDManagerClose(self.manager,
                                             kIOHIDManagerOptionNone) };
         if rv != KERN_SUCCESS {
-            println!("Couldn't close the HID Manager");
+            warn!("Couldn't close the HID Manager");
         }
     }
 }

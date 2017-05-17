@@ -1,3 +1,4 @@
+extern crate log;
 extern crate libc;
 extern crate mach;
 
@@ -77,7 +78,6 @@ impl Read for Device {
 
 impl Write for Device {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        println!("Sending on {}", self);
         unsafe { set_report(self.device_ref, kIOHIDReportTypeOutput, bytes) }
     }
 
@@ -153,7 +153,7 @@ impl PlatformManager {
                 for device in devices.values_mut() {
                     // Check to see if monitor.events has any hotplug events that we'll need to handle
                     if monitor.events().size_hint().0 > 0 {
-                        println!("Hotplug event; restarting loop");
+                        debug!("Hotplug event; restarting loop");
                         continue 'top;
                     }
 
@@ -236,18 +236,18 @@ fn maybe_add_device(devs: &mut HashMap<IOHIDDeviceRef, Device>, device_ref: IOHI
         return;
     }
 
-    println!("added U2F device {}", dev);
+    debug!("added U2F device {}", dev);
     devs.insert(device_ref, dev);
 }
 
 fn maybe_remove_device(devs: &mut HashMap<IOHIDDeviceRef, Device>, device_ref: IOHIDDeviceRef) {
     match devs.remove(&device_ref) {
         Some(dev) => {
-            println!("removing U2F device {}", dev);
+            debug!("removing U2F device {}", dev);
             // Re-allocate this raw pointer for destruction
             let _ = unsafe { Box::from_raw(dev.report_send_void) };
         },
-        None => { println!("Couldn't remove {:?}", device_ref); },
+        None => { warn!("Couldn't remove {:?}", device_ref); },
     }
 }
 
@@ -274,11 +274,11 @@ unsafe fn set_report(device_ref: IOHIDDeviceRef,
 
     let result = IOHIDDeviceSetReport(device_ref, report_type, report_id, data, length);
     if result != KERN_SUCCESS {
-        println!("Sending failure = {0:X}", result);
+        warn!("set_report sending failure = {0:X}", result);
 
         return Err(io::Error::from_raw_os_error(result));
     }
-    println!("Sending success? = {0:X}", result);
+    trace!("set_report sending success = {0:X}", result);
 
     Ok(length as usize)
 }
@@ -295,7 +295,7 @@ extern "C" fn read_new_data_cb(context: *mut c_void,
     unsafe {
         let tx: &mut Sender<Report> = &mut *(context as *mut Sender<Report>);
 
-        println!("read_new_data_cb type={} id={} report={:?} len={}",
+        trace!("read_new_data_cb type={} id={} report={:?} len={}",
                  report_type,
                  report_id,
                  report,
@@ -306,7 +306,7 @@ extern "C" fn read_new_data_cb(context: *mut c_void,
         if report_len as usize <= HID_RPT_SIZE {
             ptr::copy(report, report_obj.data.as_mut_ptr(), report_len as usize);
         } else {
-            println!("read_new_data_cb got too much data! {} > {}",
+            warn!("read_new_data_cb got too much data! {} > {}",
                      report_len,
                      HID_RPT_SIZE);
         }
@@ -315,7 +315,7 @@ extern "C" fn read_new_data_cb(context: *mut c_void,
             // TOOD: This happens when the channel closes before this thread
             // does. This is pretty common, but let's deal with stopping
             // properly later.
-            println!("Problem returning read_new_data_cb data for thread: {}", e);
+            warn!("Problem returning read_new_data_cb data for thread: {}", e);
         };
     }
 }
