@@ -3,30 +3,28 @@ extern crate mach;
 
 pub use self::iokit::*;
 mod iokit;
+mod iohid;
 
 use std::io::{Read, Write};
 use std::io;
 use std::fmt;
-use std::mem;
 use std::ptr;
 use std::sync::mpsc::{channel, Sender, Receiver, RecvTimeoutError};
 use std::thread;
 use std::time::Duration;
 
-use libc::{c_char, c_void};
+use libc::c_void;
 
 use mach::kern_return::KERN_SUCCESS;
 
 use core_foundation_sys::base::*;
-use core_foundation_sys::string::*;
-use core_foundation_sys::number::*;
 
 mod monitor;
 use self::monitor::Monitor;
 use std::collections::HashMap;
 use runloop::RunLoop;
 
-use consts::{CID_BROADCAST, FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID, HID_RPT_SIZE};
+use consts::{CID_BROADCAST, HID_RPT_SIZE};
 use U2FDevice;
 
 const READ_TIMEOUT: u64 = 15;
@@ -38,7 +36,6 @@ unsafe impl Send for Report {}
 unsafe impl Sync for Report {}
 
 pub struct Device {
-    pub name: String,
     pub device_ref: IOHIDDeviceRef,
     // Channel ID for U2F HID communication. Needed to implement U2FDevice
     // trait.
@@ -49,7 +46,7 @@ pub struct Device {
 
 impl fmt::Display for Device {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "InternalDevice({}, ref:{:?}, cid: {:02x}{:02x}{:02x}{:02x})", self.name,
+        write!(f, "InternalDevice(ref:{:?}, cid: {:02x}{:02x}{:02x}{:02x})",
                self.device_ref, self.cid[0], self.cid[1], self.cid[2], self.cid[3])
     }
 }
@@ -196,42 +193,37 @@ fn maybe_add_device(devs: &mut HashMap<IOHIDDeviceRef, Device>, device_ref: IOHI
         return;
     }
 
-    unsafe {
-        if is_u2f_device(device_ref) {
-            let scratch_buf = [0; HID_RPT_SIZE];
-            let (report_tx, report_rx) = channel::<Report>();
+    let scratch_buf = [0; HID_RPT_SIZE];
+    let (report_tx, report_rx) = channel::<Report>();
 
-            let boxed_report_tx = Box::new(report_tx);
-            let report_tx_ptr = Box::into_raw(boxed_report_tx) as *mut libc::c_void;
+    let boxed_report_tx = Box::new(report_tx);
+    let report_tx_ptr = Box::into_raw(boxed_report_tx) as *mut libc::c_void;
 
-            let mut dev = Device {
-                name: get_name(device_ref),
-                device_ref: device_ref,
-                cid: CID_BROADCAST,
-                report_recv: report_rx,
-                report_send_void: report_tx_ptr,
-            };
+    let mut dev = Device {
+        device_ref: device_ref,
+        cid: CID_BROADCAST,
+        report_recv: report_rx,
+        report_send_void: report_tx_ptr,
+    };
 
-            IOHIDDeviceRegisterInputReportCallback(device_ref, scratch_buf.as_ptr(),
-                                                   scratch_buf.len() as CFIndex,
-                                                   read_new_data_cb, report_tx_ptr);
+    unsafe { IOHIDDeviceRegisterInputReportCallback(device_ref,
+                                                    scratch_buf.as_ptr(),
+                                                    scratch_buf.len() as CFIndex,
+                                                    read_new_data_cb,
+                                                    report_tx_ptr) };
 
-            if let Err(_) = super::init_device(&mut dev) {
-                return;
-            }
-            if let Err(_) = super::ping_device(&mut dev) {
-                return;
-            }
-            if let Err(_) = super::u2f_version_is_v2(&mut dev) {
-                return;
-            }
-
-            println!("added U2F device {}", dev);
-            devs.insert(device_ref, dev);
-        } else {
-            println!("ignored non-U2F device {:?}", device_ref);
-        }
+    if let Err(_) = super::init_device(&mut dev) {
+        return;
     }
+    if let Err(_) = super::ping_device(&mut dev) {
+        return;
+    }
+    if let Err(_) = super::u2f_version_is_v2(&mut dev) {
+        return;
+    }
+
+    println!("added U2F device {}", dev);
+    devs.insert(device_ref, dev);
 }
 
 fn maybe_remove_device(devs: &mut HashMap<IOHIDDeviceRef, Device>, device_ref: IOHIDDeviceRef) {
@@ -274,63 +266,6 @@ unsafe fn set_report(device_ref: IOHIDDeviceRef,
     Ok(length as usize)
 }
 
-
-unsafe fn get_int_property(device_ref: IOHIDDeviceRef, property_name: *const c_char) -> i32 {
-    let mut result: i32 = 0;
-    let key = CFStringCreateWithCString(kCFAllocatorDefault, property_name, kCFStringEncodingUTF8);
-    if key.is_null() {
-        panic!("failed to allocate key string");
-    }
-
-    let number_ref = IOHIDDeviceGetProperty(device_ref, key);
-    if number_ref.is_null() {
-        result = -1
-    } else {
-        if CFGetTypeID(number_ref) == CFNumberGetTypeID() {
-            CFNumberGetValue(number_ref as CFNumberRef,
-                             kCFNumberSInt32Type,
-                             mem::transmute(&mut result));
-        }
-    }
-    result
-}
-
-unsafe fn get_usage(device_ref: IOHIDDeviceRef) -> i32 {
-    let mut device_usage = get_int_property(device_ref, kIOHIDDeviceUsageKey());
-    if device_usage == -1 {
-        device_usage = get_int_property(device_ref, kIOHIDPrimaryUsageKey());
-    }
-    device_usage
-}
-
-unsafe fn get_usage_page(device_ref: IOHIDDeviceRef) -> i32 {
-    let mut device_usage_page = get_int_property(device_ref, kIOHIDDeviceUsagePageKey());
-    if device_usage_page == -1 {
-        device_usage_page = get_int_property(device_ref, kIOHIDPrimaryUsagePageKey());
-    }
-    device_usage_page
-}
-
-unsafe fn is_u2f_device(device_ref: IOHIDDeviceRef) -> bool {
-    let device_usage = get_usage(device_ref);
-    let device_usage_page = get_usage_page(device_ref);
-
-    let is_u2f = device_usage == FIDO_USAGE_U2FHID as i32 &&
-                 device_usage_page == FIDO_USAGE_PAGE as i32;
-    is_u2f
-}
-
-fn get_name(device_ref: IOHIDDeviceRef) -> String {
-    unsafe {
-        let vendor_id = get_int_property(device_ref, kIOHIDVendorIDKey());
-        let product_id = get_int_property(device_ref, kIOHIDProductIDKey());
-        let device_usage = get_usage(device_ref);
-        let device_usage_page = get_usage_page(device_ref);
-
-        format!("Vendor={} Product={} Page={} Usage={}", vendor_id, product_id,
-                device_usage_page, device_usage)
-    }
-}
 
 // This is called from the RunLoop thread
 extern "C" fn read_new_data_cb(context: *mut c_void,
