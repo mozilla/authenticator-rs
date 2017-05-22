@@ -31,8 +31,8 @@ fn poll(fds: &mut Vec<::libc::pollfd>) -> io::Result<()> {
 }
 
 pub enum Event {
-    Add { path: PathBuf },
-    Remove { path: PathBuf }
+    Add(PathBuf),
+    Remove(PathBuf)
 }
 
 impl Event {
@@ -40,8 +40,8 @@ impl Event {
         let path = event.device().devnode().map(|dn| dn.to_path_buf());
 
         match (event.event_type(), path) {
-            (EventType::Add, Some(path)) => Some(Event::Add { path }),
-            (EventType::Remove, Some(path)) => Some(Event::Remove { path }),
+            (EventType::Add, Some(path)) => Some(Event::Add(path)),
+            (EventType::Remove, Some(path)) => Some(Event::Remove(path)),
             _ => None
         }
     }
@@ -66,7 +66,7 @@ impl Monitor {
             // Iterate all existing devices.
             for dev in enumerator.scan_devices()? {
                 if let Some(path) = dev.devnode().map(|p| p.to_owned()) {
-                    tx.send(Event::Add { path }).map_err(to_io_err)?;
+                    tx.send(Event::Add(path)).map_err(to_io_err)?;
                 }
             }
 

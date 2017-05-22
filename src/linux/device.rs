@@ -27,6 +27,7 @@ impl Device {
         let opts = ::nix::fcntl::O_RDWR;
         let mode = ::nix::sys::stat::Mode::empty();
         let fd = from_nix_result(::nix::fcntl::open(&path, opts, mode))?;
+        assert!(fd > 0);
 
         Ok(Self {
             path, fd,
@@ -58,29 +59,17 @@ impl PartialEq for Device {
 
 impl Read for Device {
     fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
-        if self.fd == 0 {
-            return Err(io::Error::new(io::ErrorKind::NotConnected, "Device not opened!")); // TODO
-        }
-
         from_nix_result(::nix::unistd::read(self.fd, bytes))
     }
 }
 
 impl Write for Device {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        if self.fd == 0 {
-            return Err(io::Error::new(io::ErrorKind::NotConnected, "Device not opened!")); // TODO
-        }
-
         from_nix_result(::nix::unistd::write(self.fd, bytes))
     }
 
     // USB HID writes don't buffer, so this will be a nop.
     fn flush(&mut self) -> io::Result<()> {
-        if self.fd == 0 {
-            return Err(io::Error::new(io::ErrorKind::NotConnected, "Device not opened!")); // TODO
-        }
-
         Ok(())
     }
 }

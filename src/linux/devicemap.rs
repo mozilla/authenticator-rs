@@ -21,8 +21,8 @@ impl DeviceMap {
 
     pub fn process_event(&mut self, event: Event) {
         match event {
-            Event::Add { path } => self.add(path),
-            Event::Remove { path } => self.remove(path)
+            Event::Add(path) => self.add(path),
+            Event::Remove(path) => self.remove(path)
         }
     }
 
