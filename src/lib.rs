@@ -1,8 +1,6 @@
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[macro_use]
 extern crate nix;
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-extern crate libc;
 
 #[cfg(any(target_os = "linux"))]
 extern crate libudev;
@@ -18,9 +16,14 @@ extern crate mach;
 
 #[macro_use] extern crate log;
 extern crate rand;
+extern crate libc;
 
 #[cfg(any(target_os = "macos"))]
 #[path="macos/mod.rs"]
+pub mod platform;
+
+#[cfg(any(target_os = "windows"))]
+#[path="windows/mod.rs"]
 pub mod platform;
 
 
@@ -418,7 +421,7 @@ fn send_apdu<T>(dev: &mut T, cmd: u8, p1: u8, send: &Vec<u8>) -> io::Result<Vec<
     mod tests {
     use ::{U2FDevice, init_device, ping_device, sendrecv, send_apdu};
     use std::error::Error;
-    use consts::{U2FHID_PING, U2FHID_MSG, U2FAPDUHEADER_SIZE};
+    use consts::{U2FHID_PING, U2FHID_MSG};
     mod platform {
         use consts::{CID_BROADCAST, HID_RPT_SIZE};
         use U2FDevice;
