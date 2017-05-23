@@ -12,8 +12,8 @@ extern crate libc;
 use libc::c_void;
 
 pub enum Event {
-    Add { device_id: IOHIDDeviceID },
-    Remove { device_id: IOHIDDeviceID },
+    Add(IOHIDDeviceID),
+    Remove(IOHIDDeviceID)
 }
 
 pub struct Monitor {
@@ -78,16 +78,12 @@ impl Monitor {
     extern "C" fn device_add_cb(context: *mut c_void, _: IOReturn,
                                 _: *mut c_void, device: IOHIDDeviceRef) {
         let tx = unsafe { &*(context as *mut Sender<Event>) };
-        let _ = tx.send(Event::Add {
-            device_id: IOHIDDeviceID::from_ref(device)
-        });
+        let _ = tx.send(Event::Add(IOHIDDeviceID::from_ref(device)));
     }
 
     extern "C" fn device_remove_cb(context: *mut c_void, _: IOReturn,
                                    _: *mut c_void, device: IOHIDDeviceRef) {
         let tx = unsafe { &*(context as *mut Sender<Event>) };
-        let _ = tx.send(Event::Remove {
-            device_id: IOHIDDeviceID::from_ref(device)
-        });
+        let _ = tx.send(Event::Remove(IOHIDDeviceID::from_ref(device)));
     }
 }

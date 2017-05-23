@@ -253,8 +253,8 @@ fn maybe_remove_device(devs: &mut HashMap<IOHIDDeviceRef, Device>, device_ref: I
 
 fn process_event(devs: &mut HashMap<IOHIDDeviceRef, Device>, event: monitor::Event) {
     match event {
-        monitor::Event::Add { device_id } => maybe_add_device(devs, device_id.as_ref()),
-        monitor::Event::Remove { device_id } => maybe_remove_device(devs, device_id.as_ref()),
+        monitor::Event::Add(device_id) => maybe_add_device(devs, device_id.as_ref()),
+        monitor::Event::Remove(device_id) => maybe_remove_device(devs, device_id.as_ref()),
     }
 }
 
