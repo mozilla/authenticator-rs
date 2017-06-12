@@ -3,15 +3,6 @@ use std::io;
 use consts::PARAMETER_SIZE;
 use platform::PlatformManager;
 
-/*struct WorkUnit {
-    timeout: Duration,
-    challenge: Vec<u8>,
-    application: Vec<u8>,
-    key_handle: Option<Vec<u8>>,
-    result_tx: Sender<io::Result<Vec<u8>>>,
-    cancel_rx: Receiver<()>,
-}*/
-
 pub struct U2FManager {
     platform: PlatformManager
 }

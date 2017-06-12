@@ -1,8 +1,8 @@
+extern crate base64;
 extern crate crypto;
+extern crate u2fhid;
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
-extern crate base64;
-extern crate u2fhid;
 use std::io;
 use std::sync::mpsc::channel;
 use u2fhid::U2FManager;

@@ -14,10 +14,6 @@ extern crate core_foundation_sys;
 #[cfg(any(target_os = "macos"))]
 extern crate mach;
 
-#[macro_use] extern crate log;
-extern crate rand;
-extern crate libc;
-
 #[cfg(any(target_os = "macos"))]
 #[path="macos/mod.rs"]
 pub mod platform;
@@ -26,6 +22,9 @@ pub mod platform;
 #[path="windows/mod.rs"]
 pub mod platform;
 
+#[macro_use] extern crate log;
+extern crate rand;
+extern crate libc;
 
 mod consts;
 mod manager;

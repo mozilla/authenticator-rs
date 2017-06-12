@@ -16,9 +16,7 @@ use std::thread;
 use std::time::Duration;
 
 use libc::c_void;
-
 use mach::kern_return::KERN_SUCCESS;
-
 use core_foundation_sys::base::*;
 
 mod monitor;
