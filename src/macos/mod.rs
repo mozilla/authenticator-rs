@@ -24,8 +24,9 @@ use self::monitor::Monitor;
 use std::collections::HashMap;
 use runloop::RunLoop;
 
+use u2fprotocol;
+use u2fprotocol::{U2FDevice};
 use consts::{CID_BROADCAST, HID_RPT_SIZE, PARAMETER_SIZE};
-use U2FDevice;
 
 const READ_TIMEOUT: u64 = 15;
 
@@ -151,28 +152,28 @@ impl PlatformManager {
                 for device in devices.values_mut() {
                     if let Some(ref key) = key_handle {
                         // Determine if this key handle belongs to this token
-                        let is_valid = match super::u2f_is_keyhandle_valid(device, &challenge, &application, key) {
+                        let is_valid = match u2fprotocol::u2f_is_keyhandle_valid(device, &challenge, &application, key) {
                             Err(_) => continue,
                             Ok(result) => result,
                         };
 
                         if is_valid {
                             // It does, we can sign
-                            if let Ok(bytes) = super::u2f_sign(device, &challenge, &application, key) {
+                            if let Ok(bytes) = u2fprotocol::u2f_sign(device, &challenge, &application, key) {
                                 return complete(&mut monitor, Ok(bytes));
                             }
                         } else {
                             // If doesn't, so blink anyway (using bogus data)
                             let blank = vec![0u8; PARAMETER_SIZE];
 
-                            if let Ok(_) = super::u2f_register(device, &blank, &blank) {
+                            if let Ok(_) = u2fprotocol::u2f_register(device, &blank, &blank) {
                                 // If the user selects this token that can't satisfy, it's an error
                                 return complete(&mut monitor, Err(io::Error::new(io::ErrorKind::ConnectionRefused, "User chose invalid key")));
                             }
                         }
                     } else {
                         // Caller asked us to register, so the first token that does wins
-                        if let Ok(bytes) = super::u2f_register(device, &challenge, &application) {
+                        if let Ok(bytes) = u2fprotocol::u2f_register(device, &challenge, &application) {
                             return complete(&mut monitor, Ok(bytes));
                         }
                     }
@@ -221,16 +222,16 @@ fn maybe_add_device(devs: &mut HashMap<IOHIDDeviceRef, Device>, device_ref: IOHI
 
     let mut nonce = [0u8; 8];
     thread_rng().fill_bytes(&mut nonce);
-    if let Err(_) = super::init_device(&mut dev, nonce) {
+    if let Err(_) = u2fprotocol::init_device(&mut dev, nonce) {
         return;
     }
 
     let mut random = [0u8; 8];
     thread_rng().fill_bytes(&mut random);
-    if let Err(_) = super::ping_device(&mut dev, random) {
+    if let Err(_) = u2fprotocol::ping_device(&mut dev, random) {
         return;
     }
-    if let Err(_) = super::u2f_version_is_v2(&mut dev) {
+    if let Err(_) = u2fprotocol::u2f_version_is_v2(&mut dev) {
         return;
     }
 
