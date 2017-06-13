@@ -7,7 +7,7 @@ use ::consts::CID_BROADCAST;
 use ::platform::hidraw;
 use ::platform::util::from_nix_result;
 
-use U2FDevice;
+use u2fprotocol::{U2FDevice};
 
 #[derive(Debug)]
 pub struct Device {

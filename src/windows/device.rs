@@ -6,7 +6,7 @@ use std::os::windows::io::AsRawHandle;
 use ::consts::{CID_BROADCAST, HID_RPT_SIZE, FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID};
 use super::winapi::DeviceCapabilities;
 
-use U2FDevice;
+use u2fprotocol::{U2FDevice};
 
 #[derive(Debug)]
 pub struct Device {
