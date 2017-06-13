@@ -6,7 +6,6 @@ build = "build.rs"
 
 [target.'cfg(unix)'.dependencies]
 nix = "^0.7"
-clap = {version = "2", features = ["yaml"]}
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libudev = "^0.2"
@@ -21,7 +20,7 @@ winapi = "0.2.8"
 [dependencies]
 rand = "0.3"
 log = "0.3"
-env_logger = "0.3"
+env_logger = "0.4.1"
 rust-crypto = "^0.2"
 base64 = "^0.4"
 libc = "^0.2"
