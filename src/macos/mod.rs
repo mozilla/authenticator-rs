@@ -1,6 +1,5 @@
 extern crate log;
 extern crate libc;
-extern crate mach;
 
 pub use self::iokit::*;
 mod iokit;
@@ -16,7 +15,6 @@ use std::thread;
 use std::time::Duration;
 
 use libc::c_void;
-use mach::kern_return::KERN_SUCCESS;
 use core_foundation_sys::base::*;
 
 mod monitor;
@@ -272,7 +270,7 @@ unsafe fn set_report(device_ref: IOHIDDeviceRef,
     }
 
     let result = IOHIDDeviceSetReport(device_ref, report_type, report_id, data, length);
-    if result != KERN_SUCCESS {
+    if result != 0 {
         warn!("set_report sending failure = {0:X}", result);
 
         return Err(io::Error::from_raw_os_error(result));

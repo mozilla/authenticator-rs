@@ -1,11 +1,10 @@
 #![allow(non_snake_case, non_camel_case_types, non_upper_case_globals)]
 
-extern crate mach;
-use mach::kern_return::{kern_return_t, KERN_SUCCESS};
+extern crate libc;
 
-pub type IOReturn = kern_return_t;
+pub type IOReturn = libc::c_int;
 
-pub const kIOReturnSuccess:          IOReturn = KERN_SUCCESS;
+pub const kIOReturnSuccess:          IOReturn = 0;
 pub const kIOReturnError:            IOReturn = -0x1FFFFD44;
 pub const kIOReturnNoMemory:         IOReturn = -0x1FFFFD43;
 pub const kIOReturnNoResources:      IOReturn = -0x1FFFFD42;

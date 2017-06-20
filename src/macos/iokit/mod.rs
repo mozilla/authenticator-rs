@@ -2,7 +2,6 @@
 
 extern crate core_foundation_sys;
 extern crate libc;
-extern crate mach;
 
 pub use self::hiddevice::*;
 pub use self::hidmanager::*;

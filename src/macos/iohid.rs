@@ -9,8 +9,6 @@ use core_foundation_sys::string::*;
 
 extern crate log;
 extern crate libc;
-extern crate mach;
-use mach::kern_return::KERN_SUCCESS;
 
 use ::consts::{FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID};
 
@@ -106,7 +104,7 @@ impl IOHIDManager {
                                                   kIOHIDManagerOptionNone) };
 
         let rv = unsafe { IOHIDManagerOpen(manager, kIOHIDManagerOptionNone) };
-        if rv != KERN_SUCCESS {
+        if rv != 0 {
             return Err(io::Error::new(io::ErrorKind::Other,
                                       "Couldn't open HID Manager"));
         }
@@ -126,7 +124,7 @@ impl Drop for IOHIDManager {
     fn drop(&mut self) {
         let rv = unsafe { IOHIDManagerClose(self.manager,
                                             kIOHIDManagerOptionNone) };
-        if rv != KERN_SUCCESS {
+        if rv != 0 {
             warn!("Couldn't close the HID Manager");
         }
     }

@@ -2,7 +2,6 @@
 
 extern crate core_foundation_sys;
 extern crate libc;
-extern crate mach;
 
 use libc::c_void;
 use core_foundation_sys::base::{CFIndex, CFTypeRef};
