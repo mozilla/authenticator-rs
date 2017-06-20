@@ -1,28 +1,29 @@
-use std::path::PathBuf;
+extern crate libc;
+
+use std::ffi::{CString, OsString};
 use std::io;
 use std::io::{Read, Write};
-use std::os::unix::io::RawFd;
+
+use std::os::unix::prelude::*;
 
 use ::consts::CID_BROADCAST;
 use ::platform::hidraw;
-use ::platform::util::from_nix_result;
+use ::platform::util::{from_unix_result, to_io_err};
 
 use u2fprotocol::{U2FDevice};
 
 #[derive(Debug)]
 pub struct Device {
-    path: PathBuf,
-    fd: RawFd,
+    path: OsString,
+    fd: libc::c_int,
     cid: [u8; 4],
 }
 
 impl Device {
-    pub fn new(path: PathBuf) -> io::Result<Self> {
-        let opts = ::nix::fcntl::O_RDWR;
-        let mode = ::nix::sys::stat::Mode::empty();
-        let fd = from_nix_result(::nix::fcntl::open(&path, opts, mode))?;
-        assert!(fd > 0);
-
+    pub fn new(path: OsString) -> io::Result<Self> {
+        let cstr = CString::new(path.as_bytes()).map_err(to_io_err)?;
+        let fd = unsafe { libc::open(cstr.as_ptr(), libc::O_RDWR) };
+        let fd = from_unix_result(fd)?;
         Ok(Self { path, fd, cid: CID_BROADCAST })
     }
 
@@ -34,7 +35,7 @@ impl Device {
 impl Drop for Device {
     fn drop(&mut self) {
         // Close the fd, ignore any errors.
-        let _ = ::nix::unistd::close(self.fd);
+        let _ = unsafe { libc::close(self.fd) };
     }
 }
 
@@ -45,14 +46,18 @@ impl PartialEq for Device {
 }
 
 impl Read for Device {
-    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
-        from_nix_result(::nix::unistd::read(self.fd, bytes))
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let bufp = buf.as_mut_ptr() as *mut libc::c_void;
+        let rv = unsafe { libc::read(self.fd, bufp, buf.len()) };
+        from_unix_result(rv as usize)
     }
 }
 
 impl Write for Device {
-    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        from_nix_result(::nix::unistd::write(self.fd, bytes))
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let bufp = buf.as_ptr() as *const libc::c_void;
+        let rv = unsafe { libc::write(self.fd, bufp, buf.len()) };
+        from_unix_result(rv as usize)
     }
 
     // USB HID writes don't buffer, so this will be a nop.

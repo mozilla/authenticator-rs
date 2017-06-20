@@ -1,13 +1,13 @@
 use rand::{thread_rng, Rng};
 use std::collections::hash_map::ValuesMut;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::ffi::OsString;
 
 use ::platform::device::Device;
 use ::platform::monitor::Event;
 
 pub struct DeviceMap {
-    map: HashMap<PathBuf, Device>
+    map: HashMap<OsString, Device>
 }
 
 impl DeviceMap {
@@ -15,7 +15,7 @@ impl DeviceMap {
         Self { map: HashMap::new() }
     }
 
-    pub fn values_mut(&mut self) -> ValuesMut<PathBuf, Device> {
+    pub fn values_mut(&mut self) -> ValuesMut<OsString, Device> {
         self.map.values_mut()
     }
 
@@ -26,7 +26,7 @@ impl DeviceMap {
         }
     }
 
-    fn add(&mut self, path: PathBuf) {
+    fn add(&mut self, path: OsString) {
         if self.map.contains_key(&path) {
             return;
         }
@@ -57,7 +57,7 @@ impl DeviceMap {
         }
     }
 
-    fn remove(&mut self, path: PathBuf) {
+    fn remove(&mut self, path: OsString) {
         // Ignore errors.
         let _ = self.map.remove(&path);
     }

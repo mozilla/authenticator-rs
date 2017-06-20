@@ -3,9 +3,9 @@ use libudev::EventType;
 
 use libc::{c_int, c_short, c_ulong};
 
+use std::ffi::OsString;
 use std::io;
 use std::os::unix::io::AsRawFd;
-use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, TryIter};
 
 use runloop::RunLoop;
@@ -31,13 +31,15 @@ fn poll(fds: &mut Vec<::libc::pollfd>) -> io::Result<()> {
 }
 
 pub enum Event {
-    Add(PathBuf),
-    Remove(PathBuf)
+    Add(OsString),
+    Remove(OsString)
 }
 
 impl Event {
     fn from_udev(event: libudev::Event) -> Option<Self> {
-        let path = event.device().devnode().map(|dn| dn.to_path_buf());
+        let path = event.device().devnode().map(|dn| {
+            dn.to_owned().into_os_string()
+        });
 
         match (event.event_type(), path) {
             (EventType::Add, Some(path)) => Some(Event::Add(path)),
@@ -65,7 +67,9 @@ impl Monitor {
 
             // Iterate all existing devices.
             for dev in enumerator.scan_devices()? {
-                if let Some(path) = dev.devnode().map(|p| p.to_owned()) {
+                if let Some(path) = dev.devnode().map(|p| {
+                    p.to_owned().into_os_string()
+                }) {
                     tx.send(Event::Add(path)).map_err(to_io_err)?;
                 }
             }

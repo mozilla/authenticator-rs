@@ -1,8 +1,11 @@
+extern crate libc;
+
 use std::io;
+use std::mem;
 use std::os::unix::io::RawFd;
 
 use ::consts::{FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID};
-use ::platform::util::from_nix_result;
+use ::platform::util::from_unix_result;
 
 #[allow(non_camel_case_types)]
 #[repr(C)]
@@ -17,9 +20,33 @@ impl ReportDescriptor {
     }
 }
 
+const NRBITS: u32 = 8;
+const TYPEBITS: u32 = 8;
+
+const READ: u8 = 2;
+const SIZEBITS: u8 = 14;
+
+const NRSHIFT: u32 = 0;
+const TYPESHIFT: u32 = NRSHIFT + NRBITS as u32;
+const SIZESHIFT: u32 = TYPESHIFT + TYPEBITS as u32;
+const DIRSHIFT: u32 = SIZESHIFT + SIZEBITS as u32;
+
+macro_rules! ioctl {
+    ($dir:expr, $name:ident, $ioty:expr, $nr:expr; $ty:ty) => (
+        pub unsafe fn $name(fd: libc::c_int, val: *mut $ty) -> io::Result<libc::c_int> {
+            let size = mem::size_of::<$ty>();
+            let ioc = (($dir as u32) << DIRSHIFT) |
+                      (($ioty as u32) << TYPESHIFT) |
+                      (($nr as u32) << NRSHIFT) |
+                      ((size as u32) << SIZESHIFT);
+            from_unix_result(libc::ioctl(fd, ioc as libc::c_ulong, val))
+        }
+    );
+}
+
 // https://github.com/torvalds/linux/blob/master/include/uapi/linux/hidraw.h
-ioctl!(read hidiocgrdescsize with b'H', 0x01; ::libc::c_int);
-ioctl!(read hidiocgrdesc with b'H', 0x02; /*struct*/ ReportDescriptor);
+ioctl!(READ, hidiocgrdescsize, b'H', 0x01; ::libc::c_int);
+ioctl!(READ, hidiocgrdesc, b'H', 0x02; /*struct*/ ReportDescriptor);
 
 enum Data {
     UsagePage { data: u32 },
@@ -90,8 +117,8 @@ pub fn is_u2f_device(fd: RawFd) -> bool {
 
 fn read_report_descriptor(fd: RawFd) -> io::Result<ReportDescriptor> {
     let mut desc = ReportDescriptor { size: 0, value: [0; 4096] };
-    from_nix_result(unsafe { hidiocgrdescsize(fd, &mut desc.size) })?;
-    from_nix_result(unsafe { hidiocgrdesc(fd, &mut desc) })?;
+    let _ = unsafe { hidiocgrdescsize(fd, &mut desc.size)? };
+    let _ = unsafe { hidiocgrdesc(fd, &mut desc)? };
     Ok(desc)
 }
 

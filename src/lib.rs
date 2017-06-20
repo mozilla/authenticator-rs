@@ -1,7 +1,3 @@
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-#[macro_use]
-extern crate nix;
-
 #[cfg(any(target_os = "linux"))]
 extern crate libudev;
 
