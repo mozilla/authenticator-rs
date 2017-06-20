@@ -103,33 +103,29 @@ impl PlatformManager {
         Self { thread: None }
     }
 
-    // Non-blocking
-    pub fn register<F>(&mut self, timeout: u64, challenge: Vec<u8>, application: Vec<u8>, callback: F) -> io::Result<()>
-        where F: FnOnce(io::Result<Vec<u8>>), F: Send + 'static
+    pub fn register(&mut self, timeout: u64, challenge: Vec<u8>, application: Vec<u8>) -> io::Result<Vec<u8>>
     {
-        self.run_thread(timeout, challenge, application, None, callback)
+        self.run_thread(timeout, challenge, application, None)
     }
 
 
-    // Non-blocking
-    pub fn sign<F>(&mut self, timeout: u64, challenge: Vec<u8>, application: Vec<u8>, key_handle: Vec<u8>, callback: F) -> io::Result<()>
-        where F: FnOnce(io::Result<Vec<u8>>), F: Send + 'static
+    pub fn sign(&mut self, timeout: u64, challenge: Vec<u8>, application: Vec<u8>, key_handle: Vec<u8>) -> io::Result<Vec<u8>>
     {
-        self.run_thread(timeout, challenge, application, Some(key_handle), callback)
+        self.run_thread(timeout, challenge, application, Some(key_handle))
     }
 
-    // Can block
     pub fn cancel(&mut self) {
         if let Some(mut thread) = self.thread.take() {
             thread.cancel();
         }
     }
 
-    fn run_thread<F>(&mut self, timeout: u64, challenge: Vec<u8>, application: Vec<u8>, key_handle: Option<Vec<u8>>, callback: F) -> io::Result<()>
-        where F: FnOnce(io::Result<Vec<u8>>), F: Send + 'static
+    fn run_thread(&mut self, timeout: u64, challenge: Vec<u8>, application: Vec<u8>, key_handle: Option<Vec<u8>>) -> io::Result<Vec<u8>>
     {
         // Abort any prior register/sign calls.
         self.cancel();
+
+        let (tx, rx) = channel();
 
         self.thread = Some(RunLoop::new(move |alive| {
             let mut monitor = Monitor::new()?;
@@ -138,8 +134,7 @@ impl PlatformManager {
             // Helper to stop monitor and call back.
             let complete = |monitor: &mut Monitor, rv| {
                 monitor.stop();
-                callback(rv);
-                Ok(())
+                tx.send(rv).map(|_| ()).map_err(|_|io::Error::new(io::ErrorKind::Other, "error sending"))
             };
 
             'top: while alive() {
@@ -189,7 +184,10 @@ impl PlatformManager {
             complete(&mut monitor, Err(io::Error::new(io::ErrorKind::TimedOut, "Timed out")))
         }, timeout)?);
 
-        Ok(())
+        match rx.recv() {
+            Ok(rv) => rv,
+            Err(_) => Err(io::Error::new(io::ErrorKind::Other, "error receiving"))
+        }
     }
 }
 
