@@ -1,4 +1,5 @@
 use std::io;
+use std::sync::mpsc::channel;
 use std::time::Duration;
 use std::thread;
 
@@ -24,11 +25,12 @@ impl PlatformManager {
         Self { thread: None }
     }
 
-    pub fn register<F>(&mut self, timeout: u64, challenge: Vec<u8>, application: Vec<u8>, callback: F) -> io::Result<()>
-        where F: FnOnce(io::Result<Vec<u8>>), F: Send + 'static
+    pub fn register(&mut self, timeout: u64, challenge: Vec<u8>, application: Vec<u8>) -> io::Result<Vec<u8>>
     {
         // Abort any prior register/sign calls.
         self.cancel();
+
+        let (tx, rx) = channel();
 
         self.thread = Some(RunLoop::new(move |alive| {
             let mut monitor = Monitor::new()?;
@@ -37,8 +39,7 @@ impl PlatformManager {
             // Helper to stop monitor and call back.
             let complete = |monitor: &mut Monitor, rv| {
                 monitor.stop();
-                callback(rv);
-                Ok(())
+                tx.send(rv).map(|_| ()).map_err(|_| util::io_err("error sending"))
             };
 
             while alive() {
@@ -61,14 +62,18 @@ impl PlatformManager {
             complete(&mut monitor, Err(util::io_err("cancelled or timed out")))
         }, timeout)?);
 
-        Ok(())
+        match rx.recv() {
+            Ok(rv) => rv,
+            Err(_) => Err(io::Error::new(io::ErrorKind::Other, "error receiving"))
+        }
     }
 
-    pub fn sign<F>(&mut self, timeout: u64, challenge: Vec<u8>, application: Vec<u8>, key_handle: Vec<u8>, callback: F) -> io::Result<()>
-        where F: FnOnce(io::Result<Vec<u8>>), F: Send + 'static
+    pub fn sign(&mut self, timeout: u64, challenge: Vec<u8>, application: Vec<u8>, key_handle: Vec<u8>) -> io::Result<Vec<u8>>
     {
         // Abort any prior register/sign calls.
         self.cancel();
+
+        let (tx, rx) = channel();
 
         self.thread = Some(RunLoop::new(move |alive| {
             let mut monitor = Monitor::new()?;
@@ -77,8 +82,7 @@ impl PlatformManager {
             // Helper to stop monitor and call back.
             let complete = |monitor: &mut Monitor, rv| {
                 monitor.stop();
-                callback(rv);
-                Ok(())
+                tx.send(rv).map(|_| ()).map_err(|_| util::io_err("error sending"))
             };
 
             while alive() {
@@ -116,10 +120,12 @@ impl PlatformManager {
             complete(&mut monitor, Err(util::io_err("cancelled or timed out")))
         }, timeout)?);
 
-        Ok(())
+        match rx.recv() {
+            Ok(rv) => rv,
+            Err(_) => Err(io::Error::new(io::ErrorKind::Other, "error receiving"))
+        }
     }
 
-    // This might block.
     pub fn cancel(&mut self) {
         if let Some(mut thread) = self.thread.take() {
             thread.cancel();

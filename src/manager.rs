@@ -12,21 +12,17 @@ impl U2FManager {
         Self { platform: PlatformManager::new() }
     }
 
-    // Cannot block.
-    pub fn register<F>(&mut self, timeout: u64, challenge: Vec<u8>, application: Vec<u8>, callback: F) -> io::Result<()>
-        where F: FnOnce(io::Result<Vec<u8>>), F: Send + 'static
+    pub fn register(&mut self, timeout: u64, challenge: Vec<u8>, application: Vec<u8>) -> io::Result<Vec<u8>>
     {
         if challenge.len() != PARAMETER_SIZE ||
            application.len() != PARAMETER_SIZE {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid parameter sizes"));
         }
 
-        self.platform.register(timeout, challenge, application, callback)
+        self.platform.register(timeout, challenge, application)
     }
 
-    // Cannot block.
-    pub fn sign<F>(&mut self, timeout: u64, challenge: Vec<u8>, application: Vec<u8>, key_handle: Vec<u8>, callback: F) -> io::Result<()>
-        where F: FnOnce(io::Result<Vec<u8>>), F: Send + 'static
+    pub fn sign(&mut self, timeout: u64, challenge: Vec<u8>, application: Vec<u8>, key_handle: Vec<u8>) -> io::Result<Vec<u8>>
     {
         if challenge.len() != PARAMETER_SIZE ||
            application.len() != PARAMETER_SIZE {
@@ -37,10 +33,9 @@ impl U2FManager {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "Key handle too large"));
         }
 
-        self.platform.sign(timeout, challenge, application, key_handle, callback)
+        self.platform.sign(timeout, challenge, application, key_handle)
     }
 
-    // Cannot block. Cancels a single operation.
     pub fn cancel<F>(&mut self) {
         self.platform.cancel();
     }

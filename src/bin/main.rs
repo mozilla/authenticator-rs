@@ -4,7 +4,6 @@ extern crate u2fhid;
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
 use std::io;
-use std::sync::mpsc::channel;
 use u2fhid::U2FManager;
 
 #[macro_use] extern crate log;
@@ -40,18 +39,7 @@ fn main() {
 
     let mut manager = U2FManager::new();
 
-    let (reg_tx, reg_rx) = channel();
-    manager.register(15, chall_bytes, app_bytes, move |reg_result| {
-        // Ship back to the main thread
-        if let Err(e) = reg_tx.send(reg_result) {
-            panic!("Could not send: {}", e);
-        }
-    }).expect("manager.register() failed");
-
-    let register_data = match reg_rx.recv().expect("Should not error on register receive") {
-        Ok(v) => v,
-        Err(e) => panic!("Register failure: {}", e),
-    };
+    let register_data = manager.register(15, chall_bytes, app_bytes).unwrap();
     println!("Register result: {}", base64::encode(&register_data));
 
     println!("Asking a security key to sign now, with the data from the register...");
@@ -62,18 +50,7 @@ fn main() {
     let mut app_bytes: Vec<u8> = vec![0; application.output_bytes()];
     application.result(&mut app_bytes);
 
-    let (sig_tx, sig_rx) = channel();
-    manager.sign(15, chall_bytes, app_bytes, key_handle, move |sig_result| {
-        // Ship back to the main thread
-        if let Err(e) = sig_tx.send(sig_result) {
-            panic!("Could not send: {}", e);
-        }
-    }).expect("manager.sign() failed");
-
-    let sign_data = match sig_rx.recv().expect("Should not error on signature receive") {
-        Ok(v) => v,
-        Err(e) => panic!("Sign failure: {}", e),
-    };
+    let sign_data = manager.sign(15, chall_bytes, app_bytes, key_handle).unwrap();
     println!("Sign result: {}", base64::encode(&sign_data));
 
     println!("Done.");

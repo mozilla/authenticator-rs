@@ -94,6 +94,8 @@ impl Monitor {
             Ok(())
         }, 0 /* no timeout */)?;
 
+        // TODO what if dlopen() failed?
+
         Ok(Self { rx, thread })
     }
 
