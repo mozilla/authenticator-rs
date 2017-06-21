@@ -36,7 +36,7 @@ impl U2FManager {
         self.platform.sign(timeout, challenge, application, key_handle)
     }
 
-    pub fn cancel<F>(&mut self) {
+    pub fn cancel(&mut self) {
         self.platform.cancel();
     }
 }
