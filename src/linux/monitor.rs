@@ -60,7 +60,7 @@ impl Monitor {
     pub fn new() -> io::Result<Self> {
         let (tx, rx) = channel();
 
-        let thread = RunLoop::new(move |alive| {
+        let thread = RunLoop::new(move |alive| -> io::Result<()> {
             let ctx = libudev::Context::new()?;
             let mut enumerator = libudev::Enumerator::new(&ctx)?;
             enumerator.match_subsystem(UDEV_SUBSYSTEM)?;
@@ -106,9 +106,10 @@ impl Monitor {
     pub fn events<'a>(&'a self) -> TryIter<'a, Event> {
         self.rx.try_iter()
     }
+}
 
-    // This might block.
-    pub fn stop(&mut self) {
+impl Drop for Monitor {
+    fn drop(&mut self) {
         self.thread.cancel();
     }
 }

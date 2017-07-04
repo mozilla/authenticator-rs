@@ -1,5 +1,3 @@
-use std::io;
-use std::sync::mpsc::channel;
 use std::time::Duration;
 use std::thread;
 
@@ -15,6 +13,19 @@ use runloop::RunLoop;
 use self::devicemap::DeviceMap;
 use self::monitor::Monitor;
 
+// TODO
+use ::{OnceCallback};
+
+// TODO
+macro_rules! try_or {
+    ($val:expr, $or:expr) => {
+        match $val {
+            Ok(v) => { v }
+            Err(e) => { return $or(e); }
+        }
+    }
+}
+
 pub struct PlatformManager {
     // Handle to the thread loop.
     thread: Option<RunLoop>
@@ -25,22 +36,20 @@ impl PlatformManager {
         Self { thread: None }
     }
 
-    pub fn register(&mut self, timeout: u64, challenge: Vec<u8>, application: Vec<u8>) -> io::Result<Vec<u8>>
+    pub fn register(&mut self, timeout: u64, challenge: Vec<u8>, application: Vec<u8>, callback: OnceCallback)
     {
         // Abort any prior register/sign calls.
         self.cancel();
 
-        let (tx, rx) = channel();
+        let cbc = callback.clone();
 
-        self.thread = Some(RunLoop::new(move |alive| {
-            let mut monitor = Monitor::new()?;
+        let thread = RunLoop::new(move |alive| {
             let mut devices = DeviceMap::new();
+            let monitor = try_or!(Monitor::new(), |e| {
+                callback.call(Err(e));
+            });
 
-            // Helper to stop monitor and call back.
-            let complete = |monitor: &mut Monitor, rv| {
-                monitor.stop();
-                tx.send(rv).map(|_| ()).map_err(|_| util::io_err("error sending"))
-            };
+            // TODO check if dlopen() failed?
 
             while alive() {
                 // Add/remove devices.
@@ -51,7 +60,8 @@ impl PlatformManager {
                 // Try to register each device.
                 for device in devices.values_mut() {
                     if let Ok(bytes) = super::u2f_register(device, &challenge, &application) {
-                        return complete(&mut monitor, Ok(bytes));
+                        callback.call(Ok(bytes));
+                        return;
                     }
                 }
 
@@ -59,31 +69,27 @@ impl PlatformManager {
                 thread::sleep(Duration::from_millis(100));
             }
 
-            complete(&mut monitor, Err(util::io_err("cancelled or timed out")))
-        }, timeout)?);
+            callback.call(Err(util::io_err("cancelled or timed out")));
+        }, timeout);
 
-        match rx.recv() {
-            Ok(rv) => rv,
-            Err(_) => Err(io::Error::new(io::ErrorKind::Other, "error receiving"))
-        }
+        self.thread = Some(try_or!(thread, |_| {
+            cbc.call(Err(util::io_err("couldn't create runloop")))
+        }));
     }
 
-    pub fn sign(&mut self, timeout: u64, challenge: Vec<u8>, application: Vec<u8>, key_handle: Vec<u8>) -> io::Result<Vec<u8>>
+    // TODO merge with register()?
+    pub fn sign(&mut self, timeout: u64, challenge: Vec<u8>, application: Vec<u8>, key_handle: Vec<u8>, callback: OnceCallback)
     {
         // Abort any prior register/sign calls.
         self.cancel();
 
-        let (tx, rx) = channel();
+        let cbc = callback.clone();
 
-        self.thread = Some(RunLoop::new(move |alive| {
-            let mut monitor = Monitor::new()?;
+        let thread = RunLoop::new(move |alive| {
             let mut devices = DeviceMap::new();
-
-            // Helper to stop monitor and call back.
-            let complete = |monitor: &mut Monitor, rv| {
-                monitor.stop();
-                tx.send(rv).map(|_| ()).map_err(|_| util::io_err("error sending"))
-            };
+            let monitor = try_or!(Monitor::new(), |e| {
+                callback.call(Err(e));
+            });
 
             while alive() {
                 // Add/remove devices.
@@ -102,13 +108,15 @@ impl PlatformManager {
                     if is_valid {
                         // If yes, try to sign.
                         if let Ok(bytes) = super::u2f_sign(device, &challenge, &application, &key_handle) {
-                            return complete(&mut monitor, Ok(bytes))
+                            callback.call(Ok(bytes));
+                            return;
                         }
                     } else {
                         // If no, keep registering and blinking with bogus data
                         let blank = vec![0u8; PARAMETER_SIZE];
                         if let Ok(_) = super::u2f_register(device, &blank, &blank) {
-                            return complete(&mut monitor, Err(util::io_err("invalid key")))
+                            callback.call(Err(util::io_err("invalid key")));
+                            return;
                         }
                     }
                 }
@@ -117,17 +125,17 @@ impl PlatformManager {
                 thread::sleep(Duration::from_millis(100));
             }
 
-            complete(&mut monitor, Err(util::io_err("cancelled or timed out")))
-        }, timeout)?);
+            callback.call(Err(util::io_err("cancelled or timed out")));
+        }, timeout);
 
-        match rx.recv() {
-            Ok(rv) => rv,
-            Err(_) => Err(io::Error::new(io::ErrorKind::Other, "error receiving"))
-        }
+        self.thread = Some(try_or!(thread, |_| {
+            cbc.call(Err(util::io_err("couldn't create runloop")))
+        }));
     }
 
+    // This blocks.
     pub fn cancel(&mut self) {
-        if let Some(mut thread) = self.thread.take() {
+        if let Some(thread) = self.thread.take() {
             thread.cancel();
         }
     }

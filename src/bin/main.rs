@@ -4,6 +4,7 @@ extern crate u2fhid;
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
 use std::io;
+use std::sync::mpsc::channel;
 use u2fhid::U2FManager;
 
 #[macro_use] extern crate log;
@@ -37,21 +38,24 @@ fn main() {
     let mut app_bytes: Vec<u8> = vec![0; application.output_bytes()];
     application.result(&mut app_bytes);
 
-    let mut manager = U2FManager::new();
+    let manager = U2FManager::new().unwrap();
 
-    let register_data = manager.register(15, chall_bytes, app_bytes).unwrap();
+    let (tx, rx) = channel();
+    manager.register(15, chall_bytes.clone(), app_bytes.clone(), move |rv| {
+        tx.send(rv.unwrap()).unwrap();
+    }).unwrap();
+
+    let register_data = rx.recv().unwrap();
     println!("Register result: {}", base64::encode(&register_data));
-
     println!("Asking a security key to sign now, with the data from the register...");
     let key_handle = u2f_get_key_handle_from_register_response(&register_data).unwrap();
 
-    let mut chall_bytes: Vec<u8> = vec![0; challenge.output_bytes()];
-    challenge.result(&mut chall_bytes);
-    let mut app_bytes: Vec<u8> = vec![0; application.output_bytes()];
-    application.result(&mut app_bytes);
+    let (tx, rx) = channel();
+    manager.sign(15, chall_bytes, app_bytes, key_handle, move |rv| {
+        tx.send(rv.unwrap()).unwrap();
+    }).unwrap();
 
-    let sign_data = manager.sign(15, chall_bytes, app_bytes, key_handle).unwrap();
+    let sign_data = rx.recv().unwrap();
     println!("Sign result: {}", base64::encode(&sign_data));
-
     println!("Done.");
 }

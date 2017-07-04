@@ -21,8 +21,8 @@ pub struct RunLoop {
 }
 
 impl RunLoop {
-    pub fn new<F>(fun: F, timeout: u64) -> io::Result<Self>
-        where F: FnOnce(&Fn() -> bool) -> io::Result<()>, F: Send + 'static
+    pub fn new<F,T>(fun: F, timeout: u64) -> io::Result<Self>
+        where F: FnOnce(&Fn() -> bool) -> T, F: Send + 'static
     {
         let flag = Arc::new(Canary::new());
         let flag_ = flag.clone();
@@ -56,7 +56,7 @@ impl RunLoop {
 
     // Cancels the run loop and waits for the thread to terminate.
     // This is a potentially BLOCKING operation.
-    pub fn cancel(&mut self) {
+    pub fn cancel(&self) {
         // If thread still exists...
         if let Some(flag) = self.flag.upgrade() {
             // ...let the run loop terminate.
