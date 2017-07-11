@@ -27,7 +27,7 @@ impl Monitor {
     pub fn new() -> io::Result<Self> {
         let (tx, rx) = channel();
 
-        let thread = RunLoop::new(move |alive| {
+        let thread = RunLoop::new(move |alive| -> io::Result<()> {
             let tx_box = Box::new(tx);
             let tx_ptr = Box::into_raw(tx_box) as *mut libc::c_void;
 
@@ -70,11 +70,6 @@ impl Monitor {
         self.rx.try_iter()
     }
 
-    // This might block.
-    pub fn stop(&mut self) {
-        self.thread.cancel();
-    }
-
     extern "C" fn device_add_cb(context: *mut c_void, _: IOReturn,
                                 _: *mut c_void, device: IOHIDDeviceRef) {
         let tx = unsafe { &*(context as *mut Sender<Event>) };
@@ -85,5 +80,11 @@ impl Monitor {
                                    _: *mut c_void, device: IOHIDDeviceRef) {
         let tx = unsafe { &*(context as *mut Sender<Event>) };
         let _ = tx.send(Event::Remove(IOHIDDeviceID::from_ref(device)));
+    }
+}
+
+impl Drop for Monitor {
+    fn drop(&mut self) {
+        self.thread.cancel();
     }
 }
