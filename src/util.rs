@@ -49,21 +49,19 @@ pub fn to_io_err<T: Error>(err: T) -> io::Error {
     io_err(err.description())
 }
 
-type Callback = SendBoxFnOnce<(io::Result<Vec<u8>>,)>;
-
-pub struct OnceCallback {
-    callback: Arc<Mutex<Option<Callback>>>
+pub struct OnceCallback<T> {
+    callback: Arc<Mutex<Option<SendBoxFnOnce<(io::Result<T>,)>>>>
 }
 
-impl OnceCallback {
+impl<T> OnceCallback<T> {
     pub fn new<F>(cb: F) -> Self
-        where F: FnOnce(io::Result<Vec<u8>>), F: Send + 'static
+        where F: FnOnce(io::Result<T>), F: Send + 'static
     {
         let cb = Some(SendBoxFnOnce::from(cb));
         Self { callback: Arc::new(Mutex::new(cb)) }
     }
 
-    pub fn call(&self, rv: io::Result<Vec<u8>>) {
+    pub fn call(&self, rv: io::Result<T>) {
         if let Ok(mut cb) = self.callback.lock() {
             if let Some(cb) = cb.take() {
                 cb.call(rv);
@@ -72,7 +70,7 @@ impl OnceCallback {
     }
 }
 
-impl Clone for OnceCallback {
+impl<T> Clone for OnceCallback<T> {
     fn clone(&self) -> Self {
         Self { callback: self.callback.clone() }
     }

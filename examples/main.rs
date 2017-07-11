@@ -51,11 +51,11 @@ fn main() {
     let key_handle = u2f_get_key_handle_from_register_response(&register_data).unwrap();
 
     let (tx, rx) = channel();
-    manager.sign(15, chall_bytes, app_bytes, key_handle, move |rv| {
+    manager.sign(15, chall_bytes, app_bytes, vec!(key_handle), move |rv| {
         tx.send(rv.unwrap()).unwrap();
     }).unwrap();
 
-    let sign_data = rx.recv().unwrap();
+    let (_, sign_data) = rx.recv().unwrap();
     println!("Sign result: {}", base64::encode(&sign_data));
     println!("Done.");
 }

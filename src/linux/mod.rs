@@ -23,7 +23,7 @@ impl PlatformManager {
         Self { thread: None }
     }
 
-    pub fn register(&mut self, timeout: u64, challenge: Vec<u8>, application: Vec<u8>, callback: OnceCallback)
+    pub fn register(&mut self, timeout: u64, challenge: Vec<u8>, application: Vec<u8>, callback: OnceCallback<Vec<u8>>)
     {
         // Abort any prior register/sign calls.
         self.cancel();
@@ -64,8 +64,7 @@ impl PlatformManager {
         }));
     }
 
-    // TODO merge with register()?
-    pub fn sign(&mut self, timeout: u64, challenge: Vec<u8>, application: Vec<u8>, key_handle: Vec<u8>, callback: OnceCallback)
+    pub fn sign(&mut self, timeout: u64, challenge: Vec<u8>, application: Vec<u8>, key_handles: Vec<Vec<u8>>, callback: OnceCallback<(Vec<u8>,Vec<u8>)>)
     {
         // Abort any prior register/sign calls.
         self.cancel();
@@ -78,6 +77,8 @@ impl PlatformManager {
                 callback.call(Err(e));
             });
 
+            // TODO check if dlopen() failed?
+
             while alive() {
                 // Add/remove devices.
                 for event in monitor.events() {
@@ -85,25 +86,27 @@ impl PlatformManager {
                 }
 
                 // Try signing with each device.
-                for device in devices.values_mut() {
-                    // Check if they key handle belongs to the current device.
-                    let is_valid = match super::u2f_is_keyhandle_valid(device, &challenge, &application, &key_handle) {
-                        Ok(valid) => valid,
-                        Err(_) => continue
-                    };
+                for key_handle in &key_handles {
+                    for device in devices.values_mut() {
+                        // Check if they key handle belongs to the current device.
+                        let is_valid = match super::u2f_is_keyhandle_valid(device, &challenge, &application, key_handle) {
+                            Ok(valid) => valid,
+                            Err(_) => continue // Skip this device for now.
+                        };
 
-                    if is_valid {
-                        // If yes, try to sign.
-                        if let Ok(bytes) = super::u2f_sign(device, &challenge, &application, &key_handle) {
-                            callback.call(Ok(bytes));
-                            return;
-                        }
-                    } else {
-                        // If no, keep registering and blinking with bogus data
-                        let blank = vec![0u8; PARAMETER_SIZE];
-                        if let Ok(_) = super::u2f_register(device, &blank, &blank) {
-                            callback.call(Err(io_err("invalid key")));
-                            return;
+                        if is_valid {
+                            // If yes, try to sign.
+                            if let Ok(bytes) = super::u2f_sign(device, &challenge, &application, key_handle) {
+                                callback.call(Ok((key_handle.clone(), bytes)));
+                                return;
+                            }
+                        } else {
+                            // If no, keep registering and blinking with bogus data
+                            let blank = vec![0u8; PARAMETER_SIZE];
+                            if let Ok(_) = super::u2f_register(device, &blank, &blank) {
+                                callback.call(Err(io_err("invalid key")));
+                                return;
+                            }
                         }
                     }
                 }

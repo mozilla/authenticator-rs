@@ -160,11 +160,10 @@ pub unsafe extern "C" fn rust_u2f_mgr_sign(mgr: *mut U2FManager,
 
     let challenge = from_raw(challenge_ptr, challenge_len);
     let application = from_raw(application_ptr, application_len);
-    let key_handle = (*khs)[0].clone(); // TODO
+    let key_handles = (*khs).clone();
 
-    // TODO no need to clone as soon as sign() returns the chosen key handlequest)
-    let res = (*mgr).sign(timeout, challenge, application, key_handle.clone(), move |rv| {
-        if let Ok(signature) = rv {
+    let res = (*mgr).sign(timeout, challenge, application, key_handles, move |rv| {
+        if let Ok((key_handle, signature)) = rv {
             let mut result = U2FResult::new();
             result.insert(RESBUF_ID_KEYHANDLE, key_handle);
             result.insert(RESBUF_ID_SIGNATURE, signature);

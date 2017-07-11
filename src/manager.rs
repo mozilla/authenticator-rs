@@ -12,14 +12,14 @@ pub enum QueueAction {
     timeout: u64,
     challenge: Vec<u8>,
     application: Vec<u8>,
-    callback: OnceCallback
+    callback: OnceCallback<Vec<u8>>
   },
   Sign {
     timeout: u64,
     challenge: Vec<u8>,
     application: Vec<u8>,
-    key_handle: Vec<u8>,
-    callback: OnceCallback
+    key_handles: Vec<Vec<u8>>,
+    callback: OnceCallback<(Vec<u8>,Vec<u8>)>
   },
   Cancel
 }
@@ -43,9 +43,9 @@ impl U2FManager {
                         // This must not block, otherwise we can't cancel.
                         pm.register(timeout, challenge, application, callback);
                     }
-                    Ok(QueueAction::Sign{timeout, challenge, application, key_handle, callback}) => {
+                    Ok(QueueAction::Sign{timeout, challenge, application, key_handles, callback}) => {
                         // This must not block, otherwise we can't cancel.
-                        pm.sign(timeout, challenge, application, key_handle, callback);
+                        pm.sign(timeout, challenge, application, key_handles, callback);
                     }
                     Ok(QueueAction::Cancel) => {
                         // Cancelling must block so that we don't start a new
@@ -79,20 +79,26 @@ impl U2FManager {
         self.tx.send(action).map_err(to_io_err)
     }
 
-    pub fn sign<F>(&self, timeout: u64, challenge: Vec<u8>, application: Vec<u8>, key_handle: Vec<u8>, callback: F) -> io::Result<()>
-        where F: FnOnce(io::Result<Vec<u8>>), F: Send + 'static
+    pub fn sign<F>(&self, timeout: u64, challenge: Vec<u8>, application: Vec<u8>, key_handles: Vec<Vec<u8>>, callback: F) -> io::Result<()>
+        where F: FnOnce(io::Result<(Vec<u8>,Vec<u8>)>), F: Send + 'static
     {
         if challenge.len() != PARAMETER_SIZE ||
            application.len() != PARAMETER_SIZE {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid parameter sizes"));
         }
 
-        if key_handle.len() > 256 {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "Key handle too large"));
+        if key_handles.len() < 1 {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "No key handles given"));
+        }
+
+        for key_handle in &key_handles {
+            if key_handle.len() > 256 {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, "Key handle too large"));
+            }
         }
 
         let callback = OnceCallback::new(callback);
-        let action = QueueAction::Sign { timeout, challenge, application, key_handle, callback };
+        let action = QueueAction::Sign { timeout, challenge, application, key_handles, callback };
         self.tx.send(action).map_err(to_io_err)
     }
 
