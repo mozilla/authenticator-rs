@@ -4,6 +4,7 @@ use std::{ptr, slice};
 
 use ::U2FManager;
 
+type U2FKeyHandles = Vec<Vec<u8>>;
 type U2FResult = HashMap<u8, Vec<u8>>;
 type U2FCallback = extern "C" fn (u64, *mut U2FResult);
 
@@ -30,6 +31,28 @@ pub unsafe extern "C" fn rust_u2f_mgr_free(mgr: *mut U2FManager)
 {
     if !mgr.is_null() {
         Box::from_raw(mgr);
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rust_u2f_khs_new() -> *mut U2FKeyHandles
+{
+    Box::into_raw(Box::new(vec!()))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rust_u2f_khs_add(khs: *mut U2FKeyHandles,
+                                          key_handle_ptr: *const u8,
+                                          key_handle_len: usize)
+{
+    (*khs).push(from_raw(key_handle_ptr, key_handle_len));
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rust_u2f_khs_free(khs: *mut U2FKeyHandles)
+{
+    if !khs.is_null() {
+        Box::from_raw(khs);
     }
 }
 
@@ -89,6 +112,11 @@ pub unsafe extern "C" fn rust_u2f_mgr_register(mgr: *mut U2FManager,
         return false;
     }
 
+    // Check buffers.
+    if challenge_ptr.is_null() || application_ptr.is_null() {
+        return false;
+    }
+
     let challenge = from_raw(challenge_ptr, challenge_len);
     let application = from_raw(application_ptr, application_len);
 
@@ -114,18 +142,27 @@ pub unsafe extern "C" fn rust_u2f_mgr_sign(mgr: *mut U2FManager,
                                            challenge_len: usize,
                                            application_ptr: *const u8,
                                            application_len: usize,
-                                           key_handle_ptr: *const u8,
-                                           key_handle_len: usize) -> bool
+                                           khs: *const U2FKeyHandles) -> bool
 {
-    if mgr.is_null() {
+    if mgr.is_null() || khs.is_null() {
+        return false;
+    }
+
+    // Check buffers.
+    if challenge_ptr.is_null() || application_ptr.is_null() {
+        return false;
+    }
+
+    // Need at least one key handle.
+    if (*khs).len() < 1 {
         return false;
     }
 
     let challenge = from_raw(challenge_ptr, challenge_len);
     let application = from_raw(application_ptr, application_len);
-    let key_handle = from_raw(key_handle_ptr, key_handle_len);
+    let key_handle = (*khs)[0].clone(); // TODO
 
-    // TODO no need to clone as soon as sign() returns the chosen key handle
+    // TODO no need to clone as soon as sign() returns the chosen key handlequest)
     let res = (*mgr).sign(timeout, challenge, application, key_handle.clone(), move |rv| {
         if let Ok(signature) = rv {
             let mut result = U2FResult::new();
