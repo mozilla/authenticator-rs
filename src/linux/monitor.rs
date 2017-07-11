@@ -9,8 +9,7 @@ use std::os::unix::io::AsRawFd;
 use std::sync::mpsc::{channel, Receiver, TryIter};
 
 use runloop::RunLoop;
-
-use ::platform::util::to_io_err;
+use util::to_io_err;
 
 const UDEV_SUBSYSTEM: &'static str = "hidraw";
 const POLLIN: c_short = 0x0001;

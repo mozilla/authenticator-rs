@@ -23,26 +23,9 @@ use std::collections::HashMap;
 use runloop::RunLoop;
 
 use u2fprotocol;
-use u2fprotocol::{U2FDevice};
+use u2fprotocol::U2FDevice;
 use consts::{CID_BROADCAST, HID_RPT_SIZE, PARAMETER_SIZE};
-
-// TODO
-use ::{OnceCallback};
-
-// TODO
-macro_rules! try_or {
-    ($val:expr, $or:expr) => {
-        match $val {
-            Ok(v) => { v }
-            Err(e) => { return $or(e); }
-        }
-    }
-}
-
-// TODO
-pub fn io_err(msg: &str) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, msg)
-}
+use util::{io_err, OnceCallback};
 
 const READ_TIMEOUT: u64 = 15;
 

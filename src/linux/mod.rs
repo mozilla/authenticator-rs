@@ -5,26 +5,13 @@ mod device;
 mod devicemap;
 mod hidraw;
 mod monitor;
-mod util;
 
 use consts::PARAMETER_SIZE;
 use runloop::RunLoop;
+use util::{io_err, OnceCallback};
 
 use self::devicemap::DeviceMap;
 use self::monitor::Monitor;
-
-// TODO
-use ::{OnceCallback};
-
-// TODO
-macro_rules! try_or {
-    ($val:expr, $or:expr) => {
-        match $val {
-            Ok(v) => { v }
-            Err(e) => { return $or(e); }
-        }
-    }
-}
 
 pub struct PlatformManager {
     // Handle to the thread loop.
@@ -69,11 +56,11 @@ impl PlatformManager {
                 thread::sleep(Duration::from_millis(100));
             }
 
-            callback.call(Err(util::io_err("cancelled or timed out")));
+            callback.call(Err(io_err("cancelled or timed out")));
         }, timeout);
 
         self.thread = Some(try_or!(thread, |_| {
-            cbc.call(Err(util::io_err("couldn't create runloop")))
+            cbc.call(Err(io_err("couldn't create runloop")))
         }));
     }
 
@@ -115,7 +102,7 @@ impl PlatformManager {
                         // If no, keep registering and blinking with bogus data
                         let blank = vec![0u8; PARAMETER_SIZE];
                         if let Ok(_) = super::u2f_register(device, &blank, &blank) {
-                            callback.call(Err(util::io_err("invalid key")));
+                            callback.call(Err(io_err("invalid key")));
                             return;
                         }
                     }
@@ -125,11 +112,11 @@ impl PlatformManager {
                 thread::sleep(Duration::from_millis(100));
             }
 
-            callback.call(Err(util::io_err("cancelled or timed out")));
+            callback.call(Err(io_err("cancelled or timed out")));
         }, timeout);
 
         self.thread = Some(try_or!(thread, |_| {
-            cbc.call(Err(util::io_err("couldn't create runloop")))
+            cbc.call(Err(io_err("couldn't create runloop")))
         }));
     }
 

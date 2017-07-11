@@ -4,8 +4,8 @@ use std::io;
 use std::mem;
 use std::os::unix::io::RawFd;
 
-use ::consts::{FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID};
-use ::platform::util::from_unix_result;
+use consts::{FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID};
+use util::from_unix_result;
 
 #[allow(non_camel_case_types)]
 #[repr(C)]

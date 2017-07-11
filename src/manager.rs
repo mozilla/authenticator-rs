@@ -1,24 +1,11 @@
 use std::io;
+use std::sync::mpsc::{channel, Sender, RecvTimeoutError};
 use std::time::Duration;
 
 use consts::PARAMETER_SIZE;
 use platform::PlatformManager;
 use runloop::RunLoop;
-
-// TODO
-use std::sync::mpsc::{channel, Sender, RecvTimeoutError};
-use std::error::Error;
-use ::OnceCallback;
-
-// TODO
-pub fn io_err(msg: &str) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, msg)
-}
-
-// TODO
-pub fn to_io_err<T: Error>(err: T) -> io::Error {
-    io_err(err.description())
-}
+use util::{to_io_err, OnceCallback};
 
 pub enum QueueAction {
   Register {
