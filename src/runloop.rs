@@ -72,4 +72,14 @@ impl RunLoop {
             }
         }
     }
+
+    // Tells whether the runloop is alive.
+    pub fn alive(&self) -> bool {
+        // If thread still exists...
+        if let Some(flag) = self.flag.upgrade() {
+            flag.alive.load(Ordering::Relaxed)
+        } else {
+            false
+        }
+    }
 }

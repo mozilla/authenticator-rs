@@ -117,7 +117,7 @@ impl PlatformManager {
                 callback.call(Err(e));
             });
 
-            'top: while alive() {
+            'top: while alive() && monitor.alive() {
                 for event in monitor.events() {
                     process_event(&mut devices, event);
                 }
@@ -139,7 +139,7 @@ impl PlatformManager {
                 thread::sleep(Duration::from_millis(100));
             }
 
-            callback.call(Err(io_err("cancelled or timed out")));
+            callback.call(Err(io_err("aborted or timed out")));
         }, timeout);
 
         self.thread = Some(try_or!(thread, |_| {
@@ -161,7 +161,7 @@ impl PlatformManager {
                 callback.call(Err(e));
             });
 
-            'top: while alive() {
+            'top: while alive() && monitor.alive() {
                 for event in monitor.events() {
                     process_event(&mut devices, event);
                 }
@@ -202,7 +202,7 @@ impl PlatformManager {
                 thread::sleep(Duration::from_millis(100));
             }
 
-            callback.call(Err(io_err("cancelled or timed out")));
+            callback.call(Err(io_err("aborted or timed out")));
         }, timeout);
 
         self.thread = Some(try_or!(thread, |_| {

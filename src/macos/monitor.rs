@@ -70,6 +70,10 @@ impl Monitor {
         self.rx.try_iter()
     }
 
+    pub fn alive(&self) -> bool {
+        self.thread.alive()
+    }
+
     extern "C" fn device_add_cb(context: *mut c_void, _: IOReturn,
                                 _: *mut c_void, device: IOHIDDeviceRef) {
         let tx = unsafe { &*(context as *mut Sender<Event>) };

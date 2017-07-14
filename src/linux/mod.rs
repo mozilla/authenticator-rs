@@ -36,9 +36,7 @@ impl PlatformManager {
                 callback.call(Err(e));
             });
 
-            // TODO check if dlopen() failed?
-
-            while alive() {
+            while alive() && monitor.alive() {
                 // Add/remove devices.
                 for event in monitor.events() {
                     devices.process_event(event);
@@ -56,7 +54,7 @@ impl PlatformManager {
                 thread::sleep(Duration::from_millis(100));
             }
 
-            callback.call(Err(io_err("cancelled or timed out")));
+            callback.call(Err(io_err("aborted or timed out")));
         }, timeout);
 
         self.thread = Some(try_or!(thread, |_| {
@@ -77,9 +75,7 @@ impl PlatformManager {
                 callback.call(Err(e));
             });
 
-            // TODO check if dlopen() failed?
-
-            while alive() {
+            while alive() && monitor.alive() {
                 // Add/remove devices.
                 for event in monitor.events() {
                     devices.process_event(event);
@@ -115,7 +111,7 @@ impl PlatformManager {
                 thread::sleep(Duration::from_millis(100));
             }
 
-            callback.call(Err(io_err("cancelled or timed out")));
+            callback.call(Err(io_err("aborted or timed out")));
         }, timeout);
 
         self.thread = Some(try_or!(thread, |_| {

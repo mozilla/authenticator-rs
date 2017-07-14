@@ -97,13 +97,15 @@ impl Monitor {
             Ok(())
         }, 0 /* no timeout */)?;
 
-        // TODO what if dlopen() failed?
-
         Ok(Self { rx, thread })
     }
 
     pub fn events<'a>(&'a self) -> TryIter<'a, Event> {
         self.rx.try_iter()
+    }
+
+    pub fn alive(&self) -> bool {
+        self.thread.alive()
     }
 }
 

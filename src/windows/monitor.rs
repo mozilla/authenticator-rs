@@ -66,6 +66,10 @@ impl Monitor {
     pub fn events<'a>(&'a self) -> TryIter<'a, Event> {
         self.rx.try_iter()
     }
+
+    pub fn alive(&self) -> bool {
+        self.thread.alive()
+    }
 }
 
 impl Drop for Monitor {
