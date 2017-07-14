@@ -49,15 +49,14 @@ impl Read for Device {
         let timeout = Duration::from_secs(READ_TIMEOUT);
         let report_data = match self.report_recv.recv_timeout(timeout) {
             Ok(v) => v,
+            Err(e) if e == RecvTimeoutError::Timeout => {
+                return Err(io::Error::new(io::ErrorKind::TimedOut, e));
+            }
             Err(e) => {
-                if e == RecvTimeoutError::Timeout {
-                    return Err(io::Error::new(io::ErrorKind::TimedOut, e));
-                }
                 return Err(io::Error::new(io::ErrorKind::UnexpectedEof, e));
-            },
+            }
         };
-        let len = bytes.write(&report_data.data).unwrap();
-        Ok(len)
+        bytes.write(&report_data.data)
     }
 }
 
@@ -76,6 +75,7 @@ impl U2FDevice for Device {
     fn get_cid(&self) -> [u8; 4] {
         return self.cid.clone();
     }
+
     fn set_cid(&mut self, cid: &[u8; 4]) {
         self.cid.clone_from(cid);
     }
