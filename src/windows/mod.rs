@@ -9,6 +9,7 @@ mod winapi;
 use consts::PARAMETER_SIZE;
 use runloop::RunLoop;
 use util::{io_err, OnceCallback};
+use u2fprotocol::{u2f_register, u2f_sign, u2f_is_keyhandle_valid};
 
 use self::devicemap::DeviceMap;
 use self::monitor::Monitor;
@@ -44,7 +45,7 @@ impl PlatformManager {
 
                 // Try to register each device.
                 for device in devices.values_mut() {
-                    if let Ok(bytes) = super::u2f_register(device, &challenge, &application) {
+                    if let Ok(bytes) = u2f_register(device, &challenge, &application) {
                         callback.call(Ok(bytes));
                         return;
                     }
@@ -85,21 +86,21 @@ impl PlatformManager {
                 for key_handle in &key_handles {
                     for device in devices.values_mut() {
                         // Check if they key handle belongs to the current device.
-                        let is_valid = match super::u2f_is_keyhandle_valid(device, &challenge, &application, &key_handle) {
+                        let is_valid = match u2f_is_keyhandle_valid(device, &challenge, &application, &key_handle) {
                             Ok(valid) => valid,
                             Err(_) => continue // Skip this device for now.
                         };
 
                         if is_valid {
                             // If yes, try to sign.
-                            if let Ok(bytes) = super::u2f_sign(device, &challenge, &application, &key_handle) {
+                            if let Ok(bytes) = u2f_sign(device, &challenge, &application, &key_handle) {
                                 callback.call(Ok((key_handle.clone(), bytes)));
                                 return;
                             }
                         } else {
                             // If no, keep registering and blinking with bogus data
                             let blank = vec![0u8; PARAMETER_SIZE];
-                            if let Ok(_) = super::u2f_register(device, &blank, &blank) {
+                            if let Ok(_) = u2f_register(device, &blank, &blank) {
                                 callback.call(Err(io_err("invalid key")));
                                 return;
                             }

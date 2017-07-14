@@ -1,98 +1,31 @@
 extern crate log;
 extern crate libc;
 
-pub use self::iokit::*;
-mod iokit;
-mod iohid;
 
 use rand::{thread_rng, Rng};
-use std::fmt;
-use std::io::{Read, Write};
-use std::io;
+use std::collections::HashMap;
 use std::ptr;
-use std::sync::mpsc::{channel, Sender, Receiver, RecvTimeoutError};
+use std::sync::mpsc::{channel, Sender};
 use std::thread;
 use std::time::Duration;
 
 use libc::c_void;
 use core_foundation_sys::base::*;
 
+mod device;
+mod iokit;
+mod iohid;
 mod monitor;
+
+use self::iokit::*;
+use self::device::{Device, Report};
 use self::monitor::Monitor;
-use std::collections::HashMap;
-use runloop::RunLoop;
 
-use u2fprotocol;
-use u2fprotocol::U2FDevice;
 use consts::{CID_BROADCAST, HID_RPT_SIZE, PARAMETER_SIZE};
+use runloop::RunLoop;
 use util::{io_err, OnceCallback};
-
-const READ_TIMEOUT: u64 = 15;
-
-pub struct Report {
-    pub data: [u8; HID_RPT_SIZE],
-}
-unsafe impl Send for Report {}
-unsafe impl Sync for Report {}
-
-pub struct Device {
-    pub device_ref: IOHIDDeviceRef,
-    // Channel ID for U2F HID communication. Needed to implement U2FDevice
-    // trait.
-    pub cid: [u8; 4],
-    pub report_recv: Receiver<Report>,
-    pub report_send_void: *mut libc::c_void,
-}
-
-impl fmt::Display for Device {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "InternalDevice(ref:{:?}, cid: {:02x}{:02x}{:02x}{:02x})",
-               self.device_ref, self.cid[0], self.cid[1], self.cid[2], self.cid[3])
-    }
-}
-
-impl PartialEq for Device {
-    fn eq(&self, other_device: &Device) -> bool {
-        self.device_ref == other_device.device_ref
-    }
-}
-
-impl Read for Device {
-    fn read(&mut self, mut bytes: &mut [u8]) -> io::Result<usize> {
-        let timeout = Duration::from_secs(READ_TIMEOUT);
-        let report_data = match self.report_recv.recv_timeout(timeout) {
-            Ok(v) => v,
-            Err(e) => {
-                if e == RecvTimeoutError::Timeout {
-                    return Err(io::Error::new(io::ErrorKind::TimedOut, e));
-                }
-                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, e));
-            },
-        };
-        let len = bytes.write(&report_data.data).unwrap();
-        Ok(len)
-    }
-}
-
-impl Write for Device {
-    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        unsafe { set_report(self.device_ref, kIOHIDReportTypeOutput, bytes) }
-    }
-
-    // USB HID writes don't buffer, so this will be a nop.
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-
-impl U2FDevice for Device {
-    fn get_cid(&self) -> [u8; 4] {
-        return self.cid.clone();
-    }
-    fn set_cid(&mut self, cid: &[u8; 4]) {
-        self.cid.clone_from(cid);
-    }
-}
+use u2fprotocol::{u2f_register, u2f_sign, u2f_is_keyhandle_valid};
+use u2fprotocol::{init_device, ping_device, u2f_version_is_v2};
 
 pub struct PlatformManager {
   // Handle to the thread loop.
@@ -124,7 +57,7 @@ impl PlatformManager {
 
                 for device in devices.values_mut() {
                     // Caller asked us to register, so the first token that does wins
-                    if let Ok(bytes) = u2fprotocol::u2f_register(device, &challenge, &application) {
+                    if let Ok(bytes) = u2f_register(device, &challenge, &application) {
                         callback.call(Ok(bytes));
                         return;
                     }
@@ -169,14 +102,14 @@ impl PlatformManager {
                 for key_handle in &key_handles {
                     for device in devices.values_mut() {
                         // Determine if this key handle belongs to this token
-                        let is_valid = match u2fprotocol::u2f_is_keyhandle_valid(device, &challenge, &application, key_handle) {
+                        let is_valid = match u2f_is_keyhandle_valid(device, &challenge, &application, key_handle) {
                             Ok(result) => result,
                             Err(_) => continue // Skip this device for now.
                         };
 
                         if is_valid {
                             // It does, we can sign
-                            if let Ok(bytes) = u2fprotocol::u2f_sign(device, &challenge, &application, key_handle) {
+                            if let Ok(bytes) = u2f_sign(device, &challenge, &application, key_handle) {
                                 callback.call(Ok((key_handle.clone(), bytes)));
                                 return;
                             }
@@ -184,7 +117,7 @@ impl PlatformManager {
                             // If doesn't, so blink anyway (using bogus data)
                             let blank = vec![0u8; PARAMETER_SIZE];
 
-                            if let Ok(_) = u2fprotocol::u2f_register(device, &blank, &blank) {
+                            if let Ok(_) = u2f_register(device, &blank, &blank) {
                                 // If the user selects this token that can't satisfy, it's an error
                                 callback.call(Err(io_err("invalid key")));
                                 return;
@@ -244,16 +177,16 @@ fn maybe_add_device(devs: &mut HashMap<IOHIDDeviceRef, Device>, device_ref: IOHI
 
     let mut nonce = [0u8; 8];
     thread_rng().fill_bytes(&mut nonce);
-    if let Err(_) = u2fprotocol::init_device(&mut dev, nonce) {
+    if let Err(_) = init_device(&mut dev, nonce) {
         return;
     }
 
     let mut random = [0u8; 8];
     thread_rng().fill_bytes(&mut random);
-    if let Err(_) = u2fprotocol::ping_device(&mut dev, random) {
+    if let Err(_) = ping_device(&mut dev, random) {
         return;
     }
-    if let Err(_) = u2fprotocol::u2f_version_is_v2(&mut dev) {
+    if let Err(_) = u2f_version_is_v2(&mut dev) {
         return;
     }
 
@@ -278,32 +211,6 @@ fn process_event(devs: &mut HashMap<IOHIDDeviceRef, Device>, event: monitor::Eve
         monitor::Event::Remove(device_id) => maybe_remove_device(devs, device_id.as_ref()),
     }
 }
-
-unsafe fn set_report(device_ref: IOHIDDeviceRef,
-                     report_type: IOHIDReportType,
-                     bytes: &[u8])
-                     -> io::Result<usize> {
-    let report_id = bytes[0] as i64;
-    let mut data = bytes.as_ptr();
-    let mut length = bytes.len() as CFIndex;
-
-    if report_id == 0x0 {
-        // Not using numbered reports, so don't send the report number
-        length = length - 1;
-        data = data.offset(1);
-    }
-
-    let result = IOHIDDeviceSetReport(device_ref, report_type, report_id, data, length);
-    if result != 0 {
-        warn!("set_report sending failure = {0:X}", result);
-
-        return Err(io::Error::from_raw_os_error(result));
-    }
-    trace!("set_report sending success = {0:X}", result);
-
-    Ok(length as usize)
-}
-
 
 // This is called from the RunLoop thread
 extern "C" fn read_new_data_cb(context: *mut c_void,

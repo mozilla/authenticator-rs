@@ -1,3 +1,6 @@
+extern crate log;
+extern crate libc;
+
 use std::io;
 
 use super::iokit::*;
@@ -7,10 +10,7 @@ use core_foundation_sys::number::*;
 use core_foundation_sys::runloop::*;
 use core_foundation_sys::string::*;
 
-extern crate log;
-extern crate libc;
-
-use ::consts::{FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID};
+use consts::{FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID};
 
 pub struct IOHIDDeviceID {
     pub device_id: u64 // TODO: Does this work on non-64-bit systems?

@@ -25,13 +25,11 @@ extern crate libc;
 extern crate boxfnonce;
 
 mod consts;
-mod manager;
 mod runloop;
+mod u2fprotocol;
 
-// TODO
-pub mod u2fprotocol;
-pub use u2fprotocol::*;
-pub use manager::U2FManager as U2FManager;
+mod manager;
+pub use manager::U2FManager;
 
 mod capi;
 pub use capi::*;

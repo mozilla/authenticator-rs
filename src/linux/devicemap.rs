@@ -3,8 +3,9 @@ use std::collections::hash_map::ValuesMut;
 use std::collections::HashMap;
 use std::ffi::OsString;
 
-use ::platform::device::Device;
-use ::platform::monitor::Event;
+use platform::device::Device;
+use platform::monitor::Event;
+use u2fprotocol::{init_device, ping_device, u2f_version_is_v2};
 
 pub struct DeviceMap {
     map: HashMap<OsString, Device>
@@ -40,16 +41,16 @@ impl DeviceMap {
             // Do a few U2F device checks.
             let mut nonce = [0u8; 8];
             thread_rng().fill_bytes(&mut nonce);
-            if let Err(_) = ::init_device(&mut dev, nonce) {
+            if let Err(_) = init_device(&mut dev, nonce) {
                 return;
             }
 
             let mut random = [0u8; 8];
             thread_rng().fill_bytes(&mut random);
-            if let Err(_) = ::ping_device(&mut dev, random) {
+            if let Err(_) = ping_device(&mut dev, random) {
                 return;
             }
-            if let Err(_) = ::u2f_version_is_v2(&mut dev) {
+            if let Err(_) = u2f_version_is_v2(&mut dev) {
                 return;
             }
 
