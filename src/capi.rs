@@ -2,23 +2,22 @@ use libc::size_t;
 use std::collections::HashMap;
 use std::{ptr, slice};
 
-use ::U2FManager;
+use U2FManager;
 
 type U2FKeyHandles = Vec<Vec<u8>>;
 type U2FResult = HashMap<u8, Vec<u8>>;
-type U2FCallback = extern "C" fn (u64, *mut U2FResult);
+type U2FCallback = extern "C" fn(u64, *mut U2FResult);
 
-const RESBUF_ID_REGISTRATION : u8 = 0;
-const RESBUF_ID_KEYHANDLE : u8 = 1;
-const RESBUF_ID_SIGNATURE : u8 = 2;
+const RESBUF_ID_REGISTRATION: u8 = 0;
+const RESBUF_ID_KEYHANDLE: u8 = 1;
+const RESBUF_ID_SIGNATURE: u8 = 2;
 
 unsafe fn from_raw(ptr: *const u8, len: usize) -> Vec<u8> {
     slice::from_raw_parts(ptr, len).to_vec()
 }
 
 #[no_mangle]
-pub extern "C" fn rust_u2f_mgr_new() -> *mut U2FManager
-{
+pub extern "C" fn rust_u2f_mgr_new() -> *mut U2FManager {
     if let Ok(mgr) = U2FManager::new() {
         Box::into_raw(Box::new(mgr))
     } else {
@@ -27,40 +26,39 @@ pub extern "C" fn rust_u2f_mgr_new() -> *mut U2FManager
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn rust_u2f_mgr_free(mgr: *mut U2FManager)
-{
+pub unsafe extern "C" fn rust_u2f_mgr_free(mgr: *mut U2FManager) {
     if !mgr.is_null() {
         Box::from_raw(mgr);
     }
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn rust_u2f_khs_new() -> *mut U2FKeyHandles
-{
-    Box::into_raw(Box::new(vec!()))
+pub unsafe extern "C" fn rust_u2f_khs_new() -> *mut U2FKeyHandles {
+    Box::into_raw(Box::new(vec![]))
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn rust_u2f_khs_add(khs: *mut U2FKeyHandles,
-                                          key_handle_ptr: *const u8,
-                                          key_handle_len: usize)
-{
+pub unsafe extern "C" fn rust_u2f_khs_add(
+    khs: *mut U2FKeyHandles,
+    key_handle_ptr: *const u8,
+    key_handle_len: usize,
+) {
     (*khs).push(from_raw(key_handle_ptr, key_handle_len));
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn rust_u2f_khs_free(khs: *mut U2FKeyHandles)
-{
+pub unsafe extern "C" fn rust_u2f_khs_free(khs: *mut U2FKeyHandles) {
     if !khs.is_null() {
         Box::from_raw(khs);
     }
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn rust_u2f_resbuf_length(res: *const U2FResult,
-                                                bid: u8,
-                                                len: *mut size_t) -> bool
-{
+pub unsafe extern "C" fn rust_u2f_resbuf_length(
+    res: *const U2FResult,
+    bid: u8,
+    len: *mut size_t,
+) -> bool {
     if res.is_null() {
         return false;
     }
@@ -74,10 +72,11 @@ pub unsafe extern "C" fn rust_u2f_resbuf_length(res: *const U2FResult,
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn rust_u2f_resbuf_copy(res: *const U2FResult,
-                                              bid: u8,
-                                              dst: *mut u8) -> bool
-{
+pub unsafe extern "C" fn rust_u2f_resbuf_copy(
+    res: *const U2FResult,
+    bid: u8,
+    dst: *mut u8,
+) -> bool {
     if res.is_null() {
         return false;
     }
@@ -91,23 +90,23 @@ pub unsafe extern "C" fn rust_u2f_resbuf_copy(res: *const U2FResult,
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn rust_u2f_res_free(res: *mut U2FResult)
-{
+pub unsafe extern "C" fn rust_u2f_res_free(res: *mut U2FResult) {
     if !res.is_null() {
         Box::from_raw(res);
     }
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn rust_u2f_mgr_register(mgr: *mut U2FManager,
-                                               tid: u64,
-                                               timeout: u64,
-                                               callback: U2FCallback,
-                                               challenge_ptr: *const u8,
-                                               challenge_len: usize,
-                                               application_ptr: *const u8,
-                                               application_len: usize) -> bool
-{
+pub unsafe extern "C" fn rust_u2f_mgr_register(
+    mgr: *mut U2FManager,
+    tid: u64,
+    timeout: u64,
+    callback: U2FCallback,
+    challenge_ptr: *const u8,
+    challenge_len: usize,
+    application_ptr: *const u8,
+    application_len: usize,
+) -> bool {
     if mgr.is_null() {
         return false;
     }
@@ -134,16 +133,17 @@ pub unsafe extern "C" fn rust_u2f_mgr_register(mgr: *mut U2FManager,
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn rust_u2f_mgr_sign(mgr: *mut U2FManager,
-                                           tid: u64,
-                                           timeout: u64,
-                                           callback: U2FCallback,
-                                           challenge_ptr: *const u8,
-                                           challenge_len: usize,
-                                           application_ptr: *const u8,
-                                           application_len: usize,
-                                           khs: *const U2FKeyHandles) -> bool
-{
+pub unsafe extern "C" fn rust_u2f_mgr_sign(
+    mgr: *mut U2FManager,
+    tid: u64,
+    timeout: u64,
+    callback: U2FCallback,
+    challenge_ptr: *const u8,
+    challenge_len: usize,
+    application_ptr: *const u8,
+    application_len: usize,
+    khs: *const U2FKeyHandles,
+) -> bool {
     if mgr.is_null() || khs.is_null() {
         return false;
     }
@@ -177,8 +177,7 @@ pub unsafe extern "C" fn rust_u2f_mgr_sign(mgr: *mut U2FManager,
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn rust_u2f_mgr_cancel(mgr: *mut U2FManager)
-{
+pub unsafe extern "C" fn rust_u2f_mgr_cancel(mgr: *mut U2FManager) {
     if !mgr.is_null() {
         // Ignore return value.
         let _ = (*mgr).cancel();

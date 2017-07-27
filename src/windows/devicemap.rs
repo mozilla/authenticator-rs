@@ -7,7 +7,7 @@ use platform::monitor::Event;
 use u2fprotocol::{init_device, ping_device, u2f_version_is_v2};
 
 pub struct DeviceMap {
-    map: HashMap<String, Device>
+    map: HashMap<String, Device>,
 }
 
 impl DeviceMap {
@@ -22,7 +22,7 @@ impl DeviceMap {
     pub fn process_event(&mut self, event: Event) {
         match event {
             Event::Add(path) => self.add(path),
-            Event::Remove(path) => self.remove(path)
+            Event::Remove(path) => self.remove(path),
         }
     }
 

@@ -18,9 +18,7 @@ const POLL_TIMEOUT: c_int = 100;
 fn poll(fds: &mut Vec<::libc::pollfd>) -> io::Result<()> {
     let nfds = fds.len() as c_ulong;
 
-    let rv = unsafe {
-        ::libc::poll((&mut fds[..]).as_mut_ptr(), nfds, POLL_TIMEOUT)
-    };
+    let rv = unsafe { ::libc::poll((&mut fds[..]).as_mut_ptr(), nfds, POLL_TIMEOUT) };
 
     if rv < 0 {
         Err(io::Error::from_raw_os_error(rv))
@@ -31,19 +29,19 @@ fn poll(fds: &mut Vec<::libc::pollfd>) -> io::Result<()> {
 
 pub enum Event {
     Add(OsString),
-    Remove(OsString)
+    Remove(OsString),
 }
 
 impl Event {
     fn from_udev(event: libudev::Event) -> Option<Self> {
-        let path = event.device().devnode().map(|dn| {
-            dn.to_owned().into_os_string()
-        });
+        let path = event.device().devnode().map(
+            |dn| dn.to_owned().into_os_string(),
+        );
 
         match (event.event_type(), path) {
             (EventType::Add, Some(path)) => Some(Event::Add(path)),
             (EventType::Remove, Some(path)) => Some(Event::Remove(path)),
-            _ => None
+            _ => None,
         }
     }
 }
@@ -52,52 +50,60 @@ pub struct Monitor {
     // Receive events from the thread.
     rx: Receiver<Event>,
     // Handle to the thread loop.
-    thread: RunLoop
+    thread: RunLoop,
 }
 
 impl Monitor {
     pub fn new() -> io::Result<Self> {
         let (tx, rx) = channel();
 
-        let thread = RunLoop::new(move |alive| -> io::Result<()> {
-            let ctx = libudev::Context::new()?;
-            let mut enumerator = libudev::Enumerator::new(&ctx)?;
-            enumerator.match_subsystem(UDEV_SUBSYSTEM)?;
+        let thread = RunLoop::new(
+            move |alive| -> io::Result<()> {
+                let ctx = libudev::Context::new()?;
+                let mut enumerator = libudev::Enumerator::new(&ctx)?;
+                enumerator.match_subsystem(UDEV_SUBSYSTEM)?;
 
-            // Iterate all existing devices.
-            for dev in enumerator.scan_devices()? {
-                if let Some(path) = dev.devnode().map(|p| {
-                    p.to_owned().into_os_string()
-                }) {
-                    tx.send(Event::Add(path)).map_err(to_io_err)?;
+                // Iterate all existing devices.
+                for dev in enumerator.scan_devices()? {
+                    if let Some(path) = dev.devnode().map(|p| p.to_owned().into_os_string()) {
+                        tx.send(Event::Add(path)).map_err(to_io_err)?;
+                    }
                 }
-            }
 
-            let mut monitor = libudev::Monitor::new(&ctx)?;
-            monitor.match_subsystem(UDEV_SUBSYSTEM)?;
+                let mut monitor = libudev::Monitor::new(&ctx)?;
+                monitor.match_subsystem(UDEV_SUBSYSTEM)?;
 
-            // Start listening for new devices.
-            let mut socket = monitor.listen()?;
-            let mut fds = vec!(::libc::pollfd {
-                fd: socket.as_raw_fd(), events: POLLIN, revents: 0
-            });
+                // Start listening for new devices.
+                let mut socket = monitor.listen()?;
+                let mut fds = vec![
+                    ::libc::pollfd {
+                        fd: socket.as_raw_fd(),
+                        events: POLLIN,
+                        revents: 0,
+                    },
+                ];
 
-            // Loop until we're stopped by the controlling thread, or fail.
-            while alive() {
-                // Wait for new events, break on failure.
-                poll(&mut fds)?;
+                // Loop until we're stopped by the controlling thread, or fail.
+                while alive() {
+                    // Wait for new events, break on failure.
+                    poll(&mut fds)?;
 
-                // Send the event over.
-                let udev_event = socket.receive_event();
-                if let Some(event) = udev_event.and_then(Event::from_udev) {
-                    tx.send(event).map_err(to_io_err)?;
+                    // Send the event over.
+                    let udev_event = socket.receive_event();
+                    if let Some(event) = udev_event.and_then(Event::from_udev) {
+                        tx.send(event).map_err(to_io_err)?;
+                    }
                 }
-            }
 
-            Ok(())
-        }, 0 /* no timeout */)?;
+                Ok(())
+            },
+            0, /* no timeout */
+        )?;
 
-        Ok(Self { rx, thread })
+        Ok(Self {
+            rx: rx,
+            thread: thread,
+        })
     }
 
     pub fn events<'a>(&'a self) -> TryIter<'a, Event> {

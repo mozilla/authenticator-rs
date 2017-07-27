@@ -3,31 +3,32 @@ use std::io;
 use std::io::{Read, Write};
 use std::os::windows::io::AsRawHandle;
 
-use ::consts::{CID_BROADCAST, HID_RPT_SIZE, FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID};
+use consts::{CID_BROADCAST, HID_RPT_SIZE, FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID};
 use super::winapi::DeviceCapabilities;
 
-use u2fprotocol::{U2FDevice};
+use u2fprotocol::U2FDevice;
 
 #[derive(Debug)]
 pub struct Device {
     path: String,
     file: File,
-    cid: [u8; 4]
+    cid: [u8; 4],
 }
 
 impl Device {
     pub fn new(path: String) -> io::Result<Self> {
         let file = OpenOptions::new().read(true).write(true).open(&path)?;
-        Ok(Self { path, file, cid: CID_BROADCAST })
+        Ok(Self {
+            path: path,
+            file: file,
+            cid: CID_BROADCAST,
+        })
     }
 
     pub fn is_u2f(&self) -> bool {
         match DeviceCapabilities::new(self.file.as_raw_handle()) {
-            Ok(caps) => {
-                caps.usage() == FIDO_USAGE_U2FHID &&
-                caps.usage_page() == FIDO_USAGE_PAGE
-            }
-            _ => false
+            Ok(caps) => caps.usage() == FIDO_USAGE_U2FHID && caps.usage_page() == FIDO_USAGE_PAGE,
+            _ => false,
         }
     }
 }

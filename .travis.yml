@@ -1,5 +1,6 @@
 sudo: false
 language: rust
+cache: cargo
 rust:
   - stable
   - beta
@@ -19,3 +20,10 @@ before_install:
   - pkg-config --list-all
   - pkg-config --libs libudev
   - pkg-config --modversion libudev
+  - cargo install rustfmt || true
+
+script:
+- |
+  cargo fmt -- --write-mode=diff &&
+  cargo build &&
+  cargo test

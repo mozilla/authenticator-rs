@@ -7,22 +7,27 @@ use std::time::Instant;
 
 struct Canary {
     alive: AtomicBool,
-    thread: Mutex<Option<JoinHandle<()>>>
+    thread: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl Canary {
     fn new() -> Self {
-        Self { alive: AtomicBool::new(true), thread: Mutex::new(None) }
+        Self {
+            alive: AtomicBool::new(true),
+            thread: Mutex::new(None),
+        }
     }
 }
 
 pub struct RunLoop {
-    flag: Weak<Canary>
+    flag: Weak<Canary>,
 }
 
 impl RunLoop {
-    pub fn new<F,T>(fun: F, timeout: u64) -> io::Result<Self>
-        where F: FnOnce(&Fn() -> bool) -> T, F: Send + 'static
+    pub fn new<F, T>(fun: F, timeout: u64) -> io::Result<Self>
+    where
+        F: FnOnce(&Fn() -> bool) -> T,
+        F: Send + 'static,
     {
         let flag = Arc::new(Canary::new());
         let flag_ = flag.clone();

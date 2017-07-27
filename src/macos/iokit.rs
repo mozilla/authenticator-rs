@@ -17,19 +17,19 @@ pub type IOHIDManagerRef = *mut __IOHIDManager;
 pub type IOHIDManagerOptions = IOOptionBits;
 
 pub type IOHIDDeviceRef = *const __IOHIDDevice;
-pub type IOHIDDeviceCallback = extern fn (context: *mut c_void,
-                                          result: IOReturn,
-                                          sender: *mut c_void,
-                                          device: IOHIDDeviceRef);
+pub type IOHIDDeviceCallback = extern "C" fn(context: *mut c_void,
+                                             result: IOReturn,
+                                             sender: *mut c_void,
+                                             device: IOHIDDeviceRef);
 
 pub type IOHIDReportType = IOOptionBits;
-pub type IOHIDReportCallback = extern fn (context: *mut c_void,
-                                          result: IOReturn,
-                                          sender: *mut c_void,
-                                          report_type: IOHIDReportType,
-                                          report_id: u32,
-                                          report: *mut u8,
-                                          report_len: CFIndex);
+pub type IOHIDReportCallback = extern "C" fn(context: *mut c_void,
+                                             result: IOReturn,
+                                             sender: *mut c_void,
+                                             report_type: IOHIDReportType,
+                                             report_id: u32,
+                                             report: *mut u8,
+                                             report_len: CFIndex);
 
 pub const kIOHIDManagerOptionNone: IOHIDManagerOptions = 0;
 
@@ -47,33 +47,42 @@ pub struct __IOHIDDevice {
 
 extern "C" {
     // IOHIDManager
-    pub fn IOHIDManagerCreate(allocator: CFAllocatorRef,
-                              options: IOHIDManagerOptions) -> IOHIDManagerRef;
-    pub fn IOHIDManagerSetDeviceMatching(manager: IOHIDManagerRef,
-                                         matching: CFDictionaryRef);
-    pub fn IOHIDManagerRegisterDeviceMatchingCallback(manager: IOHIDManagerRef,
-                                                      callback: IOHIDDeviceCallback,
-                                                      context: *mut c_void);
-    pub fn IOHIDManagerRegisterDeviceRemovalCallback(manager: IOHIDManagerRef,
-                                                     callback: IOHIDDeviceCallback,
-                                                     context: *mut c_void);
-    pub fn IOHIDManagerOpen(manager: IOHIDManagerRef,
-                            options: IOHIDManagerOptions) -> IOReturn;
-    pub fn IOHIDManagerClose(manager: IOHIDManagerRef,
-                             options: IOHIDManagerOptions) -> IOReturn;
-    pub fn IOHIDManagerScheduleWithRunLoop(manager: IOHIDManagerRef,
-                                           runLoop: CFRunLoopRef,
-                                           runLoopMode: CFStringRef);
+    pub fn IOHIDManagerCreate(
+        allocator: CFAllocatorRef,
+        options: IOHIDManagerOptions,
+    ) -> IOHIDManagerRef;
+    pub fn IOHIDManagerSetDeviceMatching(manager: IOHIDManagerRef, matching: CFDictionaryRef);
+    pub fn IOHIDManagerRegisterDeviceMatchingCallback(
+        manager: IOHIDManagerRef,
+        callback: IOHIDDeviceCallback,
+        context: *mut c_void,
+    );
+    pub fn IOHIDManagerRegisterDeviceRemovalCallback(
+        manager: IOHIDManagerRef,
+        callback: IOHIDDeviceCallback,
+        context: *mut c_void,
+    );
+    pub fn IOHIDManagerOpen(manager: IOHIDManagerRef, options: IOHIDManagerOptions) -> IOReturn;
+    pub fn IOHIDManagerClose(manager: IOHIDManagerRef, options: IOHIDManagerOptions) -> IOReturn;
+    pub fn IOHIDManagerScheduleWithRunLoop(
+        manager: IOHIDManagerRef,
+        runLoop: CFRunLoopRef,
+        runLoopMode: CFStringRef,
+    );
 
     // IOHIDDevice
-    pub fn IOHIDDeviceSetReport(device: IOHIDDeviceRef,
-                                reportType: IOHIDReportType,
-                                reportID: CFIndex,
-                                report: *const u8,
-                                reportLength: CFIndex) -> IOReturn;
-    pub fn IOHIDDeviceRegisterInputReportCallback(device: IOHIDDeviceRef,
-                                                  report: *const u8,
-                                                  reportLength: CFIndex,
-                                                  callback: IOHIDReportCallback,
-                                                  context: *mut c_void);
+    pub fn IOHIDDeviceSetReport(
+        device: IOHIDDeviceRef,
+        reportType: IOHIDReportType,
+        reportID: CFIndex,
+        report: *const u8,
+        reportLength: CFIndex,
+    ) -> IOReturn;
+    pub fn IOHIDDeviceRegisterInputReportCallback(
+        device: IOHIDDeviceRef,
+        report: *const u8,
+        reportLength: CFIndex,
+        callback: IOHIDReportCallback,
+        context: *mut c_void,
+    );
 }

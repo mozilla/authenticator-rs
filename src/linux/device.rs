@@ -22,7 +22,11 @@ impl Device {
         let cstr = CString::new(path.as_bytes()).map_err(to_io_err)?;
         let fd = unsafe { libc::open(cstr.as_ptr(), libc::O_RDWR) };
         let fd = from_unix_result(fd)?;
-        Ok(Self { path, fd, cid: CID_BROADCAST })
+        Ok(Self {
+            path: path,
+            fd: fd,
+            cid: CID_BROADCAST,
+        })
     }
 
     pub fn is_u2f(&self) -> bool {
