@@ -33,8 +33,15 @@ pub struct Device {
 
 impl fmt::Display for Device {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "InternalDevice(ref:{:?}, cid: {:02x}{:02x}{:02x}{:02x})",
-               self.device_ref, self.cid[0], self.cid[1], self.cid[2], self.cid[3])
+        write!(
+            f,
+            "InternalDevice(ref:{:?}, cid: {:02x}{:02x}{:02x}{:02x})",
+            self.device_ref,
+            self.cid[0],
+            self.cid[1],
+            self.cid[2],
+            self.cid[3]
+        )
     }
 }
 
@@ -81,10 +88,11 @@ impl U2FDevice for Device {
     }
 }
 
-unsafe fn set_report(device_ref: IOHIDDeviceRef,
-                     report_type: IOHIDReportType,
-                     bytes: &[u8])
-                     -> io::Result<usize> {
+unsafe fn set_report(
+    device_ref: IOHIDDeviceRef,
+    report_type: IOHIDReportType,
+    bytes: &[u8],
+) -> io::Result<usize> {
     let report_id = bytes[0] as i64;
     let mut data = bytes.as_ptr();
     let mut length = bytes.len() as CFIndex;

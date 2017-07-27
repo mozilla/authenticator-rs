@@ -13,12 +13,12 @@ use core_foundation_sys::string::*;
 use consts::{FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID};
 
 pub struct IOHIDDeviceID {
-    pub device_id: u64 // TODO: Does this work on non-64-bit systems?
+    pub device_id: u64, // TODO: Does this work on non-64-bit systems?
 }
 
 impl IOHIDDeviceID {
     pub fn from_ref(device_ref: IOHIDDeviceRef) -> IOHIDDeviceID {
-        IOHIDDeviceID{ device_id: device_ref as u64 }
+        IOHIDDeviceID { device_id: device_ref as u64 }
     }
 
     pub fn as_ref(&self) -> IOHIDDeviceRef {
@@ -29,30 +29,37 @@ impl IOHIDDeviceID {
 pub struct IOHIDDeviceMatcher {
     dict: CFDictionaryRef,
     keys: Vec<CFStringRef>,
-    values: Vec<CFNumberRef>
+    values: Vec<CFNumberRef>,
 }
 
 impl IOHIDDeviceMatcher {
     pub fn new() -> Self {
-        let keys = vec!(
+        let keys = vec![
             IOHIDDeviceMatcher::cf_string("DeviceUsage"),
-            IOHIDDeviceMatcher::cf_string("DeviceUsagePage")
-        );
+            IOHIDDeviceMatcher::cf_string("DeviceUsagePage"),
+        ];
 
-        let values = vec!(
+        let values = vec![
             IOHIDDeviceMatcher::cf_number(FIDO_USAGE_U2FHID as i32),
-            IOHIDDeviceMatcher::cf_number(FIDO_USAGE_PAGE as i32)
-        );
+            IOHIDDeviceMatcher::cf_number(FIDO_USAGE_PAGE as i32),
+        ];
 
         let dict = unsafe {
-              CFDictionaryCreate(kCFAllocatorDefault,
-                                 keys.as_ptr() as *const *const libc::c_void,
-                                 values.as_ptr() as *const *const libc::c_void,
-                                 keys.len() as CFIndex,
-                                 &kCFTypeDictionaryKeyCallBacks,
-                                 &kCFTypeDictionaryValueCallBacks) };
+            CFDictionaryCreate(
+                kCFAllocatorDefault,
+                keys.as_ptr() as *const *const libc::c_void,
+                values.as_ptr() as *const *const libc::c_void,
+                keys.len() as CFIndex,
+                &kCFTypeDictionaryKeyCallBacks,
+                &kCFTypeDictionaryValueCallBacks,
+            )
+        };
 
-        Self { dict, keys, values }
+        Self {
+            dict: dict,
+            keys: keys,
+            values: values,
+        }
     }
 
     fn cf_number(number: i32) -> CFNumberRef {
@@ -67,12 +74,16 @@ impl IOHIDDeviceMatcher {
     }
 
     fn cf_string(string: &str) -> CFStringRef {
-        unsafe { CFStringCreateWithBytes(kCFAllocatorDefault,
-                                         string.as_ptr(),
-                                         string.len() as CFIndex,
-                                         kCFStringEncodingUTF8,
-                                         false as Boolean,
-                                         kCFAllocatorNull) }
+        unsafe {
+            CFStringCreateWithBytes(
+                kCFAllocatorDefault,
+                string.as_ptr(),
+                string.len() as CFIndex,
+                kCFStringEncodingUTF8,
+                false as Boolean,
+                kCFAllocatorNull,
+            )
+        }
     }
 
     pub fn get(&self) -> CFDictionaryRef {
@@ -95,24 +106,26 @@ impl Drop for IOHIDDeviceMatcher {
 }
 
 pub struct IOHIDManager {
-    manager: IOHIDManagerRef
+    manager: IOHIDManagerRef,
 }
 
 impl IOHIDManager {
     pub fn new() -> io::Result<Self> {
-        let manager = unsafe { IOHIDManagerCreate(kCFAllocatorDefault,
-                                                  kIOHIDManagerOptionNone) };
+        let manager = unsafe { IOHIDManagerCreate(kCFAllocatorDefault, kIOHIDManagerOptionNone) };
 
         let rv = unsafe { IOHIDManagerOpen(manager, kIOHIDManagerOptionNone) };
         if rv != 0 {
-            return Err(io::Error::new(io::ErrorKind::Other,
-                                      "Couldn't open HID Manager"));
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "Couldn't open HID Manager",
+            ));
         }
 
-        unsafe { IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetCurrent(),
-                                                 kCFRunLoopDefaultMode) };
+        unsafe {
+            IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetCurrent(), kCFRunLoopDefaultMode)
+        };
 
-        Ok(Self { manager })
+        Ok(Self { manager: manager })
     }
 
     pub fn get(&self) -> IOHIDManagerRef {
@@ -122,8 +135,7 @@ impl IOHIDManager {
 
 impl Drop for IOHIDManager {
     fn drop(&mut self) {
-        let rv = unsafe { IOHIDManagerClose(self.manager,
-                                            kIOHIDManagerOptionNone) };
+        let rv = unsafe { IOHIDManagerClose(self.manager, kIOHIDManagerOptionNone) };
         if rv != 0 {
             warn!("Couldn't close the HID Manager");
         }

@@ -10,57 +10,63 @@ use runloop::RunLoop;
 use super::winapi::DeviceInfoSet;
 
 pub fn io_err(msg: &str) -> io::Error {
-  io::Error::new(io::ErrorKind::Other, msg)
+    io::Error::new(io::ErrorKind::Other, msg)
 }
 
 pub fn to_io_err<T: Error>(err: T) -> io::Error {
-  io_err(err.description())
+    io_err(err.description())
 }
 
 pub enum Event {
     Add(String),
-    Remove(String)
+    Remove(String),
 }
 
 pub struct Monitor {
     // Receive events from the thread.
     rx: Receiver<Event>,
     // Handle to the thread loop.
-    thread: RunLoop
+    thread: RunLoop,
 }
 
 impl Monitor {
     pub fn new() -> io::Result<Self> {
         let (tx, rx) = channel();
 
-        let thread = RunLoop::new(move |alive| -> io::Result<()> {
-            let mut stored = HashSet::new();
+        let thread = RunLoop::new(
+            move |alive| -> io::Result<()> {
+                let mut stored = HashSet::new();
 
-            while alive() {
-                let device_info_set = DeviceInfoSet::new()?;
-                let devices = HashSet::from_iter(device_info_set.devices());
+                while alive() {
+                    let device_info_set = DeviceInfoSet::new()?;
+                    let devices = HashSet::from_iter(device_info_set.devices());
 
-                // Remove devices that are gone.
-                for path in stored.difference(&devices) {
-                    tx.send(Event::Remove(path.clone())).map_err(to_io_err)?;
+                    // Remove devices that are gone.
+                    for path in stored.difference(&devices) {
+                        tx.send(Event::Remove(path.clone())).map_err(to_io_err)?;
+                    }
+
+                    // Add devices that were plugged in.
+                    for path in devices.difference(&stored) {
+                        tx.send(Event::Add(path.clone())).map_err(to_io_err)?;
+                    }
+
+                    // Remember the new set.
+                    stored = devices;
+
+                    // Wait a little before looking for devices again.
+                    thread::sleep(Duration::from_millis(100));
                 }
 
-                // Add devices that were plugged in.
-                for path in devices.difference(&stored) {
-                    tx.send(Event::Add(path.clone())).map_err(to_io_err)?;
-                }
+                Ok(())
+            },
+            0, /* no timeout */
+        )?;
 
-                // Remember the new set.
-                stored = devices;
-
-                // Wait a little before looking for devices again.
-                thread::sleep(Duration::from_millis(100));
-            }
-
-            Ok(())
-        }, 0 /* no timeout */)?;
-
-        Ok(Self { rx, thread })
+        Ok(Self {
+            rx: rx,
+            thread: thread,
+        })
     }
 
     pub fn events<'a>(&'a self) -> TryIter<'a, Event> {
