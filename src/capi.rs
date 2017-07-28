@@ -1,4 +1,5 @@
 use libc::size_t;
+use rand::{thread_rng, Rng};
 use std::collections::HashMap;
 use std::{ptr, slice};
 
@@ -11,6 +12,11 @@ type U2FCallback = extern "C" fn(u64, *mut U2FResult);
 const RESBUF_ID_REGISTRATION: u8 = 0;
 const RESBUF_ID_KEYHANDLE: u8 = 1;
 const RESBUF_ID_SIGNATURE: u8 = 2;
+
+// Generates a new 64-bit transaction id with collision probability 2^-32.
+fn new_tid() -> u64 {
+    thread_rng().gen::<u64>()
+}
 
 unsafe fn from_raw(ptr: *const u8, len: usize) -> Vec<u8> {
     slice::from_raw_parts(ptr, len).to_vec()
@@ -99,26 +105,26 @@ pub unsafe extern "C" fn rust_u2f_res_free(res: *mut U2FResult) {
 #[no_mangle]
 pub unsafe extern "C" fn rust_u2f_mgr_register(
     mgr: *mut U2FManager,
-    tid: u64,
     timeout: u64,
     callback: U2FCallback,
     challenge_ptr: *const u8,
     challenge_len: usize,
     application_ptr: *const u8,
     application_len: usize,
-) -> bool {
+) -> u64 {
     if mgr.is_null() {
-        return false;
+        return 0;
     }
 
     // Check buffers.
     if challenge_ptr.is_null() || application_ptr.is_null() {
-        return false;
+        return 0;
     }
 
     let challenge = from_raw(challenge_ptr, challenge_len);
     let application = from_raw(application_ptr, application_len);
 
+    let tid = new_tid();
     let res = (*mgr).register(timeout, challenge, application, move |rv| {
         if let Ok(registration) = rv {
             let mut result = U2FResult::new();
@@ -129,13 +135,12 @@ pub unsafe extern "C" fn rust_u2f_mgr_register(
         };
     });
 
-    res.is_ok()
+    if res.is_ok() { tid } else { 0 }
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn rust_u2f_mgr_sign(
     mgr: *mut U2FManager,
-    tid: u64,
     timeout: u64,
     callback: U2FCallback,
     challenge_ptr: *const u8,
@@ -143,25 +148,26 @@ pub unsafe extern "C" fn rust_u2f_mgr_sign(
     application_ptr: *const u8,
     application_len: usize,
     khs: *const U2FKeyHandles,
-) -> bool {
+) -> u64 {
     if mgr.is_null() || khs.is_null() {
-        return false;
+        return 0;
     }
 
     // Check buffers.
     if challenge_ptr.is_null() || application_ptr.is_null() {
-        return false;
+        return 0;
     }
 
     // Need at least one key handle.
     if (*khs).len() < 1 {
-        return false;
+        return 0;
     }
 
     let challenge = from_raw(challenge_ptr, challenge_len);
     let application = from_raw(application_ptr, application_len);
     let key_handles = (*khs).clone();
 
+    let tid = new_tid();
     let res = (*mgr).sign(timeout, challenge, application, key_handles, move |rv| {
         if let Ok((key_handle, signature)) = rv {
             let mut result = U2FResult::new();
@@ -173,13 +179,15 @@ pub unsafe extern "C" fn rust_u2f_mgr_sign(
         };
     });
 
-    res.is_ok()
+    if res.is_ok() { tid } else { 0 }
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn rust_u2f_mgr_cancel(mgr: *mut U2FManager) {
+pub unsafe extern "C" fn rust_u2f_mgr_cancel(mgr: *mut U2FManager) -> u64 {
     if !mgr.is_null() {
         // Ignore return value.
         let _ = (*mgr).cancel();
     }
+
+    new_tid()
 }
