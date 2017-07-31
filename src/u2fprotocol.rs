@@ -18,8 +18,7 @@ const CONT_DATA_SIZE: usize = HID_RPT_SIZE - 5;
 //
 // Spec at https://fidoalliance.org/specs/fido-u2f-v1.
 // 0-nfc-bt-amendment-20150514/fido-u2f-hid-protocol.html#message--and-packet-structure
-#[repr(packed)]
-#[allow(dead_code)]
+#[repr(C)]
 struct U2FHIDInit {
     // U2F Channel ID
     cid: [u8; 4],
@@ -40,7 +39,7 @@ struct U2FHIDInit {
 //
 // https://fidoalliance.org/specs/fido-u2f-v1.0-nfc-bt-amendment-20150514/fido-u2f-hid-protocol.
 // html#message--and-packet-structure
-#[repr(packed)]
+#[repr(C)]
 struct U2FHIDCont {
     // U2F Channel ID
     cid: [u8; 4],
@@ -56,7 +55,7 @@ struct U2FHIDCont {
 //
 // https://fidoalliance.org/specs/fido-u2f-v1.0-nfc-bt-amendment-20150514/fido-u2f-hid-protocol.
 // html#u2fhid_init
-#[repr(packed)]
+#[repr(C)]
 #[derive(Debug)]
 struct U2FHIDInitResp {
     nonce: [u8; INIT_NONCE_SIZE],
@@ -84,6 +83,13 @@ fn to_u8_array<T>(non_ptr: &T) -> &[u8] {
 }
 
 fn from_u8_array<T>(arr: &[u8]) -> &T {
+    if arr.len() > std::mem::size_of::<T>() {
+        panic!(
+            "from_u8_array attempting to overrun buffer, {} > {}",
+            arr.len(),
+            std::mem::size_of::<T>()
+        );
+    }
     unsafe { &*(arr.as_ptr() as *const T) }
 }
 
@@ -415,8 +421,7 @@ where
 // https://en.wikipedia.org/wiki/Smart_card_application_protocol_data_unit
 // https://fidoalliance.org/specs/fido-u2f-v1.
 // 0-nfc-bt-amendment-20150514/fido-u2f-raw-message-formats.html#u2f-message-framing
-#[repr(packed)]
-#[allow(dead_code)]
+#[repr(C)]
 struct U2FAPDUHeader {
     cla: u8,
     ins: u8,
