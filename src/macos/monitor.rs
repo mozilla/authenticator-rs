@@ -64,10 +64,11 @@ impl Monitor {
                     if unsafe { CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.1, 0) } ==
                         kCFRunLoopRunStopped
                     {
-                        info!("OSX Runloop device stopped.");
+                        debug!("OSX Runloop device stopped.");
                         break;
                     }
                 }
+                debug!("OSX Runloop completed, handle={:?}", thread::current());
 
                 Ok(())
             },
@@ -111,6 +112,7 @@ impl Monitor {
 
 impl Drop for Monitor {
     fn drop(&mut self) {
+        debug!("OSX Runloop dropped");
         self.thread.cancel();
     }
 }

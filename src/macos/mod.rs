@@ -179,6 +179,13 @@ impl PlatformManager {
     }
 }
 
+impl Drop for PlatformManager {
+    fn drop(&mut self) {
+        debug!("OSX PlatformManager dropped");
+        self.cancel();
+    }
+}
+
 fn maybe_add_device(devs: &mut HashMap<IOHIDDeviceRef, Device>, device_ref: IOHIDDeviceRef) {
     if devs.contains_key(&device_ref) {
         return;
@@ -231,8 +238,6 @@ fn maybe_remove_device(devs: &mut HashMap<IOHIDDeviceRef, Device>, device_ref: I
     match devs.remove(&device_ref) {
         Some(dev) => {
             debug!("removing U2F device {}", dev);
-            // Re-allocate this raw pointer for destruction
-            let _ = unsafe { Box::from_raw(dev.report_send_void) };
         }
         None => {
             warn!("Couldn't remove {:?}", device_ref);
@@ -268,7 +273,10 @@ extern "C" fn read_new_data_cb(
             report_len
         );
 
-        let mut report_obj = Report { data: [0; HID_RPT_SIZE] };
+        let mut report_obj = Report {
+            data: [0; HID_RPT_SIZE],
+            len: report_len as usize,
+        };
 
         if report_len as usize <= HID_RPT_SIZE {
             ptr::copy(report, report_obj.data.as_mut_ptr(), report_len as usize);
@@ -278,6 +286,7 @@ extern "C" fn read_new_data_cb(
                 report_len,
                 HID_RPT_SIZE
             );
+            return;
         }
 
         if let Err(e) = tx.send(report_obj) {
