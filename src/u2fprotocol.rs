@@ -97,7 +97,16 @@ fn set_data(data: &mut [u8], itr: &mut std::slice::Iter<u8>, max: usize) {
     }
     // TODO There is a better way to do this :|
     for i in 0..take_amount {
-        data[i] = *itr.next().unwrap();
+        if let Some(v) = itr.next() {
+            data[i] = *v;
+        } else {
+            warn!(
+                "set_data overrun; expected {} bytes but stopped at {}",
+                take_amount,
+                i
+            );
+            return;
+        }
     }
 }
 
@@ -156,8 +165,8 @@ where
     T: U2FDevice + Read + Write,
 {
     let mut version_resp = try!(send_apdu(dev, U2F_VERSION, 0x00, &vec![]));
-    let sw_low = version_resp.pop().unwrap();
-    let sw_high = version_resp.pop().unwrap();
+    let sw_low = version_resp.pop().unwrap_or_default();
+    let sw_high = version_resp.pop().unwrap_or_default();
 
     match status_word_to_error(sw_high, sw_low) {
         None => Ok(try!(CString::new(version_resp))),
