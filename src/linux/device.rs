@@ -8,7 +8,7 @@ use std::os::unix::prelude::*;
 use consts::CID_BROADCAST;
 use platform::hidraw;
 use util::{from_unix_result, to_io_err};
-use u2fprotocol::U2FDevice;
+use u2ftypes::U2FDevice;
 
 #[derive(Debug)]
 pub struct Device {
