@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use consts::HID_RPT_SIZE;
 use core_foundation_sys::base::*;
-use u2fprotocol::U2FDevice;
+use u2ftypes::U2FDevice;
 
 use super::iokit::*;
 

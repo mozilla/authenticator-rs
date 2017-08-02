@@ -8,6 +8,11 @@ pub const TYPE_MASK: u8 = 0x80;
 pub const TYPE_INIT: u8 = 0x80;
 pub const TYPE_CONT: u8 = 0x80;
 
+// Size of data chunk expected in U2F Init USB HID Packets
+pub const INIT_DATA_SIZE: usize = HID_RPT_SIZE - 7;
+// Size of data chunk expected in U2F Cont USB HID Packets
+pub const CONT_DATA_SIZE: usize = HID_RPT_SIZE - 5;
+
 pub const PARAMETER_SIZE: usize = 32;
 
 pub const FIDO_USAGE_PAGE: u16 = 0xf1d0; // FIDO alliance HID usage page

@@ -27,6 +27,7 @@ extern crate boxfnonce;
 
 mod consts;
 mod runloop;
+mod u2ftypes;
 mod u2fprotocol;
 
 mod manager;
