@@ -60,11 +60,11 @@ impl Write for Device {
 }
 
 impl U2FDevice for Device {
-    fn get_cid(&self) -> [u8; 4] {
-        self.cid.clone()
+    fn get_cid<'a>(&'a self) -> &'a [u8; 4] {
+        &self.cid
     }
 
-    fn set_cid(&mut self, cid: &[u8; 4]) {
-        self.cid.clone_from(cid);
+    fn set_cid(&mut self, cid: [u8; 4]) {
+        self.cid = cid;
     }
 }
