@@ -197,13 +197,6 @@ fn maybe_add_device(devs: &mut HashMap<IOHIDDeviceRef, Device>, device_ref: IOHI
     // report_tx_ptr is deallocated by maybe_remove_device
     let report_tx_ptr = Box::into_raw(boxed_report_tx) as *mut libc::c_void;
 
-    let mut dev = Device {
-        device_ref: device_ref,
-        cid: CID_BROADCAST,
-        report_recv: report_rx,
-        report_send_void: report_tx_ptr,
-    };
-
     unsafe {
         IOHIDDeviceRegisterInputReportCallback(
             device_ref,
@@ -212,6 +205,14 @@ fn maybe_add_device(devs: &mut HashMap<IOHIDDeviceRef, Device>, device_ref: IOHI
             read_new_data_cb,
             report_tx_ptr,
         )
+    };
+
+    let mut dev = Device {
+        device_ref,
+        scratch_buf,
+        cid: CID_BROADCAST,
+        report_recv: report_rx,
+        report_send_void: report_tx_ptr,
     };
 
     let mut nonce = [0u8; 8];

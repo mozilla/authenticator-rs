@@ -17,8 +17,7 @@ const READ_TIMEOUT: u64 = 15;
 
 pub struct Device {
     pub device_ref: IOHIDDeviceRef,
-    // Channel ID for U2F HID communication. Needed to implement U2FDevice
-    // trait.
+    pub scratch_buf: [u8; HID_RPT_SIZE],
     pub cid: [u8; 4],
     pub report_recv: Receiver<Vec<u8>>,
     pub report_send_void: *mut libc::c_void,
