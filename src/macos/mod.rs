@@ -1,10 +1,9 @@
 extern crate log;
 extern crate libc;
 
-
 use rand::{thread_rng, Rng};
 use std::collections::HashMap;
-use std::ptr;
+use std::slice;
 use std::sync::mpsc::{channel, Sender};
 use std::thread;
 use std::time::Duration;
@@ -18,7 +17,7 @@ mod iohid;
 mod monitor;
 
 use self::iokit::*;
-use self::device::{Device, Report};
+use self::device::Device;
 use self::monitor::Monitor;
 
 use consts::{CID_BROADCAST, HID_RPT_SIZE, PARAMETER_SIZE};
@@ -192,7 +191,7 @@ fn maybe_add_device(devs: &mut HashMap<IOHIDDeviceRef, Device>, device_ref: IOHI
     }
 
     let scratch_buf = [0; HID_RPT_SIZE];
-    let (report_tx, report_rx) = channel::<Report>();
+    let (report_tx, report_rx) = channel();
 
     let boxed_report_tx = Box::new(report_tx);
     // report_tx_ptr is deallocated by maybe_remove_device
@@ -263,7 +262,7 @@ extern "C" fn read_new_data_cb(
     report_len: CFIndex,
 ) {
     unsafe {
-        let tx: &mut Sender<Report> = &mut *(context as *mut Sender<Report>);
+        let tx = &mut *(context as *mut Sender<Vec<u8>>);
 
         trace!(
             "read_new_data_cb type={} id={} report={:?} len={}",
@@ -273,14 +272,8 @@ extern "C" fn read_new_data_cb(
             report_len
         );
 
-        let mut report_obj = Report {
-            data: [0; HID_RPT_SIZE],
-            len: report_len as usize,
-        };
-
-        if report_len as usize <= HID_RPT_SIZE {
-            ptr::copy(report, report_obj.data.as_mut_ptr(), report_len as usize);
-        } else {
+        let report_len = report_len as usize;
+        if report_len > HID_RPT_SIZE {
             warn!(
                 "read_new_data_cb got too much data! {} > {}",
                 report_len,
@@ -289,7 +282,9 @@ extern "C" fn read_new_data_cb(
             return;
         }
 
-        if let Err(e) = tx.send(report_obj) {
+        let data = slice::from_raw_parts(report, report_len).to_vec();
+
+        if let Err(e) = tx.send(data) {
             // TOOD: This happens when the channel closes before this thread
             // does. This is pretty common, but let's deal with stopping
             // properly later.

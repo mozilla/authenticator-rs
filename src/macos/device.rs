@@ -15,20 +15,12 @@ use super::iokit::*;
 
 const READ_TIMEOUT: u64 = 15;
 
-pub struct Report {
-    pub data: [u8; HID_RPT_SIZE],
-    pub len: usize,
-}
-
-unsafe impl Send for Report {}
-unsafe impl Sync for Report {}
-
 pub struct Device {
     pub device_ref: IOHIDDeviceRef,
     // Channel ID for U2F HID communication. Needed to implement U2FDevice
     // trait.
     pub cid: [u8; 4],
-    pub report_recv: Receiver<Report>,
+    pub report_recv: Receiver<Vec<u8>>,
     pub report_send_void: *mut libc::c_void,
 }
 
@@ -63,7 +55,7 @@ impl PartialEq for Device {
 impl Read for Device {
     fn read(&mut self, mut bytes: &mut [u8]) -> io::Result<usize> {
         let timeout = Duration::from_secs(READ_TIMEOUT);
-        let report_data = match self.report_recv.recv_timeout(timeout) {
+        let data = match self.report_recv.recv_timeout(timeout) {
             Ok(v) => v,
             Err(e) if e == RecvTimeoutError::Timeout => {
                 return Err(io::Error::new(io::ErrorKind::TimedOut, e));
@@ -72,7 +64,7 @@ impl Read for Device {
                 return Err(io::Error::new(io::ErrorKind::UnexpectedEof, e));
             }
         };
-        bytes.write(&report_data.data[..report_data.len])
+        bytes.write(&data)
     }
 }
 
