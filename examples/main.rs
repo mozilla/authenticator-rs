@@ -49,7 +49,7 @@ fn main() {
 
     let (tx, rx) = channel();
     manager
-        .register(15, chall_bytes.clone(), app_bytes.clone(), move |rv| {
+        .register(15000, chall_bytes.clone(), app_bytes.clone(), move |rv| {
             tx.send(rv.unwrap()).unwrap();
         })
         .unwrap();
@@ -61,7 +61,7 @@ fn main() {
 
     let (tx, rx) = channel();
     manager
-        .sign(15, chall_bytes, app_bytes, vec![key_handle], move |rv| {
+        .sign(15000, chall_bytes, app_bytes, vec![key_handle], move |rv| {
             tx.send(rv.unwrap()).unwrap();
         })
         .unwrap();
