@@ -1,25 +1,22 @@
 extern crate log;
 extern crate libc;
 
-use rand::{thread_rng, Rng};
-use std::collections::HashMap;
 use std::thread;
 use std::time::Duration;
 
 mod device;
+mod devicemap;
 mod iokit;
 mod iohid;
 mod monitor;
 
-use self::iokit::*;
-use self::device::Device;
+use self::devicemap::DeviceMap;
 use self::monitor::Monitor;
 
 use consts::PARAMETER_SIZE;
 use runloop::RunLoop;
 use util::{io_err, OnceCallback};
 use u2fprotocol::{u2f_register, u2f_sign, u2f_is_keyhandle_valid};
-use u2fprotocol::{init_device, ping_device, u2f_version_is_v2};
 
 pub struct PlatformManager {
     // Handle to the thread loop.
@@ -45,12 +42,12 @@ impl PlatformManager {
 
         let thread = RunLoop::new(
             move |alive| {
-                let mut devices = HashMap::new();
+                let mut devices = DeviceMap::new();
                 let monitor = try_or!(Monitor::new(), |e| { callback.call(Err(e)); });
 
                 'top: while alive() && monitor.alive() {
                     for event in monitor.events() {
-                        process_event(&mut devices, event);
+                        devices.process_event(event);
                     }
 
                     for device in devices.values_mut() {
@@ -98,12 +95,12 @@ impl PlatformManager {
 
         let thread = RunLoop::new(
             move |alive| {
-                let mut devices = HashMap::new();
+                let mut devices = DeviceMap::new();
                 let monitor = try_or!(Monitor::new(), |e| { callback.call(Err(e)); });
 
                 'top: while alive() && monitor.alive() {
                     for event in monitor.events() {
-                        process_event(&mut devices, event);
+                        devices.process_event(event);
                     }
 
                     for key_handle in &key_handles {
@@ -177,49 +174,5 @@ impl Drop for PlatformManager {
     fn drop(&mut self) {
         debug!("OSX PlatformManager dropped");
         self.cancel();
-    }
-}
-
-fn maybe_add_device(devs: &mut HashMap<IOHIDDeviceRef, Device>, device_ref: IOHIDDeviceRef) {
-    if devs.contains_key(&device_ref) {
-        return;
-    }
-
-    let mut dev = Device::new(device_ref);
-
-    let mut nonce = [0u8; 8];
-    thread_rng().fill_bytes(&mut nonce);
-    if let Err(_) = init_device(&mut dev, nonce) {
-        return;
-    }
-
-    let mut random = [0u8; 8];
-    thread_rng().fill_bytes(&mut random);
-    if let Err(_) = ping_device(&mut dev, random) {
-        return;
-    }
-    if let Err(_) = u2f_version_is_v2(&mut dev) {
-        return;
-    }
-
-    debug!("added U2F device {}", dev);
-    devs.insert(device_ref, dev);
-}
-
-fn maybe_remove_device(devs: &mut HashMap<IOHIDDeviceRef, Device>, device_ref: IOHIDDeviceRef) {
-    match devs.remove(&device_ref) {
-        Some(dev) => {
-            debug!("removing U2F device {}", dev);
-        }
-        None => {
-            warn!("Couldn't remove {:?}", device_ref);
-        }
-    }
-}
-
-fn process_event(devs: &mut HashMap<IOHIDDeviceRef, Device>, event: monitor::Event) {
-    match event {
-        monitor::Event::Add(device_id) => maybe_add_device(devs, device_id.as_ref()),
-        monitor::Event::Remove(device_id) => maybe_remove_device(devs, device_id.as_ref()),
     }
 }
