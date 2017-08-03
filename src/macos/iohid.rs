@@ -12,20 +12,6 @@ use core_foundation_sys::string::*;
 
 use consts::{FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID};
 
-pub struct IOHIDDeviceID {
-    pub device_id: u64, // TODO: Does this work on non-64-bit systems?
-}
-
-impl IOHIDDeviceID {
-    pub fn from_ref(device_ref: IOHIDDeviceRef) -> IOHIDDeviceID {
-        IOHIDDeviceID { device_id: device_ref as u64 }
-    }
-
-    pub fn as_ref(&self) -> IOHIDDeviceRef {
-        self.device_id as IOHIDDeviceRef
-    }
-}
-
 pub struct IOHIDDeviceMatcher {
     dict: CFDictionaryRef,
     keys: Vec<CFStringRef>,

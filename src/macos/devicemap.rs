@@ -23,8 +23,8 @@ impl DeviceMap {
 
     pub fn process_event(&mut self, event: Event) {
         match event {
-            Event::Add(id) => self.add(id.as_ref()),
-            Event::Remove(id) => self.remove(id.as_ref()),
+            Event::Add(dev) => self.add(dev),
+            Event::Remove(dev) => self.remove(dev),
         }
     }
 

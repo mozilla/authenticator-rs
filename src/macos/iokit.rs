@@ -16,7 +16,6 @@ pub type IOReturn = libc::c_int;
 pub type IOHIDManagerRef = *mut __IOHIDManager;
 pub type IOHIDManagerOptions = IOOptionBits;
 
-pub type IOHIDDeviceRef = *const __IOHIDDevice;
 pub type IOHIDDeviceCallback = extern "C" fn(context: *mut c_void,
                                              result: IOReturn,
                                              sender: *mut c_void,
@@ -41,9 +40,11 @@ pub struct __IOHIDManager {
 }
 
 #[repr(C)]
-pub struct __IOHIDDevice {
-    __private: c_void,
-}
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub struct IOHIDDeviceRef(*const c_void);
+
+unsafe impl Send for IOHIDDeviceRef {}
+unsafe impl Sync for IOHIDDeviceRef {}
 
 extern "C" {
     // IOHIDManager
