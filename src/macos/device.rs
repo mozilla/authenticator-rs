@@ -4,11 +4,14 @@ extern crate log;
 use std::fmt;
 use std::io;
 use std::io::{Read, Write};
-use std::sync::mpsc::{Receiver, RecvTimeoutError};
+use std::slice;
+use std::sync::mpsc::{channel, Sender, Receiver, RecvTimeoutError};
 use std::time::Duration;
 
-use consts::HID_RPT_SIZE;
 use core_foundation_sys::base::*;
+use libc::c_void;
+
+use consts::{CID_BROADCAST, HID_RPT_SIZE};
 use u2ftypes::U2FDevice;
 
 use super::iokit::*;
@@ -16,11 +19,38 @@ use super::iokit::*;
 const READ_TIMEOUT: u64 = 15;
 
 pub struct Device {
-    pub device_ref: IOHIDDeviceRef,
-    pub scratch_buf: [u8; HID_RPT_SIZE],
-    pub cid: [u8; 4],
-    pub report_recv: Receiver<Vec<u8>>,
-    pub report_send_void: *mut libc::c_void,
+    device_ref: IOHIDDeviceRef,
+    cid: [u8; 4],
+    report_rx: Receiver<Vec<u8>>,
+    report_send_void: *mut c_void,
+    _scratch_buf: [u8; HID_RPT_SIZE],
+}
+
+impl Device {
+    pub fn new(device_ref: IOHIDDeviceRef) -> Self {
+        let _scratch_buf = [0; HID_RPT_SIZE];
+        let (report_tx, report_rx) = channel();
+        let boxed_report_tx = Box::new(report_tx);
+        let report_send_void = Box::into_raw(boxed_report_tx) as *mut c_void;
+
+        unsafe {
+            IOHIDDeviceRegisterInputReportCallback(
+                device_ref,
+                _scratch_buf.as_ptr(),
+                _scratch_buf.len() as CFIndex,
+                read_new_data_cb,
+                report_send_void,
+            );
+        }
+
+        Self {
+            device_ref,
+            cid: CID_BROADCAST,
+            report_rx,
+            report_send_void,
+            _scratch_buf,
+        }
+    }
 }
 
 impl Drop for Device {
@@ -54,7 +84,7 @@ impl PartialEq for Device {
 impl Read for Device {
     fn read(&mut self, mut bytes: &mut [u8]) -> io::Result<usize> {
         let timeout = Duration::from_secs(READ_TIMEOUT);
-        let data = match self.report_recv.recv_timeout(timeout) {
+        let data = match self.report_rx.recv_timeout(timeout) {
             Ok(v) => v,
             Err(e) if e == RecvTimeoutError::Timeout => {
                 return Err(io::Error::new(io::ErrorKind::TimedOut, e));
@@ -107,5 +137,47 @@ impl U2FDevice for Device {
 
     fn set_cid(&mut self, cid: [u8; 4]) {
         self.cid = cid;
+    }
+}
+
+// This is called from the RunLoop thread
+extern "C" fn read_new_data_cb(
+    context: *mut c_void,
+    _: IOReturn,
+    _: *mut c_void,
+    report_type: IOHIDReportType,
+    report_id: u32,
+    report: *mut u8,
+    report_len: CFIndex,
+) {
+    unsafe {
+        let tx = &mut *(context as *mut Sender<Vec<u8>>);
+
+        trace!(
+            "read_new_data_cb type={} id={} report={:?} len={}",
+            report_type,
+            report_id,
+            report,
+            report_len
+        );
+
+        let report_len = report_len as usize;
+        if report_len > HID_RPT_SIZE {
+            warn!(
+                "read_new_data_cb got too much data! {} > {}",
+                report_len,
+                HID_RPT_SIZE
+            );
+            return;
+        }
+
+        let data = slice::from_raw_parts(report, report_len).to_vec();
+
+        if let Err(e) = tx.send(data) {
+            // TOOD: This happens when the channel closes before this thread
+            // does. This is pretty common, but let's deal with stopping
+            // properly later.
+            warn!("Problem returning read_new_data_cb data for thread: {}", e);
+        };
     }
 }

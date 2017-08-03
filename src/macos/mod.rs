@@ -3,13 +3,8 @@ extern crate libc;
 
 use rand::{thread_rng, Rng};
 use std::collections::HashMap;
-use std::slice;
-use std::sync::mpsc::{channel, Sender};
 use std::thread;
 use std::time::Duration;
-
-use libc::c_void;
-use core_foundation_sys::base::*;
 
 mod device;
 mod iokit;
@@ -20,7 +15,7 @@ use self::iokit::*;
 use self::device::Device;
 use self::monitor::Monitor;
 
-use consts::{CID_BROADCAST, HID_RPT_SIZE, PARAMETER_SIZE};
+use consts::PARAMETER_SIZE;
 use runloop::RunLoop;
 use util::{io_err, OnceCallback};
 use u2fprotocol::{u2f_register, u2f_sign, u2f_is_keyhandle_valid};
@@ -190,30 +185,7 @@ fn maybe_add_device(devs: &mut HashMap<IOHIDDeviceRef, Device>, device_ref: IOHI
         return;
     }
 
-    let scratch_buf = [0; HID_RPT_SIZE];
-    let (report_tx, report_rx) = channel();
-
-    let boxed_report_tx = Box::new(report_tx);
-    // report_tx_ptr is deallocated by maybe_remove_device
-    let report_tx_ptr = Box::into_raw(boxed_report_tx) as *mut libc::c_void;
-
-    unsafe {
-        IOHIDDeviceRegisterInputReportCallback(
-            device_ref,
-            scratch_buf.as_ptr(),
-            scratch_buf.len() as CFIndex,
-            read_new_data_cb,
-            report_tx_ptr,
-        )
-    };
-
-    let mut dev = Device {
-        device_ref,
-        scratch_buf,
-        cid: CID_BROADCAST,
-        report_recv: report_rx,
-        report_send_void: report_tx_ptr,
-    };
+    let mut dev = Device::new(device_ref);
 
     let mut nonce = [0u8; 8];
     thread_rng().fill_bytes(&mut nonce);
@@ -249,47 +221,5 @@ fn process_event(devs: &mut HashMap<IOHIDDeviceRef, Device>, event: monitor::Eve
     match event {
         monitor::Event::Add(device_id) => maybe_add_device(devs, device_id.as_ref()),
         monitor::Event::Remove(device_id) => maybe_remove_device(devs, device_id.as_ref()),
-    }
-}
-
-// This is called from the RunLoop thread
-extern "C" fn read_new_data_cb(
-    context: *mut c_void,
-    _: IOReturn,
-    _: *mut c_void,
-    report_type: IOHIDReportType,
-    report_id: u32,
-    report: *mut u8,
-    report_len: CFIndex,
-) {
-    unsafe {
-        let tx = &mut *(context as *mut Sender<Vec<u8>>);
-
-        trace!(
-            "read_new_data_cb type={} id={} report={:?} len={}",
-            report_type,
-            report_id,
-            report,
-            report_len
-        );
-
-        let report_len = report_len as usize;
-        if report_len > HID_RPT_SIZE {
-            warn!(
-                "read_new_data_cb got too much data! {} > {}",
-                report_len,
-                HID_RPT_SIZE
-            );
-            return;
-        }
-
-        let data = slice::from_raw_parts(report, report_len).to_vec();
-
-        if let Err(e) = tx.send(data) {
-            // TOOD: This happens when the channel closes before this thread
-            // does. This is pretty common, but let's deal with stopping
-            // properly later.
-            warn!("Problem returning read_new_data_cb data for thread: {}", e);
-        };
     }
 }
