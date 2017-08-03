@@ -201,7 +201,7 @@ where
 // Device Communication Functions
 ////////////////////////////////////////////////////////////////////////
 
-fn sendrecv<T>(dev: &mut T, cmd: u8, send: &[u8]) -> io::Result<Vec<u8>>
+pub fn sendrecv<T>(dev: &mut T, cmd: u8, send: &[u8]) -> io::Result<Vec<u8>>
 where
     T: U2FDevice + Read + Write,
 {

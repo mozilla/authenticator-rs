@@ -35,3 +35,10 @@ pub use manager::U2FManager;
 
 mod capi;
 pub use capi::*;
+
+#[cfg(fuzzing)]
+pub use u2fprotocol::*;
+#[cfg(fuzzing)]
+pub use u2ftypes::*;
+#[cfg(fuzzing)]
+pub use consts::*;
