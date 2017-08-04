@@ -50,11 +50,10 @@ impl DeviceMap {
             if let Err(_) = ping_device(&mut dev, random) {
                 return;
             }
-            if let Err(_) = u2f_version_is_v2(&mut dev) {
-                return;
-            }
 
-            self.map.insert(path, dev);
+            if u2f_version_is_v2(&mut dev).unwrap_or(false) {
+                self.map.insert(path, dev);
+            }
         }
     }
 

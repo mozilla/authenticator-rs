@@ -52,7 +52,7 @@ fn status_word_to_error(status_word_high: u8, status_word_low: u8) -> Option<io:
     }
 }
 
-pub fn u2f_version<T>(dev: &mut T) -> io::Result<std::ffi::CString>
+fn u2f_version<T>(dev: &mut T) -> io::Result<CString>
 where
     T: U2FDevice + Read + Write,
 {
@@ -66,19 +66,11 @@ where
     }
 }
 
-pub fn u2f_version_is_v2<T>(dev: &mut T) -> io::Result<()>
+pub fn u2f_version_is_v2<T>(dev: &mut T) -> io::Result<bool>
 where
     T: U2FDevice + Read + Write,
 {
-    let version_string = u2f_version(dev)?;
-
-    if version_string != CString::new("U2F_V2")? {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "Unexpected U2F Version",
-        ));
-    }
-    Ok(())
+    Ok(u2f_version(dev)? == CString::new("U2F_V2")?)
 }
 
 pub fn u2f_register<T>(
