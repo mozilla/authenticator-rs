@@ -23,21 +23,22 @@ pub struct Device {
     cid: [u8; 4],
     report_rx: Receiver<Vec<u8>>,
     report_send_void: *mut c_void,
-    _scratch_buf: [u8; HID_RPT_SIZE],
+    scratch_buf_ptr: *mut u8,
 }
 
 impl Device {
     pub fn new(device_ref: IOHIDDeviceRef) -> Self {
-        let _scratch_buf = [0; HID_RPT_SIZE];
         let (report_tx, report_rx) = channel();
-        let boxed_report_tx = Box::new(report_tx);
-        let report_send_void = Box::into_raw(boxed_report_tx) as *mut c_void;
+        let report_send_void = Box::into_raw(Box::new(report_tx)) as *mut c_void;
+
+        let scratch_buf = [0; HID_RPT_SIZE];
+        let scratch_buf_ptr = Box::into_raw(Box::new(scratch_buf)) as *mut u8;
 
         unsafe {
             IOHIDDeviceRegisterInputReportCallback(
                 device_ref,
-                _scratch_buf.as_ptr(),
-                _scratch_buf.len() as CFIndex,
+                scratch_buf_ptr,
+                HID_RPT_SIZE as CFIndex,
                 read_new_data_cb,
                 report_send_void,
             );
@@ -48,7 +49,7 @@ impl Device {
             cid: CID_BROADCAST,
             report_rx,
             report_send_void,
-            _scratch_buf,
+            scratch_buf_ptr,
         }
     }
 }
@@ -56,8 +57,12 @@ impl Device {
 impl Drop for Device {
     fn drop(&mut self) {
         debug!("Dropping U2F device {}", self);
-        // Re-allocate this raw pointer for destruction
-        let _ = unsafe { Box::from_raw(self.report_send_void) };
+
+        unsafe {
+            // Re-allocate raw pointers for destruction.
+            let _ = Box::from_raw(self.report_send_void as *mut Sender<Vec<u8>>);
+            let _ = Box::from_raw(self.scratch_buf_ptr as *mut [u8; HID_RPT_SIZE]);
+        }
     }
 }
 
