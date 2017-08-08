@@ -39,13 +39,13 @@ impl DeviceMap {
         // Do a few U2F device checks.
         let mut nonce = [0u8; 8];
         thread_rng().fill_bytes(&mut nonce);
-        if let Err(_) = init_device(&mut dev, nonce) {
+        if let Err(_) = init_device(&mut dev, &nonce) {
             return;
         }
 
         let mut random = [0u8; 8];
         thread_rng().fill_bytes(&mut random);
-        if let Err(_) = ping_device(&mut dev, random) {
+        if let Err(_) = ping_device(&mut dev, &random) {
             return;
         }
 
