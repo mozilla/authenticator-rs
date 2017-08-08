@@ -33,7 +33,7 @@ impl Monitor {
                 let tx_ptr = Box::into_raw(tx_box) as *mut libc::c_void;
 
                 // This will keep `tx` alive only for the scope.
-                let _tx = unsafe { Box::from_raw(tx_ptr) };
+                let _tx = unsafe { Box::from_raw(tx_ptr as *mut Sender<Event>) };
 
                 // Create and initialize a scoped HID manager.
                 let manager = IOHIDManager::new()?;
@@ -75,10 +75,7 @@ impl Monitor {
             0, /* no timeout */
         )?;
 
-        Ok(Self {
-            rx: rx,
-            thread: thread,
-        })
+        Ok(Self { rx, thread })
     }
 
     pub fn events<'a>(&'a self) -> TryIter<'a, Event> {

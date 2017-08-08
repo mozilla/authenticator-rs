@@ -23,8 +23,8 @@ impl Device {
         let fd = unsafe { libc::open(cstr.as_ptr(), libc::O_RDWR) };
         let fd = from_unix_result(fd)?;
         Ok(Self {
-            path: path,
-            fd: fd,
+            path,
+            fd,
             cid: CID_BROADCAST,
         })
     }

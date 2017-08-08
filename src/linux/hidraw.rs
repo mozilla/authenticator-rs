@@ -60,7 +60,7 @@ struct ReportDescriptorIterator {
 
 impl ReportDescriptorIterator {
     fn new(desc: ReportDescriptor) -> Self {
-        Self { desc: desc, pos: 0 }
+        Self { desc, pos: 0 }
     }
 }
 

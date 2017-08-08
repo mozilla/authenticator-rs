@@ -11,6 +11,7 @@ use core_foundation_sys::runloop::*;
 use core_foundation_sys::string::*;
 
 use consts::{FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID};
+use util::io_err;
 
 pub struct IOHIDDeviceMatcher {
     dict: CFDictionaryRef,
@@ -41,11 +42,7 @@ impl IOHIDDeviceMatcher {
             )
         };
 
-        Self {
-            dict: dict,
-            keys: keys,
-            values: values,
-        }
+        Self { dict, keys, values }
     }
 
     fn cf_number(number: i32) -> CFNumberRef {
@@ -54,7 +51,7 @@ impl IOHIDDeviceMatcher {
 
         unsafe {
             // Drop when out of scope.
-            let _num = Box::from_raw(nptr);
+            let _num = Box::from_raw(nptr as *mut i32);
             CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, nptr)
         }
     }
@@ -101,17 +98,14 @@ impl IOHIDManager {
 
         let rv = unsafe { IOHIDManagerOpen(manager, kIOHIDManagerOptionNone) };
         if rv != 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "Couldn't open HID Manager",
-            ));
+            return Err(io_err("Couldn't open HID Manager"));
         }
 
         unsafe {
             IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetCurrent(), kCFRunLoopDefaultMode)
         };
 
-        Ok(Self { manager: manager })
+        Ok(Self { manager })
     }
 
     pub fn get(&self) -> IOHIDManagerRef {

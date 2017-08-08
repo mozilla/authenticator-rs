@@ -6,8 +6,9 @@ use std::slice;
 use std::ffi::OsString;
 use std::os::windows::ffi::OsStringExt;
 
-extern crate libc;
+use util::io_err;
 
+extern crate libc;
 extern crate winapi;
 use self::winapi::*;
 
@@ -52,10 +53,6 @@ extern "stdcall" {
     fn HidP_GetCaps(PreparsedData: PHIDP_PREPARSED_DATA, Capabilities: PHIDP_CAPS) -> NTSTATUS;
 }
 
-fn io_err(msg: &str) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, msg)
-}
-
 macro_rules! offset_of {
     ($ty:ty, $field:ident) => {
         unsafe { &(*(0 as *const $ty)).$field as *const _ as usize }
@@ -87,7 +84,7 @@ impl DeviceInfoSet {
             return Err(io_err("SetupDiGetClassDevsW failed!"));
         }
 
-        Ok(Self { set: set })
+        Ok(Self { set })
     }
 
     pub fn get(&self) -> HDEVINFO {
@@ -112,7 +109,7 @@ pub struct DeviceInfoSetIter<'a> {
 
 impl<'a> DeviceInfoSetIter<'a> {
     fn new(set: &'a DeviceInfoSet) -> Self {
-        Self { set: set, index: 0 }
+        Self { set, index: 0 }
     }
 }
 
@@ -121,7 +118,6 @@ impl<'a> Iterator for DeviceInfoSetIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut device_interface_data = unsafe { mem::uninitialized::<SP_DEVICE_INTERFACE_DATA>() };
-
         device_interface_data.cbSize = mem::size_of::<SP_DEVICE_INTERFACE_DATA>() as UINT;
 
         let rv = unsafe {
@@ -186,7 +182,6 @@ struct DeviceInterfaceDetailData {
 impl DeviceInterfaceDetailData {
     fn new(size: usize) -> Option<Self> {
         let mut data = unsafe { libc::malloc(size) as PSP_DEVICE_INTERFACE_DETAIL_DATA_W };
-
         if data.is_null() {
             return None;
         }
@@ -199,7 +194,7 @@ impl DeviceInterfaceDetailData {
         let offset = offset_of!(SP_DEVICE_INTERFACE_DETAIL_DATA_W, DevicePath);
 
         Some(Self {
-            data: data,
+            data,
             path_len: size - offset,
         })
     }
@@ -242,7 +237,7 @@ impl DeviceCapabilities {
             }
         }
 
-        Ok(Self { caps: caps })
+        Ok(Self { caps })
     }
 
     pub fn usage(&self) -> USAGE {

@@ -100,10 +100,7 @@ impl Monitor {
             0, /* no timeout */
         )?;
 
-        Ok(Self {
-            rx: rx,
-            thread: thread,
-        })
+        Ok(Self { rx, thread })
     }
 
     pub fn events<'a>(&'a self) -> TryIter<'a, Event> {
