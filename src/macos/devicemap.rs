@@ -1,8 +1,7 @@
-use rand::{thread_rng, Rng};
 use std::collections::hash_map::ValuesMut;
 use std::collections::HashMap;
 
-use u2fprotocol::{init_device, ping_device, u2f_version_is_v2};
+use u2fprotocol::u2f_init_device;
 
 use platform::monitor::Event;
 use platform::device::Device;
@@ -36,20 +35,7 @@ impl DeviceMap {
         // Create the device.
         let mut dev = Device::new(device_ref);
 
-        // Do a few U2F device checks.
-        let mut nonce = [0u8; 8];
-        thread_rng().fill_bytes(&mut nonce);
-        if let Err(_) = init_device(&mut dev, &nonce) {
-            return;
-        }
-
-        let mut random = [0u8; 8];
-        thread_rng().fill_bytes(&mut random);
-        if let Err(_) = ping_device(&mut dev, &random) {
-            return;
-        }
-
-        if u2f_version_is_v2(&mut dev).unwrap_or(false) {
+        if u2f_init_device(&mut dev) {
             self.map.insert(device_ref, dev);
         }
     }

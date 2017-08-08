@@ -1,5 +1,6 @@
 extern crate std;
 
+use rand::{thread_rng, Rng};
 use std::io;
 use std::io::{Read, Write};
 use std::ffi::CString;
@@ -12,40 +13,24 @@ use util::io_err;
 // Device Commands
 ////////////////////////////////////////////////////////////////////////
 
-pub fn init_device<T>(dev: &mut T, nonce: &[u8]) -> io::Result<()>
+pub fn u2f_init_device<T>(dev: &mut T) -> bool
 where
     T: U2FDevice + Read + Write,
 {
-    assert_eq!(nonce.len(), INIT_NONCE_SIZE);
-    let raw = sendrecv(dev, U2FHID_INIT, nonce)?;
-    dev.set_cid(U2FHIDInitResp::read(&raw, nonce)?);
-    Ok(())
-}
-
-pub fn ping_device<T>(dev: &mut T, random: &[u8]) -> io::Result<()>
-where
-    T: U2FDevice + Read + Write,
-{
-    assert_eq!(random.len(), 8);
-    if sendrecv(dev, U2FHID_PING, random)? != random {
-        return Err(io_err("Ping was corrupted!"));
+    // Do a few U2F device checks.
+    let mut nonce = [0u8; 8];
+    thread_rng().fill_bytes(&mut nonce);
+    if let Err(_) = init_device(dev, &nonce) {
+        return false;
     }
 
-    Ok(())
-}
+    let mut random = [0u8; 8];
+    thread_rng().fill_bytes(&mut random);
+    if let Err(_) = ping_device(dev, &random) {
+        return false;
+    }
 
-pub fn u2f_version_is_v2<T>(dev: &mut T) -> io::Result<bool>
-where
-    T: U2FDevice + Read + Write,
-{
-    let mut res = send_apdu(dev, U2F_VERSION, 0x00, &vec![])?;
-    let sw_low = res.pop().unwrap_or_default();
-    let sw_high = res.pop().unwrap_or_default();
-
-    let actual = CString::new(res)?;
-    let expected = CString::new("U2F_V2")?;
-    status_word_to_result(sw_high, sw_low, actual == expected)
-
+    is_v2_device(dev).unwrap_or(false)
 }
 
 pub fn u2f_register<T>(dev: &mut T, challenge: &[u8], application: &[u8]) -> io::Result<Vec<u8>>
@@ -150,6 +135,46 @@ where
     let flags = U2F_CHECK_IS_REGISTERED;
     let sign_resp = send_apdu(dev, U2F_AUTHENTICATE, flags, &sign_data)?;
     Ok(sign_resp == SW_CONDITIONS_NOT_SATISFIED)
+}
+
+////////////////////////////////////////////////////////////////////////
+// Internal Device Commands
+////////////////////////////////////////////////////////////////////////
+
+fn init_device<T>(dev: &mut T, nonce: &[u8]) -> io::Result<()>
+where
+    T: U2FDevice + Read + Write,
+{
+    assert_eq!(nonce.len(), INIT_NONCE_SIZE);
+    let raw = sendrecv(dev, U2FHID_INIT, nonce)?;
+    dev.set_cid(U2FHIDInitResp::read(&raw, nonce)?);
+
+    Ok(())
+}
+
+fn ping_device<T>(dev: &mut T, random: &[u8]) -> io::Result<()>
+where
+    T: U2FDevice + Read + Write,
+{
+    assert_eq!(random.len(), 8);
+    if sendrecv(dev, U2FHID_PING, random)? != random {
+        return Err(io_err("Ping was corrupted!"));
+    }
+
+    Ok(())
+}
+
+fn is_v2_device<T>(dev: &mut T) -> io::Result<bool>
+where
+    T: U2FDevice + Read + Write,
+{
+    let mut res = send_apdu(dev, U2F_VERSION, 0x00, &vec![])?;
+    let sw_low = res.pop().unwrap_or_default();
+    let sw_high = res.pop().unwrap_or_default();
+
+    let actual = CString::new(res)?;
+    let expected = CString::new("U2F_V2")?;
+    status_word_to_result(sw_high, sw_low, actual == expected)
 }
 
 ////////////////////////////////////////////////////////////////////////
