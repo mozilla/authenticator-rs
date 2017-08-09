@@ -6,10 +6,6 @@ rust:
   - beta
   - nightly
 
-matrix:
-  allow_failures:
-    - rust: nightly
-
 addons:
   apt:
     packages:
@@ -23,6 +19,11 @@ before_install:
   - cargo install rustfmt || true
 
 script:
+- |
+  if [ "$TRAVIS_RUST_VERSION" == "nightly" ] ; then
+    export ASAN_OPTIONS="detect_odr_violation=1:leak_check_at_exit=0:detect_leaks=0"
+    export RUSTFLAGS="-Z sanitizer=address"
+  fi
 - |
   cargo fmt -- --write-mode=diff &&
   cargo build &&
