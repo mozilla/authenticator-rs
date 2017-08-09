@@ -181,13 +181,22 @@ struct DeviceInterfaceDetailData {
 
 impl DeviceInterfaceDetailData {
     fn new(size: usize) -> Option<Self> {
+        let mut cb_size = mem::size_of::<SP_DEVICE_INTERFACE_DETAIL_DATA_W>();
+        if cfg!(target_pointer_width = "32") {
+            cb_size = 4 + 2; // 4-byte uint + default TCHAR size. size_of is inaccurate.
+        }
+
+        if size < cb_size {
+            warn!("DeviceInterfaceDetailData is too small. {}", size);
+            return None;
+        }
+
         let mut data = unsafe { libc::malloc(size) as PSP_DEVICE_INTERFACE_DETAIL_DATA_W };
         if data.is_null() {
             return None;
         }
 
         // Set total size of the structure.
-        let cb_size = mem::size_of::<SP_DEVICE_INTERFACE_DETAIL_DATA_W>();
         unsafe { (*data).cbSize = cb_size as UINT };
 
         // Compute offset of `SP_DEVICE_INTERFACE_DETAIL_DATA_W.DevicePath`.
