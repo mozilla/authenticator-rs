@@ -6,9 +6,9 @@ rust:
   - beta
   - nightly
 
-matrix:
-  allow_failures:
-    - rust: nightly
+# matrix:
+#   allow_failures:
+#     - rust: nightly
 
 addons:
   apt:
@@ -27,3 +27,11 @@ script:
   cargo fmt -- --write-mode=diff &&
   cargo build &&
   cargo test
+- |
+  if [ "$TRAVIS_RUST_VERSION" == "nightly" ] ; then
+    export LSAN_OPTIONS=verbosity=1:log_threads=1
+    export ASAN_OPTIONS="detect_odr_violation=1:leak_check_at_exit=0:detect_leaks=0"
+    export RUST_BACKTRACE=full
+    export RUSTFLAGS="-Z sanitizer=address"
+    rustup run nightly cargo test
+  fi
