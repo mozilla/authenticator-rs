@@ -20,13 +20,13 @@ where
     // Do a few U2F device checks.
     let mut nonce = [0u8; 8];
     thread_rng().fill_bytes(&mut nonce);
-    if let Err(_) = init_device(dev, &nonce) {
+    if init_device(dev, &nonce).is_err() {
         return false;
     }
 
     let mut random = [0u8; 8];
     thread_rng().fill_bytes(&mut random);
-    if let Err(_) = ping_device(dev, &random) {
+    if ping_device(dev, &random).is_err() {
         return false;
     }
 
@@ -168,7 +168,7 @@ fn is_v2_device<T>(dev: &mut T) -> io::Result<bool>
 where
     T: U2FDevice + Read + Write,
 {
-    let mut res = send_apdu(dev, U2F_VERSION, 0x00, &vec![])?;
+    let mut res = send_apdu(dev, U2F_VERSION, 0x00, &[])?;
     let sw_low = res.pop().unwrap_or_default();
     let sw_high = res.pop().unwrap_or_default();
 

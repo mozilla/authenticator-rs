@@ -78,7 +78,7 @@ impl Monitor {
         Ok(Self { rx, thread })
     }
 
-    pub fn events<'a>(&'a self) -> TryIter<'a, Event> {
+    pub fn events(&self) -> TryIter<Event> {
         self.rx.try_iter()
     }
 

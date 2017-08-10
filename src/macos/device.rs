@@ -104,7 +104,7 @@ impl Read for Device {
 
 impl Write for Device {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        assert!(bytes.len() == HID_RPT_SIZE + 1);
+        assert_eq!(bytes.len(), HID_RPT_SIZE + 1);
 
         let report_id = bytes[0] as i64;
         // Skip report number when not using numbered reports.
@@ -136,7 +136,7 @@ impl Write for Device {
 }
 
 impl U2FDevice for Device {
-    fn get_cid<'a>(&'a self) -> &'a [u8; 4] {
+    fn get_cid(&self) -> &[u8; 4] {
         &self.cid
     }
 
