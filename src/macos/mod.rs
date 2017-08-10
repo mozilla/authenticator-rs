@@ -18,6 +18,7 @@ use runloop::RunLoop;
 use util::{io_err, OnceCallback};
 use u2fprotocol::{u2f_register, u2f_sign, u2f_is_keyhandle_valid};
 
+#[derive(Default)]
 pub struct PlatformManager {
     // Handle to the thread loop.
     thread: Option<RunLoop>,
@@ -25,7 +26,7 @@ pub struct PlatformManager {
 
 impl PlatformManager {
     pub fn new() -> Self {
-        Self { thread: None }
+        Default::default()
     }
 
     pub fn register(
@@ -132,7 +133,7 @@ impl PlatformManager {
                                 // If doesn't, so blink anyway (using bogus data)
                                 let blank = vec![0u8; PARAMETER_SIZE];
 
-                                if let Ok(_) = u2f_register(device, &blank, &blank) {
+                                if u2f_register(device, &blank, &blank).is_ok() {
                                     // If the user selects this token that can't satisfy, it's an
                                     // error
                                     callback.call(Err(io_err("invalid key")));

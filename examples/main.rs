@@ -7,7 +7,6 @@ use std::io;
 use std::sync::mpsc::channel;
 use u2fhid::U2FManager;
 
-#[macro_use]
 extern crate log;
 extern crate env_logger;
 
@@ -49,7 +48,7 @@ fn main() {
 
     let (tx, rx) = channel();
     manager
-        .register(15000, chall_bytes.clone(), app_bytes.clone(), move |rv| {
+        .register(15_000, chall_bytes.clone(), app_bytes.clone(), move |rv| {
             tx.send(rv.unwrap()).unwrap();
         })
         .unwrap();
@@ -61,7 +60,7 @@ fn main() {
 
     let (tx, rx) = channel();
     manager
-        .sign(15000, chall_bytes, app_bytes, vec![key_handle], move |rv| {
+        .sign(15_000, chall_bytes, app_bytes, vec![key_handle], move |rv| {
             tx.send(rv.unwrap()).unwrap();
         })
         .unwrap();
