@@ -60,9 +60,13 @@ fn main() {
 
     let (tx, rx) = channel();
     manager
-        .sign(15_000, chall_bytes, app_bytes, vec![key_handle], move |rv| {
-            tx.send(rv.unwrap()).unwrap();
-        })
+        .sign(
+            15_000,
+            chall_bytes,
+            app_bytes,
+            vec![key_handle],
+            move |rv| { tx.send(rv.unwrap()).unwrap(); },
+        )
         .unwrap();
 
     let (_, sign_data) = rx.recv().unwrap();
