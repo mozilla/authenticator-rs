@@ -50,7 +50,7 @@ where
 
     let flags = U2F_REQUEST_USER_PRESENCE;
     let (resp, status) = send_apdu(dev, U2F_REGISTER, flags, &register_data)?;
-    status_word_to_result(status[0], status[1], resp)
+    status_word_to_result(status, resp)
 }
 
 pub fn u2f_sign<T>(
@@ -84,7 +84,7 @@ where
 
     let flags = U2F_REQUEST_USER_PRESENCE;
     let (resp, status) = send_apdu(dev, U2F_AUTHENTICATE, flags, &sign_data)?;
-    status_word_to_result(status[0], status[1], resp)
+    status_word_to_result(status, resp)
 }
 
 pub fn u2f_is_keyhandle_valid<T>(
@@ -155,22 +155,22 @@ where
     let (data, status) = send_apdu(dev, U2F_VERSION, 0x00, &[])?;
     let actual = CString::new(data)?;
     let expected = CString::new("U2F_V2")?;
-    status_word_to_result(status[0], status[1], actual == expected)
+    status_word_to_result(status, actual == expected)
 }
 
 ////////////////////////////////////////////////////////////////////////
 // Error Handling
 ////////////////////////////////////////////////////////////////////////
 
-fn status_word_to_result<T>(hi: u8, lo: u8, val: T) -> io::Result<T> {
+fn status_word_to_result<T>(status: [u8; 2], val: T) -> io::Result<T> {
     use self::io::ErrorKind::{InvalidData, InvalidInput};
 
-    match [hi, lo] {
+    match status {
         SW_NO_ERROR => Ok(val),
         SW_WRONG_DATA => Err(io::Error::new(InvalidData, "wrong data")),
         SW_WRONG_LENGTH => Err(io::Error::new(InvalidInput, "wrong length")),
         SW_CONDITIONS_NOT_SATISFIED => Err(io_err("conditions not satisfied")),
-        _ => Err(io_err(&format!("failed with status {}{}", hi, lo))),
+        _ => Err(io_err(&format!("failed with status {:?}", status))),
     }
 }
 
@@ -207,7 +207,7 @@ where
     Ok(data)
 }
 
-fn send_apdu<T>(dev: &mut T, cmd: u8, p1: u8, send: &[u8]) -> io::Result<(Vec<u8>, Vec<u8>)>
+fn send_apdu<T>(dev: &mut T, cmd: u8, p1: u8, send: &[u8]) -> io::Result<(Vec<u8>, [u8; 2])>
 where
     T: U2FDevice + Read + Write,
 {
@@ -220,7 +220,7 @@ where
 
     let split_at = data.len() - 2;
     let status = data.split_off(split_at);
-    Ok((data, status))
+    Ok((data, [status[0], status[1]]))
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -411,7 +411,7 @@ mod tests {
 
         let (result, status) = send_apdu(&mut device, U2FHID_PING, 0xaa, &data).unwrap();
         assert_eq!(result, &data);
-        assert_eq!(status, &SW_NO_ERROR);
+        assert_eq!(status, SW_NO_ERROR);
     }
 
     #[test]
