@@ -19,6 +19,10 @@ pub mod platform;
 #[path = "windows/mod.rs"]
 pub mod platform;
 
+#[cfg(any(target_os = "android"))]
+#[path = "android/mod.rs"]
+pub mod platform;
+
 #[macro_use]
 extern crate log;
 extern crate rand;
