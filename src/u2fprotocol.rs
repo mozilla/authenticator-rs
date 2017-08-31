@@ -49,18 +49,8 @@ where
     register_data.extend(application);
 
     let flags = U2F_REQUEST_USER_PRESENCE;
-    let register_resp = send_apdu(dev, U2F_REGISTER, flags, &register_data)?;
-
-    if register_resp.len() < 2 {
-        return Err(io_err("unexpected response"));
-    }
-
-    if register_resp.len() > 2 {
-        // Real data, we're done
-        return Ok(register_resp);
-    }
-
-    status_word_to_result(register_resp[0], register_resp[1], vec![])
+    let (resp, status) = send_apdu(dev, U2F_REGISTER, flags, &register_data)?;
+    status_word_to_result(status, resp)
 }
 
 pub fn u2f_sign<T>(
@@ -93,14 +83,8 @@ where
     sign_data.extend(key_handle);
 
     let flags = U2F_REQUEST_USER_PRESENCE;
-    let sign_resp = send_apdu(dev, U2F_AUTHENTICATE, flags, &sign_data)?;
-
-    if sign_resp.len() != 2 {
-        // Real data, let's bail out here
-        return Ok(sign_resp);
-    }
-
-    status_word_to_result(sign_resp[0], sign_resp[1], vec![])
+    let (resp, status) = send_apdu(dev, U2F_AUTHENTICATE, flags, &sign_data)?;
+    status_word_to_result(status, resp)
 }
 
 pub fn u2f_is_keyhandle_valid<T>(
@@ -133,8 +117,8 @@ where
     sign_data.extend(key_handle);
 
     let flags = U2F_CHECK_IS_REGISTERED;
-    let sign_resp = send_apdu(dev, U2F_AUTHENTICATE, flags, &sign_data)?;
-    Ok(sign_resp == SW_CONDITIONS_NOT_SATISFIED)
+    let (_, status) = send_apdu(dev, U2F_AUTHENTICATE, flags, &sign_data)?;
+    Ok(status == SW_CONDITIONS_NOT_SATISFIED)
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -168,28 +152,25 @@ fn is_v2_device<T>(dev: &mut T) -> io::Result<bool>
 where
     T: U2FDevice + Read + Write,
 {
-    let mut res = send_apdu(dev, U2F_VERSION, 0x00, &[])?;
-    let sw_low = res.pop().unwrap_or_default();
-    let sw_high = res.pop().unwrap_or_default();
-
-    let actual = CString::new(res)?;
+    let (data, status) = send_apdu(dev, U2F_VERSION, 0x00, &[])?;
+    let actual = CString::new(data)?;
     let expected = CString::new("U2F_V2")?;
-    status_word_to_result(sw_high, sw_low, actual == expected)
+    status_word_to_result(status, actual == expected)
 }
 
 ////////////////////////////////////////////////////////////////////////
 // Error Handling
 ////////////////////////////////////////////////////////////////////////
 
-fn status_word_to_result<T>(hi: u8, lo: u8, val: T) -> io::Result<T> {
+fn status_word_to_result<T>(status: [u8; 2], val: T) -> io::Result<T> {
     use self::io::ErrorKind::{InvalidData, InvalidInput};
 
-    match [hi, lo] {
+    match status {
         SW_NO_ERROR => Ok(val),
         SW_WRONG_DATA => Err(io::Error::new(InvalidData, "wrong data")),
         SW_WRONG_LENGTH => Err(io::Error::new(InvalidInput, "wrong length")),
         SW_CONDITIONS_NOT_SATISFIED => Err(io_err("conditions not satisfied")),
-        _ => Err(io_err(&format!("failed with status {}{}", hi, lo))),
+        _ => Err(io_err(&format!("failed with status {:?}", status))),
     }
 }
 
@@ -226,11 +207,20 @@ where
     Ok(data)
 }
 
-fn send_apdu<T>(dev: &mut T, cmd: u8, p1: u8, send: &[u8]) -> io::Result<Vec<u8>>
+fn send_apdu<T>(dev: &mut T, cmd: u8, p1: u8, send: &[u8]) -> io::Result<(Vec<u8>, [u8; 2])>
 where
     T: U2FDevice + Read + Write,
 {
-    sendrecv(dev, U2FHID_MSG, &U2FAPDUHeader::to_bytes(cmd, p1, send)?)
+    let apdu = U2FAPDUHeader::to_bytes(cmd, p1, send)?;
+    let mut data = sendrecv(dev, U2FHID_MSG, &apdu)?;
+
+    if data.len() < 2 {
+        return Err(io_err("unexpected response"));
+    }
+
+    let split_at = data.len() - 2;
+    let status = data.split_off(split_at);
+    Ok((data, [status[0], status[1]]))
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -242,7 +232,7 @@ mod tests {
     use rand::{thread_rng, Rng};
 
     use super::{U2FDevice, init_device, ping_device, sendrecv, send_apdu};
-    use consts::{CID_BROADCAST, U2FHID_INIT, U2FHID_PING, U2FHID_MSG};
+    use consts::{CID_BROADCAST, U2FHID_INIT, U2FHID_PING, U2FHID_MSG, SW_NO_ERROR};
 
     mod platform {
         use std::io;
@@ -414,12 +404,14 @@ mod tests {
 
         // Send data back
         let mut msg = cid.to_vec();
-        msg.extend(vec![U2FHID_MSG, 0x00, 0x05]);
+        msg.extend(vec![U2FHID_MSG, 0x00, 0x07]);
         msg.extend_from_slice(&data);
+        msg.extend_from_slice(&SW_NO_ERROR);
         device.add_read(&msg, 0);
 
-        let result = send_apdu(&mut device, U2FHID_PING, 0xaa, &data).unwrap();
+        let (result, status) = send_apdu(&mut device, U2FHID_PING, 0xaa, &data).unwrap();
         assert_eq!(result, &data);
+        assert_eq!(status, SW_NO_ERROR);
     }
 
     #[test]
