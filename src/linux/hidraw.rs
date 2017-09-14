@@ -9,7 +9,7 @@ use std::mem;
 use std::os::unix::io::RawFd;
 
 use consts::{FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID};
-use util::from_unix_result;
+use util::{from_unix_result, io_err};
 
 #[allow(non_camel_case_types)]
 #[repr(C)]
@@ -34,6 +34,20 @@ const NRSHIFT: u32 = 0;
 const TYPESHIFT: u32 = NRSHIFT + NRBITS as u32;
 const SIZESHIFT: u32 = TYPESHIFT + TYPEBITS as u32;
 const DIRSHIFT: u32 = SIZESHIFT + SIZEBITS as u32;
+
+// The 4 MSBs (the tag) are set when it's a long item.
+const HID_MASK_LONG_ITEM_TAG: u8 = 0b11110000;
+// The 2 LSBs denote the size of a short item.
+const HID_MASK_SHORT_ITEM_SIZE: u8 = 0b00000011;
+// The 6 MSBs denote the tag (4) and type (2).
+const HID_MASK_ITEM_TAGTYPE: u8 = 0b11111100;
+// tag=0000, type=10 (local)
+const HID_ITEM_TAGTYPE_USAGE: u8 = 0b00001000;
+// tag=0000, type=01 (global)
+const HID_ITEM_TAGTYPE_USAGE_PAGE: u8 = 0b00000100;
+
+// https://github.com/torvalds/linux/blob/master/include/uapi/linux/hid.h
+const HID_MAX_DESCRIPTOR_SIZE: usize = 4096;
 
 macro_rules! ioctl {
     ($dir:expr, $name:ident, $ioty:expr, $nr:expr; $ty:ty) => (
@@ -66,44 +80,92 @@ impl ReportDescriptorIterator {
     fn new(desc: ReportDescriptor) -> Self {
         Self { desc, pos: 0 }
     }
+
+    fn next_item(&mut self) -> Option<Data> {
+        let item = get_hid_item(&self.desc.value[self.pos..]);
+        if item.is_none() {
+            self.pos = self.desc.size as usize; // Close, invalid data.
+            return None;
+        }
+
+        let (tag_type, key_len, data) = item.unwrap();
+
+        // Advance if we have a valid item.
+        self.pos += key_len + data.len();
+
+        // We only check short items.
+        if key_len > 1 {
+            return None; // Check next item.
+        }
+
+        // Short items have max. length of 4 bytes.
+        assert!(data.len() <= mem::size_of::<u32>());
+
+        // Convert data bytes to a uint.
+        let data = read_uint_le(data);
+
+        match tag_type {
+            HID_ITEM_TAGTYPE_USAGE_PAGE => Some(Data::UsagePage { data }),
+            HID_ITEM_TAGTYPE_USAGE => Some(Data::Usage { data }),
+            _ => None,
+        }
+    }
 }
 
 impl Iterator for ReportDescriptorIterator {
     type Item = Data;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let value_len = self.desc.value.len();
-        if self.pos >= value_len {
+        if self.pos >= self.desc.size as usize {
             return None;
         }
 
-        let key = self.desc.value[self.pos];
-        if key & 0xf0 == 0xf0 {
-            self.pos = value_len;
-            return None; // Invalid data.
-        }
-
-        // Determine length.
-        let data_len = match key & 0x3 {
-            s @ 0...2 => s as usize,
-            _ => 4, /* key & 0x3 == 3 */
-        };
-
-        if self.pos + data_len >= value_len {
-            self.pos = value_len;
-            return None; // Invalid data.
-        }
-
-        let range = self.pos + 1..self.pos + 1 + data_len;
-        let data = read_uint_le(&self.desc.value[range]);
-        self.pos += 1 + data_len;
-
-        match key & 0xfc {
-            0x4 => Some(Data::UsagePage { data: data }),
-            0x8 => Some(Data::Usage { data: data }),
-            _ => self.next(),
-        }
+        self.next_item().or_else(|| self.next())
     }
+}
+
+fn get_hid_item<'a>(buf: &'a [u8]) -> Option<(u8, usize, &'a [u8])> {
+    if (buf[0] & HID_MASK_LONG_ITEM_TAG) == HID_MASK_LONG_ITEM_TAG {
+        get_hid_long_item(buf)
+    } else {
+        get_hid_short_item(buf)
+    }
+}
+
+fn get_hid_long_item<'a>(buf: &'a [u8]) -> Option<(u8, usize, &'a [u8])> {
+    // A valid long item has at least three bytes.
+    if buf.len() < 3 {
+        return None;
+    }
+
+    let len = buf[1] as usize;
+
+    // Ensure that there are enough bytes left in the buffer.
+    if len > buf.len() - 3 {
+        return None;
+    }
+
+    Some((buf[2], 3 /* key length */, &buf[3..]))
+}
+
+fn get_hid_short_item<'a>(buf: &'a [u8]) -> Option<(u8, usize, &'a [u8])> {
+    // This is a short item. The bottom two bits of the key
+    // contain the length of the data section (value) for this key.
+    let len = match buf[0] & HID_MASK_SHORT_ITEM_SIZE {
+        s @ 0...2 => s as usize,
+        _ => 4, /* _ == 3 */
+    };
+
+    // Ensure that there are enough bytes left in the buffer.
+    if len > buf.len() - 1 {
+        return None;
+    }
+
+    Some((
+        buf[0] & HID_MASK_ITEM_TAGTYPE,
+        1, /* key length */
+        &buf[1..1 + len],
+    ))
 }
 
 fn read_uint_le(buf: &[u8]) -> u32 {
@@ -122,9 +184,14 @@ pub fn is_u2f_device(fd: RawFd) -> bool {
 fn read_report_descriptor(fd: RawFd) -> io::Result<ReportDescriptor> {
     let mut desc = ReportDescriptor {
         size: 0,
-        value: [0; 4096],
+        value: [0; HID_MAX_DESCRIPTOR_SIZE],
     };
+
     let _ = unsafe { hidiocgrdescsize(fd, &mut desc.size)? };
+    if desc.size == 0 || desc.size as usize > desc.value.len() {
+        return Err(io_err("unexpected hidiocgrdescsize() result"));
+    }
+
     let _ = unsafe { hidiocgrdesc(fd, &mut desc)? };
     Ok(desc)
 }
