@@ -307,6 +307,8 @@ mod tests {
             unsafe {
                 // We need some source for the runloop to run.
                 let manager = IOHIDManagerCreate(kCFAllocatorDefault, 0);
+                assert!(!manager.is_null());
+
                 IOHIDManagerScheduleWithRunLoop(
                     manager,
                     CFRunLoopGetCurrent(),
@@ -322,6 +324,8 @@ mod tests {
 
                 let rv = IOHIDManagerClose(manager, 0);
                 assert_eq!(rv, 0);
+
+                CFRelease(manager as *mut c_void);
             }
         });
 
