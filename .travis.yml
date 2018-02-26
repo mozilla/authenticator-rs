@@ -22,6 +22,10 @@ before_install:
   - pkg-config --modversion libudev
   - cargo install rustfmt || true
 
+install:
+  - rustup install nightly
+  - rustup component add --toolchain nightly rustfmt-preview
+
 script:
 - |
   if [ "$TRAVIS_RUST_VERSION" == "nightly" ] ; then
@@ -29,6 +33,6 @@ script:
     export RUSTFLAGS="-Z sanitizer=address"
   fi
 - |
-  cargo fmt -- --write-mode=diff &&
+  cargo +nightly fmt -- --write-mode=diff &&
   cargo build &&
   cargo test
