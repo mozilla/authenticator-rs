@@ -8,8 +8,8 @@ use std::io;
 use std::mem;
 use std::os::unix::io::RawFd;
 
-use util::{from_unix_result, io_err};
 use hidproto::*;
+use util::{from_unix_result, io_err};
 
 #[allow(non_camel_case_types)]
 #[repr(C)]
@@ -52,7 +52,6 @@ macro_rules! ioctl {
 // https://github.com/torvalds/linux/blob/master/include/uapi/linux/hidraw.h
 ioctl!(READ, hidiocgrdescsize, b'H', 0x01; ::libc::c_int);
 ioctl!(READ, hidiocgrdesc, b'H', 0x02; /*struct*/ LinuxReportDescriptor);
-
 
 pub fn is_u2f_device(fd: RawFd) -> bool {
     match read_report_descriptor(fd) {

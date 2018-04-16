@@ -5,11 +5,11 @@
 extern crate libc;
 
 use std::io;
-use std::ptr;
 use std::os::unix::io::RawFd;
+use std::ptr;
 
-use util::from_unix_result;
 use hidproto::*;
+use util::from_unix_result;
 
 #[allow(non_camel_case_types)]
 #[repr(C)]
@@ -57,15 +57,13 @@ const TYPESHIFT: u32 = 8;
 const SIZESHIFT: u32 = 16;
 
 macro_rules! ioctl {
-    ($dir:expr, $name:ident, $ioty:expr, $nr:expr, $size:expr; $ty:ty) => (
+    ($dir:expr, $name:ident, $ioty:expr, $nr:expr, $size:expr; $ty:ty) => {
         pub unsafe fn $name(fd: libc::c_int, val: *mut $ty) -> io::Result<libc::c_int> {
-            let ioc = ($dir as u32) |
-                      (($size as u32 & IOCPARM_MASK) << SIZESHIFT) |
-                      (($ioty as u32) << TYPESHIFT) |
-                      ($nr as u32) ;
+            let ioc = ($dir as u32) | (($size as u32 & IOCPARM_MASK) << SIZESHIFT)
+                | (($ioty as u32) << TYPESHIFT) | ($nr as u32);
             from_unix_result(libc::ioctl(fd, ioc as libc::c_ulong, val))
         }
-    );
+    };
 }
 
 // https://github.com/freebsd/freebsd/blob/master/sys/dev/usb/usb_ioctl.h
@@ -76,7 +74,9 @@ fn read_report_descriptor(fd: RawFd) -> io::Result<ReportDescriptor> {
     let _ = unsafe { usb_get_report_desc(fd, &mut desc)? };
     desc.ugd_maxlen = desc.ugd_actlen;
     let mut value = Vec::with_capacity(desc.ugd_actlen as usize);
-    unsafe { value.set_len(desc.ugd_actlen as usize); }
+    unsafe {
+        value.set_len(desc.ugd_actlen as usize);
+    }
     desc.ugd_data = value.as_mut_ptr();
     let _ = unsafe { usb_get_report_desc(fd, &mut desc)? };
     Ok(ReportDescriptor { value })
