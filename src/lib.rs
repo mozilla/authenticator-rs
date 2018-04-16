@@ -9,6 +9,9 @@ mod util;
 extern crate libudev;
 
 #[cfg(any(target_os = "linux"))]
+pub mod hidproto;
+
+#[cfg(any(target_os = "linux"))]
 #[path = "linux/mod.rs"]
 pub mod platform;
 
