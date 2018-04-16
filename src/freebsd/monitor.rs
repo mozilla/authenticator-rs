@@ -5,8 +5,8 @@
 use devd_rs;
 use std::collections::HashMap;
 use std::ffi::OsString;
-use std::{io, fs};
 use std::sync::Arc;
+use std::{fs, io};
 
 use runloop::RunLoop;
 
@@ -20,10 +20,22 @@ pub enum Event {
 impl Event {
     fn from_devd(event: devd_rs::Event) -> Option<Self> {
         match event {
-            devd_rs::Event::Attach { ref dev, parent: _, location: _ }
-                if dev.starts_with("uhid") => Some(Event::Add(("/dev/".to_owned() + dev).into())),
-            devd_rs::Event::Detach { ref dev, parent: _, location: _ }
-                if dev.starts_with("uhid") => Some(Event::Remove(("/dev/".to_owned() + dev).into())),
+            devd_rs::Event::Attach {
+                ref dev,
+                parent: _,
+                location: _,
+            } if dev.starts_with("uhid") =>
+            {
+                Some(Event::Add(("/dev/".to_owned() + dev).into()))
+            }
+            devd_rs::Event::Detach {
+                ref dev,
+                parent: _,
+                location: _,
+            } if dev.starts_with("uhid") =>
+            {
+                Some(Event::Remove(("/dev/".to_owned() + dev).into()))
+            }
             _ => None,
         }
     }
@@ -76,7 +88,7 @@ where
                     if let Some(event) = Event::from_devd(event) {
                         self.process_event(event);
                     }
-                },
+                }
             }
         }
 

@@ -5,5 +5,5 @@
 pub mod device;
 pub mod transaction;
 
-mod uhid;
 mod monitor;
+mod uhid;
