@@ -7,6 +7,7 @@ extern crate log;
 
 use core_foundation_sys::base::*;
 use core_foundation_sys::runloop::*;
+use core_foundation::base::TCFType;
 use std::os::raw::c_void;
 use platform::iokit::*;
 use runloop::RunLoop;
@@ -40,7 +41,7 @@ where
 
         // Match FIDO devices only.
         let _matcher = IOHIDDeviceMatcher::new();
-        unsafe { IOHIDManagerSetDeviceMatching(manager, _matcher.get()) };
+        unsafe { IOHIDManagerSetDeviceMatching(manager, _matcher.dict.as_concrete_TypeRef()) };
 
         Self {
             manager,
