@@ -7,7 +7,7 @@ extern crate log;
 
 use core_foundation_sys::base::*;
 use core_foundation_sys::runloop::*;
-use libc::c_void;
+use std::os::raw::c_void;
 use platform::iokit::*;
 use runloop::RunLoop;
 use std::collections::HashMap;
@@ -170,6 +170,6 @@ where
     F: Fn((IOHIDDeviceRef, Receiver<Vec<u8>>), &Fn() -> bool) + Sync,
 {
     fn drop(&mut self) {
-        unsafe { CFRelease(self.manager as *mut libc::c_void) };
+        unsafe { CFRelease(self.manager as *mut c_void) };
     }
 }

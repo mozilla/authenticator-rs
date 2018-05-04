@@ -13,7 +13,7 @@ use core_foundation_sys::dictionary::*;
 use core_foundation_sys::number::*;
 use core_foundation_sys::runloop::*;
 use core_foundation_sys::string::*;
-use libc::c_void;
+use std::os::raw::c_void;
 use std::ops::Deref;
 
 type IOOptionBits = u32;
@@ -172,8 +172,8 @@ impl IOHIDDeviceMatcher {
         let dict = unsafe {
             CFDictionaryCreate(
                 kCFAllocatorDefault,
-                keys.as_ptr() as *const *const libc::c_void,
-                values.as_ptr() as *const *const libc::c_void,
+                keys.as_ptr() as *const *const c_void,
+                values.as_ptr() as *const *const c_void,
                 keys.len() as CFIndex,
                 &kCFTypeDictionaryKeyCallBacks,
                 &kCFTypeDictionaryValueCallBacks,
@@ -185,7 +185,7 @@ impl IOHIDDeviceMatcher {
 
     fn cf_number(number: i32) -> CFNumberRef {
         let nbox = Box::new(number);
-        let nptr = Box::into_raw(nbox) as *mut libc::c_void;
+        let nptr = Box::into_raw(nbox) as *mut c_void;
 
         unsafe {
             // Drop when out of scope.
@@ -213,14 +213,14 @@ impl IOHIDDeviceMatcher {
 
 impl Drop for IOHIDDeviceMatcher {
     fn drop(&mut self) {
-        unsafe { CFRelease(self.dict as *mut libc::c_void) };
+        unsafe { CFRelease(self.dict as *mut c_void) };
 
         for key in &self.keys {
-            unsafe { CFRelease(*key as *mut libc::c_void) };
+            unsafe { CFRelease(*key as *mut c_void) };
         }
 
         for value in &self.values {
-            unsafe { CFRelease(*value as *mut libc::c_void) };
+            unsafe { CFRelease(*value as *mut c_void) };
         }
     }
 }
@@ -285,7 +285,7 @@ mod tests {
     use super::*;
     use core_foundation_sys::base::*;
     use core_foundation_sys::runloop::*;
-    use libc::c_void;
+    use std::os::raw::c_void;
     use std::ptr;
     use std::sync::mpsc::{channel, Sender};
     use std::thread;
