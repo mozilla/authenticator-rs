@@ -231,8 +231,6 @@ extern "C" {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use core_foundation_sys::base::*;
-    use core_foundation_sys::runloop::*;
     use std::os::raw::c_void;
     use std::ptr;
     use std::sync::mpsc::{channel, Sender};
