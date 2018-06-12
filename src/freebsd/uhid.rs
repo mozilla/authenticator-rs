@@ -59,8 +59,10 @@ const SIZESHIFT: u32 = 16;
 macro_rules! ioctl {
     ($dir:expr, $name:ident, $ioty:expr, $nr:expr, $size:expr; $ty:ty) => {
         pub unsafe fn $name(fd: libc::c_int, val: *mut $ty) -> io::Result<libc::c_int> {
-            let ioc = ($dir as u32) | (($size as u32 & IOCPARM_MASK) << SIZESHIFT)
-                | (($ioty as u32) << TYPESHIFT) | ($nr as u32);
+            let ioc = ($dir as u32)
+                | (($size as u32 & IOCPARM_MASK) << SIZESHIFT)
+                | (($ioty as u32) << TYPESHIFT)
+                | ($nr as u32);
             from_unix_result(libc::ioctl(fd, ioc as libc::c_ulong, val))
         }
     };
