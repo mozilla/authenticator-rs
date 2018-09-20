@@ -15,8 +15,8 @@ use util::io_err;
 extern crate libc;
 extern crate winapi;
 
-use platform::winapi::winapi::shared::{hidclass, hidpi, hidusage};
 use platform::winapi::winapi::shared::{guiddef, minwindef, ntdef, windef};
+use platform::winapi::winapi::shared::{hidclass, hidpi, hidusage};
 use platform::winapi::winapi::um::{handleapi, setupapi};
 
 #[link(name = "setupapi")]
@@ -57,7 +57,10 @@ extern "stdcall" {
 
     fn HidD_FreePreparsedData(PreparsedData: hidpi::PHIDP_PREPARSED_DATA) -> ntdef::BOOLEAN;
 
-    fn HidP_GetCaps(PreparsedData: hidpi::PHIDP_PREPARSED_DATA, Capabilities: hidpi::PHIDP_CAPS) -> ntdef::NTSTATUS;
+    fn HidP_GetCaps(
+        PreparsedData: hidpi::PHIDP_PREPARSED_DATA,
+        Capabilities: hidpi::PHIDP_CAPS,
+    ) -> ntdef::NTSTATUS;
 }
 
 macro_rules! offset_of {
@@ -124,8 +127,10 @@ impl<'a> Iterator for DeviceInfoSetIter<'a> {
     type Item = String;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut device_interface_data = unsafe { mem::uninitialized::<setupapi::SP_DEVICE_INTERFACE_DATA>() };
-        device_interface_data.cbSize = mem::size_of::<setupapi::SP_DEVICE_INTERFACE_DATA>() as minwindef::UINT;
+        let mut device_interface_data =
+            unsafe { mem::uninitialized::<setupapi::SP_DEVICE_INTERFACE_DATA>() };
+        device_interface_data.cbSize =
+            mem::size_of::<setupapi::SP_DEVICE_INTERFACE_DATA>() as minwindef::UINT;
 
         let rv = unsafe {
             SetupDiEnumDeviceInterfaces(
