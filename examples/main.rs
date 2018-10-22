@@ -44,9 +44,11 @@ fn main() {
     env_logger::init();
 
     println!("Asking a security key to register now...");
-    let challenge_str = format!("{}{}",
+    let challenge_str = format!(
+        "{}{}",
         r#"{"challenge": "1vQ9mxionq0ngCnjD-wTsv1zUSrGRtFqG2xP09SbZ70","#,
-        r#" "version": "U2F_V2", "appId": "http://demo.yubico.com"}"#);
+        r#" "version": "U2F_V2", "appId": "http://demo.yubico.com"}"#
+    );
     let mut challenge = Sha256::default();
     challenge.input(challenge_str.as_bytes());
     let chall_bytes = challenge.result().to_vec();
@@ -69,7 +71,8 @@ fn main() {
             move |rv| {
                 tx.send(rv.unwrap()).unwrap();
             },
-        ).unwrap();
+        )
+        .unwrap();
 
     let register_data = try_or!(rx.recv(), |_| {
         panic!("Problem receiving, unable to continue");
@@ -94,7 +97,8 @@ fn main() {
             move |rv| {
                 tx.send(rv.unwrap()).unwrap();
             },
-        ).unwrap();
+        )
+        .unwrap();
 
     let (_, handle_used, sign_data) = try_or!(rx.recv(), |_| {
         println!("Problem receiving");
