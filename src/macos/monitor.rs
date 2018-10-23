@@ -5,9 +5,8 @@
 extern crate libc;
 extern crate log;
 
-use core_foundation::base::TCFType;
-use core_foundation_sys::base::*;
-use core_foundation_sys::runloop::*;
+use core_foundation::base::*;
+use core_foundation::runloop::*;
 use platform::iokit::*;
 use runloop::RunLoop;
 use std::collections::HashMap;

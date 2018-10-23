@@ -4,15 +4,15 @@
 
 #![allow(non_snake_case, non_camel_case_types, non_upper_case_globals)]
 
-extern crate core_foundation_sys;
 extern crate libc;
 
 use consts::{FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID};
+use core_foundation::array::*;
+use core_foundation::base::*;
 use core_foundation::dictionary::*;
 use core_foundation::number::*;
+use core_foundation::runloop::*;
 use core_foundation::string::*;
-use core_foundation_sys::base::*;
-use core_foundation_sys::runloop::*;
 use std::ops::Deref;
 use std::os::raw::c_void;
 

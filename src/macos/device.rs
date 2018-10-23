@@ -5,7 +5,7 @@
 extern crate log;
 
 use consts::{CID_BROADCAST, HID_RPT_SIZE};
-use core_foundation_sys::base::*;
+use core_foundation::base::*;
 use platform::iokit::*;
 use std::io;
 use std::io::{Read, Write};
