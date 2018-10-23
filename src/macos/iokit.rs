@@ -160,11 +160,11 @@ impl IOHIDDeviceMatcher {
         let dict = CFDictionary::<CFString, CFNumber>::from_CFType_pairs(&[
             (
                 CFString::from_static_string("DeviceUsage"),
-                CFNumber::from(FIDO_USAGE_U2FHID as i32),
+                CFNumber::from(i32::from(FIDO_USAGE_U2FHID)),
             ),
             (
                 CFString::from_static_string("DeviceUsagePage"),
-                CFNumber::from(FIDO_USAGE_PAGE as i32),
+                CFNumber::from(i32::from(FIDO_USAGE_PAGE)),
             ),
         ]);
         Self { dict }

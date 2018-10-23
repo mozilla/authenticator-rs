@@ -24,6 +24,7 @@ before_install:
 install:
   - rustup install nightly
   - rustup component add rustfmt-preview
+  - rustup component add clippy-preview
 
 script:
 - |
@@ -35,5 +36,5 @@ script:
   if [ "$TRAVIS_RUST_VERSION" == "stable" ] ; then
     cargo fmt --all -- --check
   fi
-- cargo build
+- cargo clippy --all-targets -- -A renamed_and_removed_lints -A new-ret-no-self -D warnings
 - cargo test
