@@ -71,8 +71,7 @@ fn main() {
             move |rv| {
                 tx.send(rv.unwrap()).unwrap();
             },
-        )
-        .unwrap();
+        ).unwrap();
 
     let register_data = try_or!(rx.recv(), |_| {
         panic!("Problem receiving, unable to continue");
@@ -97,8 +96,7 @@ fn main() {
             move |rv| {
                 tx.send(rv.unwrap()).unwrap();
             },
-        )
-        .unwrap();
+        ).unwrap();
 
     let (_, handle_used, sign_data) = try_or!(rx.recv(), |_| {
         println!("Problem receiving");

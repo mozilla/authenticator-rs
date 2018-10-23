@@ -95,8 +95,7 @@ impl StateMachine {
                     &challenge,
                     &application,
                     &key_handle.credential,
-                )
-                .unwrap_or(false) /* no match on failure */
+                ).unwrap_or(false) /* no match on failure */
             });
 
             while alive() {

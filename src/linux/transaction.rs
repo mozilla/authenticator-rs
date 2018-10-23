@@ -34,8 +34,7 @@ impl Transaction {
                 callback.call(Err(::Error::NotAllowed));
             },
             timeout,
-        )
-        .map_err(|_| ::Error::Unknown)?;
+        ).map_err(|_| ::Error::Unknown)?;
 
         Ok(Self {
             thread: Some(thread),
