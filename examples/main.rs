@@ -24,7 +24,7 @@ macro_rules! try_or {
     };
 }
 
-fn u2f_get_key_handle_from_register_response(register_response: &Vec<u8>) -> io::Result<Vec<u8>> {
+fn u2f_get_key_handle_from_register_response(register_response: &[u8]) -> io::Result<Vec<u8>> {
     if register_response[0] != 0x05 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -33,7 +33,7 @@ fn u2f_get_key_handle_from_register_response(register_response: &Vec<u8>) -> io:
     }
 
     let key_handle_len = register_response[66] as usize;
-    let mut public_key = register_response.clone();
+    let mut public_key = register_response.to_owned();
     let mut key_handle = public_key.split_off(67);
     let _attestation = key_handle.split_off(key_handle_len);
 
