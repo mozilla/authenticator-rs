@@ -24,20 +24,12 @@ impl Event {
                 ref dev,
                 parent: _,
                 location: _,
-            }
-                if dev.starts_with("uhid") =>
-            {
-                Some(Event::Add(("/dev/".to_owned() + dev).into()))
-            }
+            } if dev.starts_with("uhid") => Some(Event::Add(("/dev/".to_owned() + dev).into())),
             devd_rs::Event::Detach {
                 ref dev,
                 parent: _,
                 location: _,
-            }
-                if dev.starts_with("uhid") =>
-            {
-                Some(Event::Remove(("/dev/".to_owned() + dev).into()))
-            }
+            } if dev.starts_with("uhid") => Some(Event::Remove(("/dev/".to_owned() + dev).into())),
             _ => None,
         }
     }
