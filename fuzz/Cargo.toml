@@ -9,7 +9,7 @@ publish = false
 cargo-fuzz = true
 
 [dependencies]
-rand = "0.3"
+rand = "0.6"
 
 [dependencies.u2fhid]
 path = ".."
