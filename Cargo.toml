@@ -33,4 +33,4 @@ bitflags = "1.0"
 [dev-dependencies]
 sha2 = "^0.8"
 base64 = "^0.10"
-env_logger = "0.5"
+env_logger = "0.6"
