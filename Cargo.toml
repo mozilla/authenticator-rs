@@ -7,7 +7,7 @@ authors = ["Kyle Machulis <kyle@nonpolynomial.com>", "J.C. Jones <jc@mozilla.com
 libudev = "^0.2"
 
 [target.'cfg(target_os = "freebsd")'.dependencies]
-devd-rs = "0.2.1"
+devd-rs = "0.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.6.2"
@@ -23,7 +23,7 @@ features = [
 ]
 
 [dependencies]
-rand = "0.3"
+rand = "0.6"
 log = "0.4"
 libc = "^0.2"
 boxfnonce = "0.0.3"
@@ -31,6 +31,6 @@ runloop = "0.1.0"
 bitflags = "1.0"
 
 [dev-dependencies]
-sha2 = "^0.7"
-base64 = "^0.4"
-env_logger = "0.5"
+sha2 = "^0.8"
+base64 = "^0.10"
+env_logger = "0.6"
