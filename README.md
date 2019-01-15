@@ -1,7 +1,7 @@
 # A Rust HID library for interacting with U2F Security Keys
 
 [![Build Status](https://travis-ci.org/jcjones/u2f-hid-rs.svg?branch=master)](https://travis-ci.org/jcjones/u2f-hid-rs)
-![Maturity Level](https://img.shields.io/badge/maturity-beta-yellow.svg)
+![Maturity Level](https://img.shields.io/badge/maturity-release-green.svg)
 
 This is a cross-platform library for interacting with U2F Security Key-type devices via Rust.
 
