@@ -29,6 +29,14 @@ libc = "0.2"
 boxfnonce = "0.0.3"
 runloop = "0.1.0"
 bitflags = "1.0"
+serde = "1.0"
+serde_bytes = "0.10"
+# Needs patches for trailing data errors
+# see https://github.com/pyfisch/cbor/pull/101
+serde_cbor = {git = "https://github.com/baloo/cbor", branch="baloo/features/streamed_slices.v2"}
+serde_derive = "1.0"
+nom = "4.2"
+
 
 [dev-dependencies]
 sha2 = "^0.8"
