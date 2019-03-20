@@ -6,33 +6,34 @@ use std::io;
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::time::Duration;
 
-use consts::PARAMETER_SIZE;
+use crate::ctap::{CollectedClientData, WebauthnType};
+use crate::ctap2::attestation::AttestationObject;
+use crate::ctap2::commands::{MakeCredentials, Pin};
+use crate::ctap2::server::{PublicKeyCredentialParameters, RelyingParty, User};
+//use consts::PARAMETER_SIZE;
 use runloop::RunLoop;
 use statemachine::StateMachine;
 use util::OnceCallback;
 
 enum QueueAction {
     Register {
-        flags: ::RegisterFlags,
         timeout: u64,
-        challenge: Vec<u8>,
-        application: ::AppId,
-        key_handles: Vec<::KeyHandle>,
-        callback: OnceCallback<::RegisterResult>,
+        params: MakeCredentials,
+        callback: OnceCallback<(AttestationObject, CollectedClientData)>,
     },
-    Sign {
-        flags: ::SignFlags,
-        timeout: u64,
-        challenge: Vec<u8>,
-        app_ids: Vec<::AppId>,
-        key_handles: Vec<::KeyHandle>,
-        callback: OnceCallback<::SignResult>,
-    },
+    //Sign {
+    //    flags: ::SignFlags,
+    //    timeout: u64,
+    //    challenge: Vec<u8>,
+    //    app_ids: Vec<::AppId>,
+    //    key_handles: Vec<::KeyHandle>,
+    //    callback: OnceCallback<::SignResult>,
+    //},
     Cancel,
 }
 
 pub(crate) enum Capability {
-    Fido2 = 2
+    Fido2 = 2,
 }
 
 pub struct FidoManager {
@@ -52,34 +53,24 @@ impl FidoManager {
             while alive() {
                 match rx.recv_timeout(Duration::from_millis(50)) {
                     Ok(QueueAction::Register {
-                        flags,
                         timeout,
-                        challenge,
-                        application,
-                        key_handles,
+                        params,
                         callback,
                     }) => {
                         // This must not block, otherwise we can't cancel.
-                        sm.register(
-                            flags,
-                            timeout,
-                            challenge,
-                            application,
-                            key_handles,
-                            callback,
-                        );
+                        sm.register(timeout, params, callback);
                     }
-                    Ok(QueueAction::Sign {
-                        flags,
-                        timeout,
-                        challenge,
-                        app_ids,
-                        key_handles,
-                        callback,
-                    }) => {
-                        // This must not block, otherwise we can't cancel.
-                        sm.sign(flags, timeout, challenge, app_ids, key_handles, callback);
-                    }
+                    //Ok(QueueAction::Sign {
+                    //    flags,
+                    //    timeout,
+                    //    challenge,
+                    //    app_ids,
+                    //    key_handles,
+                    //    callback,
+                    //}) => {
+                    //    // This must not block, otherwise we can't cancel.
+                    //    sm.sign(flags, timeout, challenge, app_ids, key_handles, callback);
+                    //}
                     Ok(QueueAction::Cancel) => {
                         // Cancelling must block so that we don't start a new
                         // polling thread before the old one has shut down.
@@ -96,7 +87,11 @@ impl FidoManager {
             sm.cancel();
         })?;
 
-        Ok(Self { queue, tx, filter: None })
+        Ok(Self {
+            queue,
+            tx,
+            filter: None,
+        })
     }
 
     pub fn fido2_capable(&mut self) {
@@ -105,83 +100,102 @@ impl FidoManager {
 
     pub fn register<F>(
         &self,
-        flags: ::RegisterFlags,
+        relying_party: String,
+        origin: String,
         timeout: u64,
         challenge: Vec<u8>,
-        application: ::AppId,
-        key_handles: Vec<::KeyHandle>,
+        user: User,
+        pub_cred_params: Vec<PublicKeyCredentialParameters>,
+        pin: Option<Pin>,
         callback: F,
     ) -> Result<(), ::Error>
     where
-        F: FnOnce(Result<::RegisterResult, ::Error>),
+        F: FnOnce(Result<(AttestationObject, CollectedClientData), ::Error>),
         F: Send + 'static,
     {
-        if challenge.len() != PARAMETER_SIZE || application.len() != PARAMETER_SIZE {
-            return Err(::Error::Unknown);
-        }
+        //if challenge.len() != PARAMETER_SIZE || application.len() != PARAMETER_SIZE {
+        //    return Err(::Error::Unknown);
+        //}
 
-        for key_handle in &key_handles {
-            if key_handle.credential.len() > 256 {
-                return Err(::Error::Unknown);
-            }
-        }
+        //for key_handle in &key_handles {
+        //    if key_handle.credential.len() > 256 {
+        //        return Err(::Error::Unknown);
+        //    }
+        //}
 
         let callback = OnceCallback::new(callback);
+
+        let rp = RelyingParty { id: relying_party };
+
+        let client_data = CollectedClientData {
+            type_: WebauthnType::Create,
+            challenge: challenge.clone().into(),
+            origin,
+            token_binding: None,
+        };
+
+        let register = MakeCredentials::new(
+            client_data,
+            rp,
+            user,
+            pub_cred_params.clone(),
+            Vec::new(),
+            None,
+            pin,
+        );
+
         let action = QueueAction::Register {
-            flags,
             timeout,
-            challenge,
-            application,
-            key_handles,
+            params: register,
             callback,
         };
         self.tx.send(action).map_err(|_| ::Error::Unknown)
     }
 
-    pub fn sign<F>(
-        &self,
-        flags: ::SignFlags,
-        timeout: u64,
-        challenge: Vec<u8>,
-        app_ids: Vec<::AppId>,
-        key_handles: Vec<::KeyHandle>,
-        callback: F,
-    ) -> Result<(), ::Error>
-    where
-        F: FnOnce(Result<::SignResult, ::Error>),
-        F: Send + 'static,
-    {
-        if challenge.len() != PARAMETER_SIZE {
-            return Err(::Error::Unknown);
-        }
+    //pub fn sign<F>(
+    //    &self,
+    //    flags: ::SignFlags,
+    //    timeout: u64,
+    //    challenge: Vec<u8>,
+    //    app_ids: Vec<::AppId>,
+    //    key_handles: Vec<::KeyHandle>,
+    //    callback: F,
+    //) -> Result<(), ::Error>
+    //where
+    //    F: FnOnce(Result<::SignResult, ::Error>),
+    //    F: Send + 'static,
+    //{
+    //    if challenge.len() != PARAMETER_SIZE {
+    //        return Err(::Error::Unknown);
+    //    }
 
-        if app_ids.is_empty() {
-            return Err(::Error::Unknown);
-        }
+    //    if app_ids.is_empty() {
+    //        return Err(::Error::Unknown);
+    //    }
 
-        for app_id in &app_ids {
-            if app_id.len() != PARAMETER_SIZE {
-                return Err(::Error::Unknown);
-            }
-        }
+    //    for app_id in &app_ids {
+    //        if app_id.len() != PARAMETER_SIZE {
+    //            return Err(::Error::Unknown);
+    //        }
+    //    }
 
-        for key_handle in &key_handles {
-            if key_handle.credential.len() > 256 {
-                return Err(::Error::Unknown);
-            }
-        }
+    //    for key_handle in &key_handles {
+    //        if key_handle.credential.len() > 256 {
+    //            return Err(::Error::Unknown);
+    //        }
+    //    }
 
-        let callback = OnceCallback::new(callback);
-        let action = QueueAction::Sign {
-            flags,
-            timeout,
-            challenge,
-            app_ids,
-            key_handles,
-            callback,
-        };
-        self.tx.send(action).map_err(|_| ::Error::Unknown)
-    }
+    //    let callback = OnceCallback::new(callback);
+    //    let action = QueueAction::Sign {
+    //        flags,
+    //        timeout,
+    //        challenge,
+    //        app_ids,
+    //        key_handles,
+    //        callback,
+    //    };
+    //    self.tx.send(action).map_err(|_| ::Error::Unknown)
+    //}
 
     pub fn cancel(&self) -> Result<(), ::Error> {
         self.tx

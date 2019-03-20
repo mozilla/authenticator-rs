@@ -2,9 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use platform::monitor::Monitor;
 use runloop::RunLoop;
-use std::ffi::OsString;
+use std::path::PathBuf;
+use transport::platform::monitor::Monitor;
 use util::OnceCallback;
 
 pub struct Transaction {
@@ -19,7 +19,7 @@ impl Transaction {
         new_device_cb: F,
     ) -> Result<Self, ::Error>
     where
-        F: Fn(OsString, &Fn() -> bool) + Sync + Send + 'static,
+        F: Fn(PathBuf, &Fn() -> bool) + Sync + Send + 'static,
         T: 'static,
     {
         let thread = RunLoop::new_with_timeout(

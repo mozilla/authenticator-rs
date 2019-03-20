@@ -1,0 +1,20 @@
+[package]
+name = "cose"
+version = "0.1.0"
+authors = ["Arthur Gautier <baloo@gandi.net>"]
+
+[dependencies]
+log = "0.4"
+# TODO(baloo): can I use ring(boringssl) here? have to ask jcj.
+ring = "0.14"
+untrusted = "0.6"
+# TODO(baloo): can I use openssl here? have to ask jcj.
+#              needed to derive ec public key from affine coordinates
+openssl = "0.10"
+serde = "1.0"
+serde_bytes = "0.10"
+
+sha2 = "0.8.0"
+serde_cbor = "0.9.0"
+#{ git = "https://github.com/baloo/cbor", branch = "baloo/features/streamed_slices.v2" }
+

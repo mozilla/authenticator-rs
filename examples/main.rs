@@ -5,7 +5,7 @@
 extern crate authenticator;
 extern crate base64;
 extern crate sha2;
-use authenticator::{AuthenticatorTransports, KeyHandle, RegisterFlags, SignFlags, FidoManager};
+use authenticator::{AuthenticatorTransports, FidoManager, KeyHandle, RegisterFlags, SignFlags};
 use sha2::{Digest, Sha256};
 use std::io;
 use std::sync::mpsc::channel;

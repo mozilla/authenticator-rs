@@ -7,9 +7,9 @@ use libudev;
 use libudev::EventType;
 use runloop::RunLoop;
 use std::collections::HashMap;
-use std::ffi::OsString;
 use std::io;
 use std::os::unix::io::AsRawFd;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 const UDEV_SUBSYSTEM: &str = "hidraw";
@@ -30,15 +30,15 @@ fn poll(fds: &mut Vec<::libc::pollfd>) -> io::Result<()> {
 
 pub struct Monitor<F>
 where
-    F: Fn(OsString, &Fn() -> bool) + Sync,
+    F: Fn(PathBuf, &Fn() -> bool) + Sync,
 {
-    runloops: HashMap<OsString, RunLoop>,
+    runloops: HashMap<PathBuf, RunLoop>,
     new_device_cb: Arc<F>,
 }
 
 impl<F> Monitor<F>
 where
-    F: Fn(OsString, &Fn() -> bool) + Send + Sync + 'static,
+    F: Fn(PathBuf, &Fn() -> bool) + Send + Sync + 'static,
 {
     pub fn new(new_device_cb: F) -> Self {
         Self {
@@ -55,7 +55,12 @@ where
 
         // Iterate all existing devices.
         for dev in enumerator.scan_devices()? {
-            if let Some(path) = dev.devnode().map(|p| p.to_owned().into_os_string()) {
+            if let Some(path) = dev
+                .devnode()
+                .map(|p| p.to_owned().into_os_string())
+                .map(PathBuf::from)
+            {
+                debug!("monitor, adding {:?} from existing device", path);
                 self.add_device(path);
             }
         }
@@ -90,20 +95,22 @@ where
         let path = event
             .device()
             .devnode()
-            .map(|dn| dn.to_owned().into_os_string());
+            .map(|dn| dn.to_owned().into_os_string())
+            .map(PathBuf::from);
 
         match (event.event_type(), path) {
             (EventType::Add, Some(path)) => {
+                debug!("monitor, adding {:?} from monitored new devices", path);
                 self.add_device(path);
             }
             (EventType::Remove, Some(path)) => {
-                self.remove_device(&path);
+                self.remove_device(path);
             }
             _ => { /* ignore other types and failures */ }
         }
     }
 
-    fn add_device(&mut self, path: OsString) {
+    fn add_device(&mut self, path: PathBuf) {
         let f = self.new_device_cb.clone();
         let key = path.clone();
 
@@ -118,16 +125,15 @@ where
         }
     }
 
-    fn remove_device(&mut self, path: &OsString) {
-        if let Some(runloop) = self.runloops.remove(path) {
+    fn remove_device(&mut self, path: PathBuf) {
+        if let Some(runloop) = self.runloops.remove(&path) {
             runloop.cancel();
         }
     }
 
     fn remove_all_devices(&mut self) {
-        while !self.runloops.is_empty() {
-            let path = self.runloops.keys().next().unwrap().clone();
-            self.remove_device(&path);
+        for (_, runloop) in self.runloops.iter() {
+            runloop.cancel();
         }
     }
 }

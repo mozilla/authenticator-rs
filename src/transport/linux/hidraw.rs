@@ -9,7 +9,7 @@ use std::io;
 use std::mem;
 use std::os::unix::io::RawFd;
 
-use hidproto::*;
+use transport::hidproto::*;
 use util::{from_unix_result, io_err};
 
 #[allow(non_camel_case_types)]

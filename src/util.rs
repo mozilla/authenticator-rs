@@ -9,6 +9,8 @@ use std::sync::{Arc, Mutex};
 
 use boxfnonce::SendBoxFnOnce;
 
+use log;
+
 macro_rules! try_or {
     ($val:expr, $or:expr) => {
         match $val {
@@ -36,7 +38,7 @@ impl Signed for usize {
     }
 }
 
-#[cfg(any(target_os = "linux"))]
+#[cfg(all(target_os = "linux", not(test)))]
 pub fn from_unix_result<T: Signed>(rv: T) -> io::Result<T> {
     if rv.is_negative() {
         let errno = unsafe { *libc::__errno_location() };
@@ -46,7 +48,7 @@ pub fn from_unix_result<T: Signed>(rv: T) -> io::Result<T> {
     }
 }
 
-#[cfg(any(target_os = "freebsd"))]
+#[cfg(all(target_os = "freebsd", not(test)))]
 pub fn from_unix_result<T: Signed>(rv: T) -> io::Result<T> {
     if rv.is_negative() {
         let errno = unsafe { *libc::__error() };
@@ -90,5 +92,12 @@ impl<T> Clone for OnceCallback<T> {
         Self {
             callback: self.callback.clone(),
         }
+    }
+}
+
+pub fn trace_hex(data: &[u8]) {
+    if log_enabled!(log::Level::Trace) {
+        let parts: Vec<String> = data.iter().map(|byte| format!("{:02x}", byte)).collect();
+        trace!("USB send: {}", parts.join(""));
     }
 }

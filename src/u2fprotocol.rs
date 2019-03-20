@@ -127,6 +127,7 @@ where
     T: U2FDevice + Read + Write,
 {
     assert_eq!(nonce.len(), INIT_NONCE_SIZE);
+
     let raw = sendrecv(dev, U2FHID_INIT, nonce)?;
     dev.set_cid(U2FHIDInitResp::read(&raw, nonce)?);
 
