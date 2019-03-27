@@ -2,13 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+extern crate authenticator;
 extern crate base64;
 extern crate sha2;
-extern crate u2fhid;
+use authenticator::{AuthenticatorTransports, KeyHandle, RegisterFlags, SignFlags, U2FManager};
 use sha2::{Digest, Sha256};
 use std::io;
 use std::sync::mpsc::channel;
-use u2fhid::{AuthenticatorTransports, KeyHandle, RegisterFlags, SignFlags, U2FManager};
 
 extern crate env_logger;
 extern crate log;

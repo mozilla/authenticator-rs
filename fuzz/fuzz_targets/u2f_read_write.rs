@@ -3,13 +3,14 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #![no_main]
-#[macro_use] extern crate libfuzzer_sys;
-extern crate u2fhid;
+#[macro_use]
+extern crate libfuzzer_sys;
+extern crate authenticator;
 
 use std::{cmp, io};
 
-use u2fhid::{CID_BROADCAST, HID_RPT_SIZE};
-use u2fhid::{U2FDevice, sendrecv};
+use authenticator::{sendrecv, U2FDevice};
+use authenticator::{CID_BROADCAST, HID_RPT_SIZE};
 
 struct TestDevice {
     cid: [u8; 4],
@@ -20,7 +21,7 @@ impl TestDevice {
     pub fn new() -> TestDevice {
         TestDevice {
             cid: CID_BROADCAST,
-            data: vec!(),
+            data: vec![],
         }
     }
 }
@@ -57,12 +58,10 @@ impl U2FDevice for TestDevice {
     }
 }
 
-fuzz_target!(|data: &[u8]| {
-    if data.len() > 0 {
-        let cmd = data[0];
-        let data = &data[1..];
-        let mut dev = TestDevice::new();
-        let res = sendrecv(&mut dev, cmd, data);
-        assert_eq!(data, &res.unwrap()[..]);
-    }
+fuzz_target!(|data: &[u8]| if data.len() > 0 {
+    let cmd = data[0];
+    let data = &data[1..];
+    let mut dev = TestDevice::new();
+    let res = sendrecv(&mut dev, cmd, data);
+    assert_eq!(data, &res.unwrap()[..]);
 });

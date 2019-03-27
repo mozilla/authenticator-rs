@@ -1,16 +1,18 @@
-# A Rust HID library for interacting with U2F Security Keys
+# A Rust library for interacting with CTAP1/CTAP2 Security Keys
 
-[![Build Status](https://travis-ci.org/jcjones/u2f-hid-rs.svg?branch=master)](https://travis-ci.org/jcjones/u2f-hid-rs)
+[![Build Status](https://travis-ci.org/jcjones/authenticator-rs.svg?branch=master)](https://travis-ci.org/jcjones/authenticator-rs)
 ![Maturity Level](https://img.shields.io/badge/maturity-release-green.svg)
 
-This is a cross-platform library for interacting with U2F Security Key-type devices via Rust.
+This is a cross-platform library for interacting with Security Key-type devices via Rust.
 
 * **Supported Platforms**: Windows, Linux, FreeBSD, and macOS.
-* **Supported HID Transports**: USB.
-* **Supported Protocols**: [FIDO U2F over USB](https://fidoalliance.org/specs/fido-u2f-v1.1-id-20160915/fido-u2f-raw-message-formats-v1.1-id-20160915.html).
+* **Supported Transports**: USB HID.
+* **Supported Protocols**: [FIDO U2F over USB](https://fidoalliance.org/specs/fido-u2f-v1.1-id-20160915/fido-u2f-raw-message-formats-v1.1-id-20160915.html). [CTAP2 support](https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html) is forthcoming, with work being done in the `ctap2` branch.
 
-This library currently focuses on U2F security keys, but is expected to be extended to
-support additional protocols and transports.
+This library currently focuses on USB security keys, but is expected to be extended to
+support additional transports.
+
+**NOTE**: This library will be moving to the Mozilla github account in the near future.
 
 ## Usage
 
@@ -24,7 +26,7 @@ RUST_LOG=debug cargo run --example main
 ```
 
 Proper usage should be to call into this library from something else - e.g., Firefox. There are
-some [C headers exposed for the purpose](u2f-hid-rs/blob/master/src/u2fhid-capi.h).
+some [C headers exposed for the purpose](authenticator/blob/master/src/u2fhid-capi.h).
 
 ## Tests
 
