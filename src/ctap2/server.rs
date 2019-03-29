@@ -52,7 +52,7 @@ impl User {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 /// see: https://www.iana.org/assignments/cose/cose.xhtml#table-algorithms
 // TODO(baloo): could probably use a more generic approach, need to see this
 //              whenever we introduce the firefox-side api

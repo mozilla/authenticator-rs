@@ -3,7 +3,6 @@ use std::fmt;
 use nom::{be_u16, be_u32, be_u8, Err as NomErr, IResult};
 use serde::de::{self, Deserialize, Deserializer, Error as SerdeError, MapAccess, Visitor};
 use serde_bytes::ByteBuf;
-use serde_cbor::Value;
 
 use super::server::Alg;
 use super::utils::from_slice_stream;
@@ -112,13 +111,11 @@ impl<'de> Deserialize<'de> for AAGuid {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct AttestedCredentialData {
     pub aaguid: AAGuid,
     pub credential_id: Vec<u8>,
-    // TODO(baloo): Cose-encoded Key, should be deserialized correctly to be
-    //              be able to verify signatures
-    pub credential_public_key: Value,
+    pub credential_public_key: cose::PublicKey,
 }
 
 use nom::{Context, ErrorKind};
@@ -158,7 +155,7 @@ bitflags! {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct AuthenticatorData {
     pub rp_id_hash: RpIdHash,
     pub flags: AuthenticatorDataFlags,
@@ -223,7 +220,7 @@ impl<'de> Deserialize<'de> for AuthenticatorData {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, PartialEq, Eq)]
 /// x509 encoded attestation certificate
 pub struct AttestationCertificate(Vec<u8>);
 
@@ -253,7 +250,7 @@ impl<'de> Deserialize<'de> for AttestationCertificate {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, PartialEq, Eq)]
 pub struct Signature(ByteBuf);
 
 impl fmt::Debug for Signature {
@@ -263,7 +260,7 @@ impl fmt::Debug for Signature {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 // TODO(baloo): there is a couple other options than x5c:
 //              https://www.w3.org/TR/webauthn/#packed-attestation
 pub struct AttestationStatement {
@@ -275,7 +272,7 @@ pub struct AttestationStatement {
     attestation_cert: Vec<AttestationCertificate>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum AttestationFormat {
     Packed,
     // TOOD(baloo): only packed is implemented for now see spec:
@@ -316,7 +313,7 @@ impl<'de> Deserialize<'de> for AttestationFormat {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct AttestationObject {
     pub format: AttestationFormat,
     pub auth_data: AuthenticatorData,

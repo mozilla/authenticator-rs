@@ -4,7 +4,8 @@ use std::fmt;
 
 use pretty_hex::pretty_hex;
 
-use cose::agreement::{self, PublicKey};
+use cose::agreement::{self, Agreement};
+use cose::PublicKey;
 use hmac::{Hmac, Mac};
 use serde::de::{self, Deserialize, Deserializer, Error as SerdeError, MapAccess, Visitor};
 use serde::ser::{Error as ErrorT, Serialize, SerializeMap, Serializer};
@@ -735,7 +736,7 @@ pub enum Error {
     MissingRequiredField(&'static str),
     Parsing(error::Error),
     Serialization(error::Error),
-    Cose(agreement::Error),
+    Cose(cose::Error),
     StatusCode(StatusCode, Option<Value>),
     Openssl(ErrorStack),
     Pin(PinError),
@@ -801,8 +802,8 @@ impl From<error::Error> for Error {
     }
 }
 
-impl From<agreement::Error> for Error {
-    fn from(e: agreement::Error) -> Error {
+impl From<cose::Error> for Error {
+    fn from(e: cose::Error) -> Error {
         Error::Cose(e)
     }
 }
@@ -895,7 +896,7 @@ pub(crate) trait ClientPINSubCommand {
 }
 
 struct ClientPinResponse {
-    key_agreement: Option<cose::agreement::PublicKey>,
+    key_agreement: Option<cose::PublicKey>,
     pin_token: Option<EncryptedPinToken>,
     /// Number of PIN attempts remaining before lockout.
     _retries: Option<u8>,
@@ -1114,7 +1115,7 @@ where
 }
 
 #[derive(Debug)]
-pub struct KeyAgreement(cose::agreement::PublicKey);
+pub struct KeyAgreement(cose::PublicKey);
 
 impl KeyAgreement {
     pub fn shared_secret(&self) -> Result<ECDHSecret, Error> {

@@ -37,7 +37,7 @@ pub enum Version {
 //        This member MUST be present if status is present, and MUST be a
 //        base64url encoding of the Token Binding ID that was used when
 //        communicating with the Relying Party.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TokenBinding {
     Present(Vec<u8>),
     Supported,
@@ -78,7 +78,7 @@ impl Serialize for TokenBinding {
 //    existing credential. The purpose of this member is to prevent certain
 //    types of signature confusion attacks (where an attacker substitutes one
 //    legitimate signature for another).
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum WebauthnType {
     Create,
     Get,
@@ -96,7 +96,7 @@ impl Serialize for WebauthnType {
     }
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, PartialEq, Eq)]
 pub struct Challenge(Vec<u8>);
 
 impl fmt::Debug for Challenge {
@@ -112,7 +112,7 @@ impl From<Vec<u8>> for Challenge {
     }
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, PartialEq, Eq)]
 pub struct CollectedClientData {
     #[serde(rename = "type")]
     pub type_: WebauthnType,
