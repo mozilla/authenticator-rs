@@ -42,6 +42,14 @@ extern crate openssl;
 #[cfg(test)]
 #[macro_use]
 extern crate hex_literal;
+#[cfg(test)]
+extern crate once_cell;
+#[cfg(test)]
+extern crate ring;
+#[cfg(test)]
+extern crate simple_logger;
+#[cfg(test)]
+extern crate untrusted;
 
 mod consts;
 mod statemachine;
@@ -106,3 +114,6 @@ pub use consts::*;
 pub use u2fprotocol::*;
 #[cfg(fuzzing)]
 pub use u2ftypes::*;
+
+#[cfg(test)]
+mod tests;

@@ -1,5 +1,7 @@
 use std::fmt;
 
+#[cfg(test)]
+use serde::de::{self, Deserialize, Deserializer, Visitor};
 use serde::ser::{Serialize, SerializeMap, Serializer};
 use serde_json as json;
 use sha2::{Digest, Sha256};
@@ -143,6 +145,38 @@ impl Serialize for ClientDataHash {
         S: Serializer,
     {
         serializer.serialize_bytes(&self.0)
+    }
+}
+
+#[cfg(test)]
+impl<'de> Deserialize<'de> for ClientDataHash {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct ClientDataHashVisitor;
+
+        impl<'de> Visitor<'de> for ClientDataHashVisitor {
+            type Value = ClientDataHash;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a byte string")
+            }
+
+            fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                let mut out = [0u8; 32];
+                if out.len() != v.len() {
+                    return Err(E::custom("unexpected byte len"));
+                }
+                out.copy_from_slice(v);
+                Ok(ClientDataHash(out))
+            }
+        }
+
+        deserializer.deserialize_bytes(ClientDataHashVisitor)
     }
 }
 

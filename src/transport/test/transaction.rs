@@ -24,7 +24,8 @@ impl Transaction {
         F: Fn(TestCase, &Fn() -> bool) + Sync + Send + 'static,
         T: 'static,
     {
-        new_device_cb(TestCase::Fido2Simple, &always_alive);
+        let test_case = TestCase::active();
+        new_device_cb(test_case, &always_alive);
         Ok(Self {})
     }
 

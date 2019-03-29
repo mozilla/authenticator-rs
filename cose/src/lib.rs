@@ -55,7 +55,7 @@ impl StdErrorT for Error {
 // https://www.iana.org/assignments/cose/cose.xhtml#elliptic-curves
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[repr(u8)]
-enum EllipticCurve {
+pub enum EllipticCurve {
     P256 = 1,
     P384 = 2,
     // TODO(baloo): looks unsupported by openssl, have to check
@@ -139,6 +139,13 @@ impl PublicKey {
         //point.affine_coordinates_gf2m(&group, &mut x, &mut y, &mut ctx)?;
 
         Ok((x.to_vec().into(), y.to_vec().into()))
+    }
+
+    pub fn new(curve: EllipticCurve, bytes: Vec<u8>) -> Self {
+        PublicKey {
+            curve,
+            bytes,
+        }
     }
 }
 
@@ -249,5 +256,11 @@ impl Serialize for PublicKey {
         map.serialize_entry(&-2, &x)?;
         map.serialize_entry(&-3, &y)?;
         map.end()
+    }
+}
+
+impl AsRef<[u8]> for PublicKey {
+    fn as_ref(&self) -> &[u8] {
+        self.bytes.as_ref()
     }
 }

@@ -26,10 +26,9 @@ use crate::transport::{self, FidoDevice};
 use crate::ctap2::attestation::AAGuid;
 use crate::ctap2::attestation::AttestationObject;
 
-use crate::ctap2::server::PublicKeyCredentialDescriptor;
-use crate::ctap2::server::PublicKeyCredentialParameters;
-use crate::ctap2::server::RelyingParty;
-use crate::ctap2::server::User;
+use crate::ctap2::server::{
+    PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, User,
+};
 
 use crate::ctap::{ClientDataHash, CollectedClientData, Version};
 
@@ -63,6 +62,7 @@ trait RequestWithPin: Request {
 
 // Spec: https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html#authenticator-api
 #[repr(u8)]
+#[derive(Debug)]
 pub enum Command {
     MakeCredentials = 0x01,
     GetAssertion = 0x02,
@@ -70,6 +70,21 @@ pub enum Command {
     ClientPin = 0x06,
     Reset = 0x07,
     GetNextAssertion = 0x08,
+}
+
+impl Command {
+    #[cfg(test)]
+    pub fn from_u8(v: u8) -> Option<Command> {
+        match v {
+            0x01 => Some(Command::MakeCredentials),
+            0x02 => Some(Command::GetAssertion),
+            0x04 => Some(Command::GetInfo),
+            0x06 => Some(Command::ClientPin),
+            0x07 => Some(Command::Reset),
+            0x08 => Some(Command::GetNextAssertion),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -228,6 +243,57 @@ impl From<u8> for StatusCode {
     }
 }
 
+#[cfg(test)]
+impl Into<u8> for StatusCode {
+    fn into(self) -> u8 {
+        match self {
+            StatusCode::OK => 0x00,
+            StatusCode::InvalidCommand => 0x01,
+            StatusCode::InvalidParameter => 0x02,
+            StatusCode::InvalidLength => 0x03,
+            StatusCode::InvalidSeq => 0x04,
+            StatusCode::Timeout => 0x05,
+            StatusCode::ChannelBusy => 0x06,
+            StatusCode::LockRequired => 0x0A,
+            StatusCode::InvalidChannel => 0x0B,
+            StatusCode::CBORUnexpectedType => 0x11,
+            StatusCode::InvalidCBOR => 0x12,
+            StatusCode::MissingParameter => 0x14,
+            StatusCode::LimitExceeded => 0x15,
+            StatusCode::UnsupportedExtension => 0x16,
+            StatusCode::CredentialExcluded => 0x19,
+            StatusCode::Processing => 0x21,
+            StatusCode::InvalidCredential => 0x22,
+            StatusCode::UserActionPending => 0x23,
+            StatusCode::OperationPending => 0x24,
+            StatusCode::NoOperations => 0x25,
+            StatusCode::UnsupportedAlgorithm => 0x26,
+            StatusCode::OperationDenied => 0x27,
+            StatusCode::KeyStoreFull => 0x28,
+            StatusCode::NoOperationPending => 0x2A,
+            StatusCode::UnsupportedOption => 0x2B,
+            StatusCode::InvalidOption => 0x2C,
+            StatusCode::KeepaliveCancel => 0x2D,
+            StatusCode::NoCredentials => 0x2E,
+            StatusCode::UserActionTimeout => 0x2f,
+            StatusCode::NotAllowed => 0x30,
+            StatusCode::PinInvalid => 0x31,
+            StatusCode::PinBlocked => 0x32,
+            StatusCode::PinAuthInvalid => 0x33,
+            StatusCode::PinAuthBlocked => 0x34,
+            StatusCode::PinNotSet => 0x35,
+            StatusCode::PinRequired => 0x36,
+            StatusCode::PinPolicyViolation => 0x37,
+            StatusCode::PinTokenExpired => 0x38,
+            StatusCode::RequestTooLarge => 0x39,
+            StatusCode::ActionTimeout => 0x3A,
+            StatusCode::UpRequired => 0x3B,
+
+            StatusCode::Unknown(othr) => othr,
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone)]
 pub enum PinError {
     PinIsTooShort,
@@ -256,6 +322,7 @@ impl StdErrorT for PinError {
 }
 
 #[derive(Debug)]
+#[cfg_attr(test, derive(Deserialize))]
 pub struct PinAuth([u8; 16]);
 
 impl AsRef<[u8]> for PinAuth {
@@ -358,6 +425,7 @@ where
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(Deserialize))]
 pub struct MakeCredentialsOptions {
     #[serde(rename = "rk")]
     resident_key: bool,
@@ -1208,13 +1276,13 @@ impl AsRef<[u8]> for PinToken {
 }
 
 #[cfg(test)]
-mod test {
+pub mod test {
     use super::{AuthenticatorInfo, MakeCredentials, Request};
     use crate::ctap::{CollectedClientData, WebauthnType};
     use crate::ctap2::server::{Alg, PublicKeyCredentialParameters, RelyingParty, User};
     use serde_cbor::de::from_slice;
 
-    const MAKE_CREDENTIALS_SAMPLE_RESPONSE: [u8; 666] =
+    pub const MAKE_CREDENTIALS_SAMPLE_RESPONSE: [u8; 666] =
         include!("tests/MAKE_CREDENTIALS_SAMPLE_RESPONSE,in");
 
     #[test]
@@ -1256,7 +1324,8 @@ mod test {
         );
     }
 
-    const AUTHENTICATOR_INFO_PAYLOAD: [u8; 85] = include!("tests/AUTHENTICATOR_INFO_PAYLOAD.in");
+    pub const AUTHENTICATOR_INFO_PAYLOAD: [u8; 85] =
+        include!("tests/AUTHENTICATOR_INFO_PAYLOAD.in");
 
     #[test]
     fn parse_authenticator_info() {

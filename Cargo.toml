@@ -55,4 +55,8 @@ sha2 = "^0.8"
 base64 = "^0.10"
 env_logger = "0.6"
 hex-literal = "0.1.4"
+once_cell = "0.1.8"
 simple_logger = "1.0.1"
+ring = "0.14"
+untrusted = "0.6"
+

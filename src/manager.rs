@@ -14,6 +14,9 @@ use crate::ctap2::server::{PublicKeyCredentialParameters, RelyingParty, User};
 use runloop::RunLoop;
 use statemachine::StateMachine;
 use util::OnceCallback;
+#[cfg(test)]
+use crate::transport::platform::TestCase;
+
 
 enum QueueAction {
     Register {
@@ -46,8 +49,17 @@ impl FidoManager {
     pub fn new() -> io::Result<Self> {
         let (tx, rx) = channel();
 
+        // Tests case injection works with thread local storage values,
+        // this looks up the value, and reinject it inside the new thread.
+        // This is only enabled for tests
+        #[cfg(test)]
+        let value = TestCase::active();
+
         // Start a new work queue thread.
         let queue = RunLoop::new(move |alive| {
+            #[cfg(test)]
+            TestCase::activate(value);
+
             let mut sm = StateMachine::new();
 
             while alive() {

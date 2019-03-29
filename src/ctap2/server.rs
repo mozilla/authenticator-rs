@@ -4,10 +4,19 @@ use serde_bytes::ByteBuf;
 use serde_cbor::error;
 use serde_cbor::ser;
 
-use serde::de::{Deserialize, Deserializer, Error, Unexpected, Visitor};
+#[cfg(test)]
+use serde::de::MapAccess;
+use serde::de::{self, Deserialize, Deserializer, Unexpected, Visitor};
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
+#[cfg(test)]
+use sha2::{Digest, Sha256};
+
+#[cfg(test)]
+use crate::ctap2::attestation::RpIdHash;
+
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(Deserialize))]
 pub struct RelyingParty {
     // TODO(baloo): spec is wrong !!!!111
     //              https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html#commands
@@ -19,9 +28,22 @@ impl RelyingParty {
     pub fn to_ctap2(&self) -> Result<Vec<u8>, error::Error> {
         ser::to_vec(self)
     }
+
+    #[cfg(test)]
+    pub fn hash(&self) -> RpIdHash {
+        let mut hasher = Sha256::new();
+        hasher.input(&self.id.as_bytes()[..]);
+
+        let mut output = [0u8; 32];
+        let len = output.len();
+        output.copy_from_slice(&hasher.result().as_slice()[..len]);
+
+        RpIdHash(output)
+    }
 }
 
 #[derive(Debug, Serialize, Clone, Eq, PartialEq)]
+#[cfg_attr(test, derive(Deserialize))]
 pub struct User {
     #[serde(with = "serde_bytes")]
     pub id: Vec<u8>,
@@ -89,12 +111,12 @@ impl<'de> Deserialize<'de> for Alg {
 
             fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
             where
-                E: Error,
+                E: de::Error,
             {
                 match v {
                     -7 => Ok(Alg::ES256),
                     -257 => Ok(Alg::RS256),
-                    v => Err(Error::invalid_value(Unexpected::Signed(v), &self)),
+                    v => Err(de::Error::invalid_value(Unexpected::Signed(v), &self)),
                 }
             }
         }
@@ -120,6 +142,68 @@ impl Serialize for PublicKeyCredentialParameters {
     }
 }
 
+#[cfg(test)]
+impl<'de> Deserialize<'de> for PublicKeyCredentialParameters {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct PublicKeyCredentialParametersVisitor;
+
+        impl<'de> Visitor<'de> for PublicKeyCredentialParametersVisitor {
+            type Value = PublicKeyCredentialParameters;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a map")
+            }
+
+            fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+            where
+                M: MapAccess<'de>,
+            {
+                let mut found_type = false;
+                let mut alg = None;
+
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        "alg" => {
+                            if alg.is_some() {
+                                return Err(de::Error::duplicate_field("alg"));
+                            }
+
+                            alg = Some(map.next_value()?);
+                        }
+                        "type" => {
+                            if found_type {
+                                return Err(de::Error::duplicate_field("type"));
+                            }
+
+                            let v: &str = map.next_value()?;
+                            if v != "public-key" {
+                                return Err(de::Error::custom(format!("invalid value: {}", v)));
+                            }
+                            found_type = true;
+                        }
+                        v => {
+                            return Err(de::Error::unknown_field(v, &[]));
+                        }
+                    }
+                }
+
+                if !found_type {
+                    return Err(de::Error::missing_field("type"));
+                }
+
+                let alg = alg.ok_or(de::Error::missing_field("alg"))?;
+
+                Ok(PublicKeyCredentialParameters { alg })
+            }
+        }
+
+        deserializer.deserialize_bytes(PublicKeyCredentialParametersVisitor)
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Transport {
     USB,
@@ -142,6 +226,39 @@ impl Serialize for Transport {
     }
 }
 
+#[cfg(test)]
+impl<'de> Deserialize<'de> for Transport {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct TransportVisitor;
+
+        impl<'de> Visitor<'de> for TransportVisitor {
+            type Value = Transport;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a string")
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                match v {
+                    "usb" => Ok(Transport::USB),
+                    "nfc" => Ok(Transport::NFC),
+                    "ble" => Ok(Transport::BLE),
+                    "internal" => Ok(Transport::Internal),
+                    v => Err(E::custom(format!("unknown value: {}", v))),
+                }
+            }
+        }
+
+        deserializer.deserialize_bytes(TransportVisitor)
+    }
+}
+
 #[derive(Debug)]
 pub struct PublicKeyCredentialDescriptor {
     id: Vec<u8>,
@@ -158,6 +275,77 @@ impl Serialize for PublicKeyCredentialDescriptor {
         map.serialize_entry("id", &ByteBuf::from(&self.id[..]))?;
         map.serialize_entry("transports", &self.transports)?;
         map.end()
+    }
+}
+
+#[cfg(test)]
+impl<'de> Deserialize<'de> for PublicKeyCredentialDescriptor {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct PublicKeyCredentialDescriptorVisitor;
+
+        impl<'de> Visitor<'de> for PublicKeyCredentialDescriptorVisitor {
+            type Value = PublicKeyCredentialDescriptor;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a map")
+            }
+
+            fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+            where
+                M: MapAccess<'de>,
+            {
+                let mut found_type = false;
+                let mut id = None;
+                let mut transports = None;
+
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        "id" => {
+                            if id.is_some() {
+                                return Err(de::Error::duplicate_field("id"));
+                            }
+
+                            id = Some(map.next_value()?);
+                        }
+                        "transports" => {
+                            if transports.is_some() {
+                                return Err(de::Error::duplicate_field("transports"));
+                            }
+
+                            transports = Some(map.next_value()?);
+                        }
+                        "type" => {
+                            if found_type {
+                                return Err(de::Error::duplicate_field("type"));
+                            }
+
+                            let v: &str = map.next_value()?;
+                            if v != "public-key" {
+                                return Err(de::Error::custom(format!("invalid value: {}", v)));
+                            }
+                            found_type = true;
+                        }
+                        v => {
+                            return Err(de::Error::unknown_field(v, &[]));
+                        }
+                    }
+                }
+
+                if !found_type {
+                    return Err(de::Error::missing_field("type"));
+                }
+
+                let id = id.ok_or(de::Error::missing_field("id"))?;
+                let transports = transports.ok_or(de::Error::missing_field("transports"))?;
+
+                Ok(PublicKeyCredentialDescriptor { id, transports })
+            }
+        }
+
+        deserializer.deserialize_bytes(PublicKeyCredentialDescriptorVisitor)
     }
 }
 

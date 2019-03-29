@@ -1,7 +1,13 @@
 use std::fmt;
+#[cfg(test)]
+use std::io::{self, Write};
 
+#[cfg(test)]
+use byteorder::{BigEndian, WriteBytesExt};
 use nom::{be_u16, be_u32, be_u8, Err as NomErr, IResult};
 use serde::de::{self, Deserialize, Deserializer, Error as SerdeError, MapAccess, Visitor};
+#[cfg(test)]
+use serde::ser::{Error as SerError, Serialize, SerializeMap, Serializer};
 use serde_bytes::ByteBuf;
 
 use super::server::Alg;
@@ -220,6 +226,29 @@ impl<'de> Deserialize<'de> for AuthenticatorData {
     }
 }
 
+#[cfg(test)]
+impl Serialize for AuthenticatorData {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut data = io::Cursor::new(Vec::new());
+        data.write_all(&self.rp_id_hash.0)
+            .map_err(|e| S::Error::custom(format!("io error: {:?}", e)))?;
+        data.write_all(&[self.flags.bits()])
+            .map_err(|e| S::Error::custom(format!("io error: {:?}", e)))?;
+        data.write_u32::<BigEndian>(self.counter)
+            .map_err(|e| S::Error::custom(format!("io error: {:?}", e)))?;
+
+        // TODO(baloo): need to yield credential_data and extensions, but that dependends on flags,
+        //              should we consider another type system?
+
+        data.set_position(0);
+        let data = data.into_inner();
+        serde_bytes::serialize(&data[..], serializer)
+    }
+}
+
 #[derive(Debug, Serialize, PartialEq, Eq)]
 /// x509 encoded attestation certificate
 pub struct AttestationCertificate(Vec<u8>);
@@ -260,10 +289,30 @@ impl fmt::Debug for Signature {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum AttestationStatement {
+    None,
+    Packed(AttestationStatementPacked),
+    // TODO(baloo): there is a couple other options than None and Packed:
+    //              https://w3c.github.io/webauthn/#generating-an-attestation-object
+    //              https://w3c.github.io/webauthn/#defined-attestation-formats
+    //TPM,
+    //AndroidKey,
+    //AndroidSafetyNet,
+    //FidoU2F,
+    // TODO(baloo): should we do an Unknow version? most likely
+}
+
+impl AttestationStatement {
+    pub fn is_none(&self) -> bool {
+        *self == AttestationStatement::None
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 // TODO(baloo): there is a couple other options than x5c:
 //              https://www.w3.org/TR/webauthn/#packed-attestation
-pub struct AttestationStatement {
+pub struct AttestationStatementPacked {
     alg: Alg,
     sig: Signature,
 
@@ -273,15 +322,15 @@ pub struct AttestationStatement {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum AttestationFormat {
+enum AttestationFormat {
     Packed,
+    None,
     // TOOD(baloo): only packed is implemented for now see spec:
     //              https://www.w3.org/TR/webauthn/#defined-attestation-formats
-    TPM,
-    AndroidKey,
-    AndroidSafetyNet,
-    FidoU2F,
-    NONE,
+    //TPM,
+    //AndroidKey,
+    //AndroidSafetyNet,
+    //FidoU2F,
 }
 
 impl<'de> Deserialize<'de> for AttestationFormat {
@@ -304,6 +353,7 @@ impl<'de> Deserialize<'de> for AttestationFormat {
             {
                 match v {
                     "packed" => Ok(AttestationFormat::Packed),
+                    "none" => Ok(AttestationFormat::None),
                     other => Err(de::Error::custom(format!("unexpected value {}", other))),
                 }
             }
@@ -315,7 +365,6 @@ impl<'de> Deserialize<'de> for AttestationFormat {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct AttestationObject {
-    pub format: AttestationFormat,
     pub auth_data: AuthenticatorData,
     pub att_statement: AttestationStatement,
 }
@@ -338,7 +387,7 @@ impl<'de> Deserialize<'de> for AttestationObject {
             where
                 M: MapAccess<'de>,
             {
-                let mut format = None;
+                let mut format: Option<AttestationFormat> = None;
                 let mut auth_data = None;
                 let mut att_statement = None;
 
@@ -360,24 +409,30 @@ impl<'de> Deserialize<'de> for AttestationObject {
                             auth_data = Some(map.next_value()?);
                         }
                         3 => {
+                            let format = format.as_ref().ok_or(de::Error::missing_field("fmt"))?;
                             if att_statement.is_some() {
                                 return Err(de::Error::duplicate_field("att_statement"));
                             }
-                            att_statement = Some(map.next_value()?);
+                            match format {
+                                // This should not actually happen, but ...
+                                AttestationFormat::None => {
+                                    att_statement = Some(AttestationStatement::None);
+                                }
+                                AttestationFormat::Packed => {
+                                    att_statement =
+                                        Some(AttestationStatement::Packed(map.next_value()?));
+                                }
+                            }
                         }
                         k => return Err(M::Error::custom(format!("unexpected key: {:?}", k))),
                     }
                 }
 
-                // TODO(baloo): convert those custom error to missing_field
-                let format = format.ok_or_else(|| M::Error::custom("found no fmt".to_string()))?;
                 let auth_data =
                     auth_data.ok_or_else(|| M::Error::custom("found no auth_data".to_string()))?;
-                let att_statement = att_statement
-                    .ok_or_else(|| M::Error::custom("found no att_statement".to_string()))?;
+                let att_statement = att_statement.unwrap_or(AttestationStatement::None);
 
                 Ok(AttestationObject {
-                    format,
                     auth_data,
                     att_statement,
                 })
@@ -385,6 +440,35 @@ impl<'de> Deserialize<'de> for AttestationObject {
         }
 
         deserializer.deserialize_bytes(AttestationObjectVisitor)
+    }
+}
+
+#[cfg(test)]
+impl Serialize for AttestationObject {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map_len = 2;
+        if !self.att_statement.is_none() {
+            map_len += 1;
+        }
+
+        let mut map = serializer.serialize_map(Some(map_len))?;
+
+        map.serialize_entry(&2, &self.auth_data)?;
+
+        match self.att_statement {
+            AttestationStatement::None => {
+                map.serialize_entry(&1, &"none")?;
+            }
+            AttestationStatement::Packed(ref v) => {
+                map.serialize_entry(&1, &"packed")?;
+                map.serialize_entry(&3, v)?;
+            }
+        }
+
+        map.end()
     }
 }
 
