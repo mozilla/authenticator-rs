@@ -5,7 +5,7 @@
 extern crate authenticator;
 extern crate base64;
 extern crate sha2;
-use authenticator::{AuthenticatorTransports, KeyHandle, RegisterFlags, SignFlags, U2FManager};
+use authenticator::{AuthenticatorTransports, KeyHandle, RegisterFlags, SignFlags, FidoManager};
 use sha2::{Digest, Sha256};
 use std::io;
 use std::sync::mpsc::channel;
@@ -57,7 +57,7 @@ fn main() {
     application.input(b"http://demo.yubico.com");
     let app_bytes = application.result().to_vec();
 
-    let manager = U2FManager::new().unwrap();
+    let manager = FidoManager::new().unwrap();
     let flags = RegisterFlags::empty();
 
     let (tx, rx) = channel();

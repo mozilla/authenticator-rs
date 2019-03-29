@@ -31,12 +31,17 @@ enum QueueAction {
     Cancel,
 }
 
-pub struct U2FManager {
-    queue: RunLoop,
-    tx: Sender<QueueAction>,
+pub(crate) enum Capability {
+    Fido2 = 2
 }
 
-impl U2FManager {
+pub struct FidoManager {
+    queue: RunLoop,
+    tx: Sender<QueueAction>,
+    filter: Option<Capability>,
+}
+
+impl FidoManager {
     pub fn new() -> io::Result<Self> {
         let (tx, rx) = channel();
 
@@ -91,7 +96,11 @@ impl U2FManager {
             sm.cancel();
         })?;
 
-        Ok(Self { queue, tx })
+        Ok(Self { queue, tx, filter: None })
+    }
+
+    pub fn fido2_capable(&mut self) {
+        self.filter = Some(Capability::Fido2);
     }
 
     pub fn register<F>(
@@ -181,8 +190,13 @@ impl U2FManager {
     }
 }
 
-impl Drop for U2FManager {
+impl Drop for FidoManager {
     fn drop(&mut self) {
         self.queue.cancel();
     }
 }
+
+#[deprecated]
+/// U2FManager has been renamed to FidoManager and you are suggested to
+/// change references for compatibility
+pub type U2FManager = FidoManager;

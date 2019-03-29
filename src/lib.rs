@@ -48,6 +48,13 @@ extern crate libc;
 extern crate log;
 extern crate rand;
 extern crate runloop;
+extern crate serde;
+extern crate serde_bytes;
+extern crate serde_cbor;
+#[macro_use]
+extern crate serde_derive;
+#[macro_use]
+extern crate nom;
 
 #[macro_use]
 extern crate bitflags;
@@ -57,8 +64,12 @@ mod statemachine;
 mod u2fprotocol;
 mod u2ftypes;
 
+mod fido2;
+
 mod manager;
+#[allow(deprecated)]
 pub use manager::U2FManager;
+pub use manager::FidoManager;
 
 mod capi;
 pub use capi::*;
