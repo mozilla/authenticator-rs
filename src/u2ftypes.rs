@@ -174,10 +174,11 @@ impl U2FAPDUHeader {
 
         // Size of header + data + 2 zero bytes for maximum return size.
         let mut bytes = vec![0u8; U2FAPDUHEADER_SIZE + data.len() + 2];
+        bytes[0] = 0; // CLA -- reserved, must be 0
         bytes[1] = ins;
         bytes[2] = p1;
-        // p2 is always 0, at least, for our requirements.
-        // lc[0] should always be 0.
+        bytes[3] = 0; // p2 is always 0, at least, for our requirements.
+        bytes[4] = 0; // lc[0] should always be 0.
         bytes[5] = (data.len() >> 8) as u8;
         bytes[6] = data.len() as u8;
         bytes[7..7 + data.len()].copy_from_slice(data);

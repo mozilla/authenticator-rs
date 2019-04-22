@@ -3,9 +3,14 @@ use rand::{thread_rng, RngCore};
 use std::cmp;
 use std::fmt;
 use std::io;
+use std::thread;
+use std::time::Duration;
 
-use crate::ctap2::commands::{AuthenticatorInfo, ECDHSecret, GetInfo, Request};
-use crate::transport::{Error, FidoDevice, ProtocolSupport};
+use crate::ctap2::commands::{
+    AuthenticatorInfo, ECDHSecret, GetInfo, GetVersion, Request, RequestCtap1, RequestCtap2,
+    Retryable,
+};
+use crate::transport::{ApduErrorStatus, Error, FidoDevice, ProtocolSupport};
 use crate::util::{io_err, trace_hex};
 
 use consts::{
@@ -74,8 +79,12 @@ bitflags! {
 }
 
 impl Capability {
+    pub fn has_fido1(self) -> bool {
+        !self.contains(Capability::NMSG)
+    }
+
     pub fn has_fido2(self) -> bool {
-        self.intersects(Capability::CBOR)
+        self.contains(Capability::CBOR)
     }
 }
 
@@ -117,10 +126,10 @@ where
     fn protocol_support(&self) -> ProtocolSupport {
         let mut support = ProtocolSupport::FIDO1;
 
-        if self.capabilities().intersects(Capability::CBOR) {
+        if self.capabilities().contains(Capability::CBOR) {
             support |= ProtocolSupport::FIDO2;
         }
-        if self.u2fhid_version() >= 2 && !self.capabilities().intersects(Capability::NMSG) {
+        if self.u2fhid_version() >= 2 && self.capabilities().contains(Capability::NMSG) {
             // CAPABILITY_NMSG:
             //   If set to 1, authenticator DOES NOT implement CTAPHID_MSG function
             support &= !ProtocolSupport::FIDO1;
@@ -252,11 +261,11 @@ where
 {
     type BuildParameters = <Self as HIDDevice>::BuildParameters;
 
-    fn send_cbor<'msg, Req: Request>(&mut self, msg: &'msg Req) -> Result<Req::Output, Error> {
+    fn send_cbor<'msg, Req: RequestCtap2>(&mut self, msg: &'msg Req) -> Result<Req::Output, Error> {
         debug!("sending {:?} to {:?}", msg, self);
 
-        let mut buf: Vec<u8> = Vec::new();
         let mut data = msg.wire_format(self)?;
+        let mut buf: Vec<u8> = Vec::with_capacity(data.len() + 1);
         // CTAP2 command
         buf.push(Req::command() as u8);
         // payload
@@ -266,14 +275,41 @@ where
         let (cmd, resp) = self.sendrecv(HIDCmd::Cbor, &buf[..])?;
         debug!("got from {:?} status={:?}: {:?}", self, cmd, resp);
         if cmd == HIDCmd::Cbor {
-            Ok(msg.parse_response(&resp[..])?)
+            Ok(msg.handle_response_ctap2(self, &resp[..])?)
         } else {
-            Err(Error::UnexpectedStatus(cmd.into()))
+            Err(Error::UnexpectedCmd(cmd.into()))
         }
     }
 
-    fn send_apdu<'msg, Req: Request>(&mut self, _msg: &'msg Req) -> Result<Req::Output, Error> {
-        unimplemented!("apdu support not yet implemented");
+    fn send_apdu<'msg, Req: RequestCtap1>(&mut self, msg: &'msg Req) -> Result<Req::Output, Error> {
+        debug!("sending {:?} to {:?}", msg, self);
+        let data = msg.apdu_format(self)?;
+
+        loop {
+            let (cmd, mut data) = self.sendrecv(HIDCmd::Msg, &data[..])?;
+            debug!("got from {:?} status={:?}: {:?}", self, cmd, data);
+            if cmd == HIDCmd::Msg {
+                if data.len() < 2 {
+                    return Err(io_err("Unexpected Response: shorter than expected").into());
+                }
+                let split_at = data.len() - 2;
+                let status = data.split_off(split_at);
+                // This will bubble up error if status != no error
+                let status = ApduErrorStatus::from([status[0], status[1]]);
+
+                match msg.handle_response_ctap1(status, &data[..]) {
+                    Ok(out) => return Ok(out),
+                    Err(Retryable::Retry) => {
+                        // sleep 100ms then loop again
+                        // TODO(baloo): meh, use tokio instead?
+                        thread::sleep(Duration::from_millis(100));
+                    }
+                    Err(Retryable::Error(e)) => return Err(e),
+                }
+            } else {
+                return Err(Error::UnexpectedCmd(cmd.into()));
+            }
+        }
     }
 
     fn new(parameters: Self::BuildParameters) -> Result<Self, Error>
@@ -295,6 +331,11 @@ where
             debug!("{:?} infos: {:?}", self.id(), info);
 
             self.set_authenticator_info(info);
+        }
+        if self.capabilities().has_fido1() {
+            let command = GetVersion::default();
+            // We don't really use the result here
+            self.send_apdu(&command)?;
         }
 
         self.initialize();

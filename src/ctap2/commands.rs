@@ -1,12 +1,15 @@
 use std::default::Default;
 use std::error::Error as StdErrorT;
+use std::ffi::CString;
 use std::fmt;
+use std::io::{self, Read};
 
 use pretty_hex::pretty_hex;
 
 use cose::agreement::{self, Agreement};
-use cose::PublicKey;
+use cose::{EllipticCurve, PublicKey};
 use hmac::{Hmac, Mac};
+use nom::{be_u32, be_u8};
 use serde::de::{self, Deserialize, Deserializer, Error as SerdeError, MapAccess, Visitor};
 use serde::ser::{Error as ErrorT, Serialize, SerializeMap, Serializer};
 use serde_bytes::ByteBuf;
@@ -21,10 +24,12 @@ use sha2::{Digest, Sha256};
 use openssl::error::ErrorStack;
 use openssl::symm::{Cipher, Crypter, Mode};
 
-use crate::transport::{self, FidoDevice};
+use crate::transport::{self, ApduErrorStatus, Error as TransportError, FidoDevice};
 
-use crate::ctap2::attestation::AAGuid;
-use crate::ctap2::attestation::AttestationObject;
+use crate::ctap2::attestation::{
+    AAGuid, AttestationObject, AttestationStatement, AttestationStatementFidoU2F,
+    AttestedCredentialData, AuthenticatorData, AuthenticatorDataFlags,
+};
 
 use crate::ctap2::server::{
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, User,
@@ -32,30 +37,82 @@ use crate::ctap2::server::{
 
 use crate::ctap::{ClientDataHash, CollectedClientData, Version};
 
-pub(crate) trait Ctap2Serialize {
-    fn ctap2<T>(&self, device: &mut T) -> Result<Vec<u8>, transport::Error>
-    where
-        T: FidoDevice;
+use crate::consts::{
+    PARAMETER_SIZE, U2F_AUTHENTICATE, U2F_CHECK_IS_REGISTERED, U2F_REGISTER,
+    U2F_REQUEST_USER_PRESENCE, U2F_VERSION,
+};
+use crate::u2ftypes::U2FAPDUHeader;
+
+pub(crate) trait Request<T>
+where
+    Self: fmt::Debug,
+    Self: RequestCtap1<Output = T>,
+    Self: RequestCtap2<Output = T>,
+{
+    fn maximum_version(&self) -> Version;
+    fn minimum_version(&self) -> Version;
 }
 
-pub(crate) trait Request: Ctap2Serialize + fmt::Debug {
+/// Retryable wraps an error type and may ask manager to retry sending a
+/// command, this is useful for ctap1 where token will reply with "condition not
+/// sufficient" because user needs to press the button.
+pub(crate) enum Retryable<T> {
+    Retry,
+    Error(T),
+}
+
+impl<T> Retryable<T> {
+    pub fn is_retry(&self) -> bool {
+        match *self {
+            Retryable::Retry => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_error(&self) -> bool {
+        !self.is_retry()
+    }
+}
+
+impl<T> From<T> for Retryable<T> {
+    fn from(e: T) -> Self {
+        Retryable::Error(e)
+    }
+}
+
+pub(crate) trait RequestCtap1: fmt::Debug {
+    type Output;
+
+    fn apdu_format<Dev>(&self, dev: &mut Dev) -> Result<Vec<u8>, transport::Error>
+    where
+        Dev: FidoDevice;
+
+    fn handle_response_ctap1(
+        &self,
+        status: Result<(), ApduErrorStatus>,
+        input: &[u8],
+    ) -> Result<Self::Output, Retryable<TransportError>>;
+}
+
+pub(crate) trait RequestCtap2: fmt::Debug {
     type Output;
 
     fn command() -> Command;
 
-    fn minimum_version(&self) -> Version;
-
-    fn wire_format<T>(&self, dev: &mut T) -> Result<Vec<u8>, transport::Error>
+    fn wire_format<Dev>(&self, dev: &mut Dev) -> Result<Vec<u8>, transport::Error>
     where
-        T: FidoDevice,
-    {
-        Ok(self.ctap2(dev)?)
-    }
+        Dev: FidoDevice;
 
-    fn parse_response(&self, input: &[u8]) -> Result<Self::Output, Error>;
+    fn handle_response_ctap2<Dev>(
+        &self,
+        dev: &mut Dev,
+        input: &[u8],
+    ) -> Result<Self::Output, TransportError>
+    where
+        Dev: FidoDevice;
 }
 
-trait RequestWithPin: Request {
+trait RequestWithPin: RequestCtap2 {
     fn pin(&self) -> Option<&Pin>;
     fn client_data_hash(&self) -> Result<ClientDataHash, Error>;
 }
@@ -424,20 +481,43 @@ where
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Copy, Clone, Debug, Serialize)]
 #[cfg_attr(test, derive(Deserialize))]
 pub struct MakeCredentialsOptions {
     #[serde(rename = "rk")]
-    resident_key: bool,
+    pub resident_key: bool,
     #[serde(rename = "uv")]
-    user_validation: bool,
+    pub user_validation: bool,
+}
+
+impl Default for MakeCredentialsOptions {
+    fn default() -> Self {
+        Self {
+            resident_key: false,
+            user_validation: true,
+        }
+    }
+}
+
+trait UserValidation {
+    fn ask_user_validation(&self) -> bool;
+}
+
+impl UserValidation for Option<MakeCredentialsOptions> {
+    fn ask_user_validation(&self) -> bool {
+        match *self {
+            Some(ref e) if e.user_validation => true,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug)]
 pub struct MakeCredentials {
     client_data: CollectedClientData,
     rp: RelyingParty,
-    user: User,
+    // Note(baloo): If none -> ctap1
+    user: Option<User>,
     pub_cred_params: Vec<PublicKeyCredentialParameters>,
     exclude_list: Vec<PublicKeyCredentialDescriptor>,
 
@@ -456,7 +536,7 @@ impl MakeCredentials {
     pub fn new(
         client_data: CollectedClientData,
         rp: RelyingParty,
-        user: User,
+        user: Option<User>,
         pub_cred_params: Vec<PublicKeyCredentialParameters>,
         exclude_list: Vec<PublicKeyCredentialDescriptor>,
         options: Option<MakeCredentialsOptions>,
@@ -468,21 +548,11 @@ impl MakeCredentials {
             user,
             pub_cred_params,
             exclude_list,
+            // TODO(baloo): need to sort those out once final api is in
             extensions: Map::new(),
             options,
             pin,
         }
-    }
-}
-
-impl Ctap2Serialize for MakeCredentials {
-    fn ctap2<T>(&self, dev: &mut T) -> Result<Vec<u8>, transport::Error>
-    where
-        T: FidoDevice,
-    {
-        let cd = CommandDevice::new(dev, self)?;
-
-        Ok(ser::to_vec(&cd).map_err(Error::Serialization)?)
     }
 }
 
@@ -516,7 +586,16 @@ impl<'command> Serialize for CommandDevice<'command, MakeCredentials> {
             .hash()
             .map_err(|e| S::Error::custom(format!("error while hashing client data: {}", e)))?;
         map.serialize_entry(&1, &client_data_hash)?;
-        map.serialize_entry(&2, &command.rp)?;
+        match command.rp {
+            RelyingParty::Data(ref d) => {
+                map.serialize_entry(&2, &d)?;
+            }
+            _ => {
+                return Err(S::Error::custom(
+                    "Can't serialize a RelyingParty::Hash for ctap2",
+                ));
+            }
+        }
         map.serialize_entry(&3, &command.user)?;
         map.serialize_entry(&4, &command.pub_cred_params)?;
         if !command.exclude_list.is_empty() {
@@ -536,20 +615,146 @@ impl<'command> Serialize for CommandDevice<'command, MakeCredentials> {
     }
 }
 
-impl Request for MakeCredentials {
-    fn minimum_version(&self) -> Version {
+impl Request<(AttestationObject, CollectedClientData)> for MakeCredentials {
+    fn maximum_version(&self) -> Version {
+        if self.user.is_none() {
+            return Version::CTAP1;
+        }
+        if self.client_data.origin.is_none() {
+            return Version::CTAP1;
+        }
+
         Version::CTAP2
     }
+
+    fn minimum_version(&self) -> Version {
+        if self.client_data.token_binding.is_some() {
+            return Version::CTAP2;
+        }
+
+        Version::CTAP1
+    }
+}
+
+impl RequestCtap1 for MakeCredentials {
+    type Output = (AttestationObject, CollectedClientData);
+
+    fn apdu_format<Dev>(&self, _dev: &mut Dev) -> Result<Vec<u8>, transport::Error>
+    where
+        Dev: FidoDevice,
+    {
+        let flags = if self.options.ask_user_validation() {
+            U2F_REQUEST_USER_PRESENCE
+        } else {
+            0
+        };
+
+        let mut register_data = Vec::with_capacity(2 * PARAMETER_SIZE);
+        register_data.extend_from_slice(self.client_data.challenge.as_ref());
+        register_data.extend_from_slice(self.rp.hash().as_ref());
+
+        let cmd = U2F_REGISTER;
+        let apdu = U2FAPDUHeader::serialize(cmd, flags, &register_data)?;
+
+        Ok(apdu)
+    }
+
+    fn handle_response_ctap1(
+        &self,
+        status: Result<(), ApduErrorStatus>,
+        input: &[u8],
+    ) -> Result<Self::Output, Retryable<TransportError>> {
+        if Err(ApduErrorStatus::ConditionsNotSatisfied) == status {
+            return Err(Retryable::Retry);
+        }
+
+        named!(
+            parse_register<(&[u8], &[u8])>,
+            do_parse!(
+                reserved: tag!(&[0x05]) >>
+                public_key: take!(65) >>
+                key_handle_len: be_u8 >>
+                key_handle: take!(key_handle_len) >>
+                (public_key, key_handle)
+            )
+        );
+
+        let (rest, (public_key, key_handle)) = parse_register(input)
+            .map_err(|e| {
+                error!("error while parsing registration = {:?}", e);
+                io::Error::new(io::ErrorKind::Other, "unable to parse registration")
+            })
+            .map_err(|e| TransportError::IO(None, e))
+            .map_err(Retryable::Error)?;
+
+        let (signature, cert) = der_parser::parse_der(rest)
+            .map_err(|e| {
+                error!("error while parsing cert = {:?}", e);
+                let err = io::Error::new(io::ErrorKind::Other, "Failed to parse x509 certificate");
+                let err = error::Error::from(err);
+                let err = Error::Parsing(err);
+                let err = TransportError::Command(err);
+                Retryable::Error(err)
+            })
+            .map(|(sig, cert)| (sig, &rest[..rest.len() - sig.len()]))?;
+
+        let auth_data = AuthenticatorData {
+            rp_id_hash: self.rp.hash(),
+            flags: AuthenticatorDataFlags::empty(),
+            counter: 0,
+            credential_data: Some(AttestedCredentialData {
+                aaguid: AAGuid::empty(),
+                credential_id: Vec::from(&key_handle[..]),
+                // TODO(baloo): this is wrong, this is not the format expected by cose::PublicKey
+                // (or is it?)
+                // see This is the (uncompressed) x,y-representation of a curve point on the P-256 NIST elliptic curve.
+                // https://fidoalliance.org/specs/fido-u2f-v1.2-ps-20170411/fido-u2f-raw-message-formats-v1.2-ps-20170411.html
+                credential_public_key: PublicKey::new(
+                    EllipticCurve::P256,
+                    Vec::from(&public_key[..]),
+                ),
+            }),
+            extensions: Vec::new(),
+        };
+
+        let att_statement_u2f = AttestationStatementFidoU2F::new(cert, signature);
+        let att_statement = AttestationStatement::FidoU2F(att_statement_u2f);
+        let attestation_object = AttestationObject {
+            auth_data,
+            att_statement,
+        };
+        let client_data = self.client_data.clone();
+
+        Ok((attestation_object, client_data))
+    }
+}
+
+impl RequestCtap2 for MakeCredentials {
+    type Output = (AttestationObject, CollectedClientData);
 
     fn command() -> Command {
         Command::MakeCredentials
     }
 
-    type Output = (AttestationObject, CollectedClientData);
+    fn wire_format<Dev>(&self, dev: &mut Dev) -> Result<Vec<u8>, transport::Error>
+    where
+        Dev: FidoDevice,
+    {
+        let cd = CommandDevice::new(dev, self)?;
 
-    fn parse_response(&self, input: &[u8]) -> Result<Self::Output, Error> {
+        Ok(ser::to_vec(&cd).map_err(Error::Serialization)?)
+    }
+
+    fn handle_response_ctap2<Dev>(
+        &self,
+        _dev: &mut Dev,
+        input: &[u8],
+    ) -> Result<Self::Output, TransportError>
+    where
+        Dev: FidoDevice,
+    {
         if input.is_empty() {
-            return Err(Error::InputTooSmall);
+            return Err(Error::InputTooSmall).map_err(TransportError::Command);
         }
 
         let status: StatusCode = input[0].into();
@@ -561,12 +766,12 @@ impl Request for MakeCredentials {
                 Ok((attestation, client_data))
             } else {
                 let data: Value = from_slice(&input[1..]).map_err(Error::Parsing)?;
-                Err(Error::StatusCode(status, Some(data)))
+                Err(Error::StatusCode(status, Some(data))).map_err(TransportError::Command)
             }
         } else if status.is_ok() {
-            Err(Error::InputTooSmall)
+            Err(Error::InputTooSmall).map_err(TransportError::Command)
         } else {
-            Err(Error::StatusCode(status, None))
+            Err(Error::StatusCode(status, None)).map_err(TransportError::Command)
         }
     }
 }
@@ -582,6 +787,556 @@ impl RequestWithPin for MakeCredentials {
 }
 
 #[derive(Debug)]
+pub struct GetAssertion {
+    client_data: CollectedClientData,
+    rp: RelyingParty,
+    allow_list: Vec<PublicKeyCredentialDescriptor>,
+
+    // https://www.w3.org/TR/webauthn/#client-extension-input
+    // The client extension input, which is a value that can be encoded in JSON,
+    // is passed from the WebAuthn Relying Party to the client in the get() or
+    // create() call, while the CBOR authenticator extension input is passed
+    // from the client to the authenticator for authenticator extensions during
+    // the processing of these calls.
+    extensions: Map<String, json_value::Value>,
+    options: Option<MakeCredentialsOptions>,
+
+    pin: Option<Pin>,
+}
+
+impl GetAssertion {
+    pub fn new(
+        client_data: CollectedClientData,
+        rp: RelyingParty,
+        allow_list: Vec<PublicKeyCredentialDescriptor>,
+        options: Option<MakeCredentialsOptions>,
+        pin: Option<Pin>,
+    ) -> Self {
+        Self {
+            client_data,
+            rp,
+            allow_list,
+            // TODO(baloo): need to sort those out once final api is in
+            extensions: Map::new(),
+            options,
+            pin,
+        }
+    }
+}
+
+impl<'command> Serialize for CommandDevice<'command, GetAssertion> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let command = &self.command;
+        let pin_auth = &self.pin_auth;
+
+        // Need to define how many elements are going to be in the map
+        // beforehand
+        let mut map_len = 2;
+        if !command.allow_list.is_empty() {
+            map_len += 1;
+        }
+        if !command.extensions.is_empty() {
+            map_len += 1;
+        }
+        if command.options.is_some() {
+            map_len += 1;
+        }
+        if pin_auth.is_some() {
+            map_len += 2;
+        }
+
+        let mut map = serializer.serialize_map(Some(map_len))?;
+        match command.rp {
+            RelyingParty::Data(ref d) => {
+                map.serialize_entry(&1, &d)?;
+            }
+            _ => {
+                return Err(S::Error::custom(
+                    "Can't serialize a RelyingParty::Hash for ctap2",
+                ));
+            }
+        }
+
+        let client_data_hash = command
+            .client_data
+            .hash()
+            .map_err(|e| S::Error::custom(format!("error while hashing client data: {}", e)))?;
+        map.serialize_entry(&2, &client_data_hash)?;
+        if !command.allow_list.is_empty() {
+            map.serialize_entry(&3, &command.allow_list)?;
+        }
+        if !command.extensions.is_empty() {
+            map.serialize_entry(&4, &command.extensions)?;
+        }
+        if command.options.is_some() {
+            map.serialize_entry(&5, &command.options)?;
+        }
+        if let Some(pin_auth) = pin_auth {
+            map.serialize_entry(&6, &pin_auth)?;
+            map.serialize_entry(&7, &1)?;
+        }
+        map.end()
+    }
+}
+
+impl Request<AssertionObject> for GetAssertion {
+    fn maximum_version(&self) -> Version {
+        if self.rp.is_hash() {
+            return Version::CTAP1;
+        }
+
+        Version::CTAP2
+    }
+
+    fn minimum_version(&self) -> Version {
+        Version::CTAP1
+    }
+}
+
+impl RequestCtap1 for GetAssertion {
+    type Output = AssertionObject;
+
+    fn apdu_format<Dev>(&self, dev: &mut Dev) -> Result<Vec<u8>, transport::Error>
+    where
+        Dev: FidoDevice,
+    {
+        /// This command is used to check which key_handle is valid for this
+        /// token this is sent before a GetAssertion command, to determine which
+        /// is valid for a specific token and which key_handle GetAssertion
+        /// should send to the token.
+        #[derive(Debug)]
+        struct GetAssertionCheck<'assertion> {
+            key_handle: &'assertion [u8],
+            client_data: &'assertion CollectedClientData,
+            rp: &'assertion RelyingParty,
+        }
+
+        impl<'assertion> RequestCtap1 for GetAssertionCheck<'assertion> {
+            type Output = ();
+
+            fn apdu_format<Dev>(&self, _dev: &mut Dev) -> Result<Vec<u8>, transport::Error>
+            where
+                Dev: FidoDevice,
+            {
+                let flags = U2F_CHECK_IS_REGISTERED;
+                let mut auth_data = Vec::with_capacity(
+                    2 * PARAMETER_SIZE + 1 /* key_handle_len */ + self.key_handle.len(),
+                );
+
+                auth_data.extend_from_slice(self.client_data.challenge.as_ref());
+                auth_data.extend_from_slice(self.rp.hash().as_ref());
+                auth_data.extend_from_slice(&[self.key_handle.len() as u8]);
+                auth_data.extend_from_slice(self.key_handle);
+
+                let cmd = U2F_AUTHENTICATE;
+                let apdu = U2FAPDUHeader::serialize(cmd, flags, &auth_data)?;
+
+                Ok(apdu)
+            }
+
+            fn handle_response_ctap1(
+                &self,
+                status: Result<(), ApduErrorStatus>,
+                input: &[u8],
+            ) -> Result<Self::Output, Retryable<TransportError>> {
+                match status {
+                    Err(ref status) if status.is_conditions_not_satisfied() => Ok(()),
+                    _ => Err(Retryable::Error(TransportError::DeviceError)),
+                }
+            }
+        }
+
+        let key_handle = self
+            .allow_list
+            .iter()
+            .find_map(|allowed_handle| {
+                let check_command = GetAssertionCheck {
+                    key_handle: allowed_handle.id.as_ref(),
+                    client_data: &self.client_data,
+                    rp: &self.rp,
+                };
+
+                match dev.send_apdu(&check_command) {
+                    Ok(_) => Some(allowed_handle.id.clone()),
+                    _ => None,
+                }
+            })
+            .ok_or(transport::Error::DeviceNotSupported)?;
+
+        debug!("sending key_handle = {:?}", key_handle);
+
+        let flags = if self.options.ask_user_validation() {
+            U2F_REQUEST_USER_PRESENCE
+        } else {
+            0
+        };
+        let mut auth_data =
+            Vec::with_capacity(2 * PARAMETER_SIZE + 1 /* key_handle_len */ + key_handle.len());
+
+        auth_data.extend_from_slice(self.client_data.challenge.as_ref());
+        auth_data.extend_from_slice(self.rp.hash().as_ref());
+        auth_data.extend_from_slice(&[key_handle.len() as u8]);
+        auth_data.extend_from_slice(key_handle.as_ref());
+
+        let cmd = U2F_AUTHENTICATE;
+        let apdu = U2FAPDUHeader::serialize(cmd, flags, &auth_data)?;
+
+        Ok(apdu)
+    }
+
+    fn handle_response_ctap1(
+        &self,
+        status: Result<(), ApduErrorStatus>,
+        input: &[u8],
+    ) -> Result<Self::Output, Retryable<TransportError>> {
+        if Err(ApduErrorStatus::ConditionsNotSatisfied) == status {
+            return Err(Retryable::Retry);
+        }
+        if status.is_err() {
+            return Err(Retryable::Error(TransportError::DeviceError));
+        }
+
+        named!(
+            parse_authentication<(u8, u32)>,
+            do_parse!(user_presence: be_u8 >> counter: be_u32 >> (user_presence, counter))
+        );
+
+        let (user_presence, counter, signature) = match parse_authentication(input) {
+            Ok((input, (user_presence, counter))) => {
+                let signature = Vec::from(input);
+                Ok((user_presence, counter, signature))
+            }
+            Err(e) => {
+                error!("error while parsing authentication: {:?}", e);
+                Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "unable to parse authentication",
+                ))
+                .map_err(|e| TransportError::IO(None, e))
+                .map_err(Retryable::Error)
+            },
+        }?;
+
+        let mut flags = AuthenticatorDataFlags::empty();
+        if user_presence == 1 {
+            flags |= AuthenticatorDataFlags::USER_PRESENT;
+        }
+        let auth_data = AuthenticatorData {
+            rp_id_hash: self.rp.hash(),
+            flags,
+            counter,
+            credential_data: None,
+            extensions: Vec::new(),
+        };
+        let assertion = Assertion {
+            credentials: None,
+            signature,
+            public_key: None,
+            auth_data,
+        };
+
+        Ok(AssertionObject(vec![assertion]))
+    }
+}
+
+impl RequestCtap2 for GetAssertion {
+    type Output = AssertionObject;
+
+    fn command() -> Command {
+        Command::GetAssertion
+    }
+
+    fn wire_format<Dev>(&self, dev: &mut Dev) -> Result<Vec<u8>, transport::Error>
+    where
+        Dev: FidoDevice,
+    {
+        let cd = CommandDevice::new(dev, self)?;
+
+        Ok(ser::to_vec(&cd).map_err(Error::Serialization)?)
+    }
+
+    fn handle_response_ctap2<Dev>(
+        &self,
+        dev: &mut Dev,
+        input: &[u8],
+    ) -> Result<Self::Output, TransportError>
+    where
+        Dev: FidoDevice,
+    {
+        if input.is_empty() {
+            return Err(Error::InputTooSmall).map_err(TransportError::Command);
+        }
+
+        let status: StatusCode = input[0].into();
+        debug!("response status code: {:?}", status);
+        if input.len() > 1 {
+            if status.is_ok() {
+                let assertion: GetAssertionResponse =
+                    from_slice(&input[1..]).map_err(Error::Parsing)?;
+                let number_of_credentials = assertion.number_of_credentials.unwrap_or(1);
+                let mut assertions = Vec::with_capacity(number_of_credentials);
+                assertions.push(assertion.into());
+
+                let msg = GetNextAssertion;
+                for _ in (1..number_of_credentials).rev() {
+                    let new_cred = dev.send_cbor(&msg)?;
+                    assertions.push(new_cred.into());
+                }
+
+                Ok(AssertionObject(assertions))
+            } else {
+                let data: Value = from_slice(&input[1..]).map_err(Error::Parsing)?;
+                Err(Error::StatusCode(status, Some(data))).map_err(TransportError::Command)
+            }
+        } else if status.is_ok() {
+            Err(Error::InputTooSmall).map_err(TransportError::Command)
+        } else {
+            Err(Error::StatusCode(status, None)).map_err(TransportError::Command)
+        }
+    }
+}
+
+impl RequestWithPin for GetAssertion {
+    fn pin(&self) -> Option<&Pin> {
+        self.pin.as_ref()
+    }
+
+    fn client_data_hash(&self) -> Result<ClientDataHash, Error> {
+        self.client_data.hash().map_err(Error::Json)
+    }
+}
+
+#[derive(Debug)]
+pub struct Assertion {
+    credentials: Option<serde_cbor::Value>,
+    auth_data: AuthenticatorData,
+    signature: Vec<u8>,
+    public_key: Option<User>,
+}
+
+impl From<GetAssertionResponse> for Assertion {
+    fn from(r: GetAssertionResponse) -> Self {
+        Assertion {
+            credentials: r.credentials,
+            auth_data: r.auth_data,
+            signature: r.signature,
+            public_key: r.public_key,
+        }
+    }
+}
+
+// TODO(baloo): Move this to src/ctap2/mod.rs?
+#[derive(Debug)]
+pub struct AssertionObject(Vec<Assertion>);
+
+impl AssertionObject {
+    pub fn u2f_sign_data(&self) -> Vec<u8> {
+        if let Some(first) = self.0.first() {
+            first.signature.clone()
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+struct GetAssertionResponse {
+    credentials: Option<serde_cbor::Value>,
+    auth_data: AuthenticatorData,
+    signature: Vec<u8>,
+    public_key: Option<User>,
+    number_of_credentials: Option<usize>,
+}
+
+impl<'de> Deserialize<'de> for GetAssertionResponse {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct GetAssertionResponseVisitor;
+
+        impl<'de> Visitor<'de> for GetAssertionResponseVisitor {
+            type Value = GetAssertionResponse;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a byte array")
+            }
+
+            fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+            where
+                M: MapAccess<'de>,
+            {
+                let mut credentials = None;
+                let mut auth_data = None;
+                let mut signature = None;
+                let mut public_key = None;
+                let mut number_of_credentials = None;
+
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        1 => {
+                            if credentials.is_some() {
+                                return Err(de::Error::duplicate_field("credentials"));
+                            }
+                            credentials = Some(map.next_value()?);
+                        }
+                        2 => {
+                            if auth_data.is_some() {
+                                return Err(de::Error::duplicate_field("auth_data"));
+                            }
+                            auth_data = Some(map.next_value()?);
+                        }
+                        3 => {
+                            if signature.is_some() {
+                                return Err(de::Error::duplicate_field("signature"));
+                            }
+                            let signature_bytes: ByteBuf = map.next_value()?;
+                            let signature_bytes: Vec<u8> = signature_bytes.into();
+                            signature = Some(signature_bytes);
+                        }
+                        4 => {
+                            if public_key.is_some() {
+                                return Err(de::Error::duplicate_field("public_key"));
+                            }
+                            public_key = map.next_value()?;
+                        }
+                        5 => {
+                            if number_of_credentials.is_some() {
+                                return Err(de::Error::duplicate_field("number_of_credentials"));
+                            }
+                            number_of_credentials = Some(map.next_value()?);
+                        }
+                        k => return Err(M::Error::custom(format!("unexpected key: {:?}", k))),
+                    }
+                }
+
+                let auth_data = auth_data.ok_or(de::Error::missing_field("auth_data"))?;
+                let signature = signature.ok_or(de::Error::missing_field("signature"))?;
+
+                Ok(GetAssertionResponse {
+                    credentials,
+                    auth_data,
+                    signature,
+                    public_key,
+                    number_of_credentials,
+                })
+            }
+        }
+
+        deserializer.deserialize_bytes(GetAssertionResponseVisitor)
+    }
+}
+
+#[derive(Debug)]
+struct GetNextAssertion;
+
+impl RequestCtap2 for GetNextAssertion {
+    type Output = GetAssertionResponse;
+
+    fn command() -> Command {
+        Command::GetNextAssertion
+    }
+
+    fn wire_format<Dev>(&self, dev: &mut Dev) -> Result<Vec<u8>, transport::Error>
+    where
+        Dev: FidoDevice,
+    {
+        Ok(Vec::new())
+    }
+
+    fn handle_response_ctap2<Dev>(
+        &self,
+        _dev: &mut Dev,
+        input: &[u8],
+    ) -> Result<Self::Output, TransportError>
+    where
+        Dev: FidoDevice,
+    {
+        if input.is_empty() {
+            return Err(Error::InputTooSmall).map_err(TransportError::Command);
+        }
+
+        let status: StatusCode = input[0].into();
+        debug!("response status code: {:?}", status);
+        if input.len() > 1 {
+            if status.is_ok() {
+                let assertion = from_slice(&input[1..]).map_err(Error::Parsing)?;
+                // TODO(baloo): check assertion response does not have numberOfCredentials
+                Ok(assertion)
+            } else {
+                let data: Value = from_slice(&input[1..]).map_err(Error::Parsing)?;
+                Err(Error::StatusCode(status, Some(data))).map_err(TransportError::Command)
+            }
+        } else if status.is_ok() {
+            Err(Error::InputTooSmall).map_err(TransportError::Command)
+        } else {
+            Err(Error::StatusCode(status, None)).map_err(TransportError::Command)
+        }
+    }
+}
+
+pub enum U2FInfo {
+    U2F_V2,
+}
+
+#[derive(Debug)]
+// TODO(baloo): if one does not issue U2F_VERSION before makecredentials or getassertion, token
+//              will return error (ConditionsNotSatified), test this in unit tests
+pub struct GetVersion {}
+
+impl Default for GetVersion {
+    fn default() -> GetVersion {
+        GetVersion {}
+    }
+}
+
+impl RequestCtap1 for GetVersion {
+    type Output = U2FInfo;
+
+    fn handle_response_ctap1(
+        &self,
+        _status: Result<(), ApduErrorStatus>,
+        input: &[u8],
+    ) -> Result<Self::Output, Retryable<TransportError>> {
+        if input.is_empty() {
+            return Err(Error::InputTooSmall)
+                .map_err(TransportError::Command)
+                .map_err(Retryable::Error);
+        }
+
+        let expected = CString::new("U2F_V2")
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "null data in version"))
+            .map_err(|e| TransportError::IO(None, e))
+            .map_err(Retryable::Error)?;
+
+        match CString::new(input)
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "null data in version"))
+            .map_err(|e| TransportError::IO(None, e))
+            .map_err(Retryable::Error)?
+        {
+            ref data if data == &expected => Ok(U2FInfo::U2F_V2),
+            _ => Err(io::Error::new(io::ErrorKind::Other, "unexpected version"))
+                .map_err(|e| TransportError::IO(None, e))
+                .map_err(Retryable::Error),
+        }
+    }
+
+    fn apdu_format<Dev>(&self, dev: &mut Dev) -> Result<Vec<u8>, transport::Error>
+    where
+        Dev: FidoDevice,
+    {
+        let flags = 0;
+
+        let cmd = U2F_VERSION;
+        let apdu = U2FAPDUHeader::serialize(cmd, flags, &[])?;
+
+        Ok(apdu)
+    }
+}
+
+#[derive(Debug)]
 pub struct GetInfo {}
 
 impl Default for GetInfo {
@@ -590,29 +1345,30 @@ impl Default for GetInfo {
     }
 }
 
-impl Ctap2Serialize for GetInfo {
-    fn ctap2<T>(&self, _device: &mut T) -> Result<Vec<u8>, transport::Error>
-    where
-        T: FidoDevice,
-    {
-        Ok(Vec::new())
-    }
-}
-
-impl Request for GetInfo {
-    fn minimum_version(&self) -> Version {
-        Version::CTAP2
-    }
+impl RequestCtap2 for GetInfo {
+    type Output = AuthenticatorInfo;
 
     fn command() -> Command {
         Command::GetInfo
     }
 
-    type Output = AuthenticatorInfo;
+    fn wire_format<Dev>(&self, dev: &mut Dev) -> Result<Vec<u8>, transport::Error>
+    where
+        Dev: FidoDevice,
+    {
+        Ok(Vec::new())
+    }
 
-    fn parse_response(&self, input: &[u8]) -> Result<Self::Output, Error> {
+    fn handle_response_ctap2<Dev>(
+        &self,
+        _dev: &mut Dev,
+        input: &[u8],
+    ) -> Result<Self::Output, TransportError>
+    where
+        Dev: FidoDevice,
+    {
         if input.is_empty() {
-            return Err(Error::InputTooSmall);
+            return Err(Error::InputTooSmall).map_err(TransportError::Command);
         }
 
         let status: StatusCode = input[0].into();
@@ -627,12 +1383,12 @@ impl Request for GetInfo {
                 Ok(authenticator_info)
             } else {
                 let data: Value = from_slice(&input[1..]).map_err(Error::Parsing)?;
-                Err(Error::StatusCode(status, Some(data)))
+                Err(Error::StatusCode(status, Some(data))).map_err(TransportError::Command)
             }
         } else if status.is_ok() {
-            Err(Error::InputTooSmall)
+            Err(Error::InputTooSmall).map_err(TransportError::Command)
         } else {
-            Err(Error::StatusCode(status, None))
+            Err(Error::StatusCode(status, None)).map_err(TransportError::Command)
         }
     }
 }
@@ -1128,23 +1884,7 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinToken<'sc, 'pin> {
     }
 }
 
-impl<T> Ctap2Serialize for T
-where
-    T: ClientPINSubCommand,
-{
-    fn ctap2<Dev>(&self, _device: &mut Dev) -> Result<Vec<u8>, transport::Error>
-    where
-        Dev: FidoDevice,
-    {
-        let client_pin = self.as_client_pin()?;
-        let output = to_vec(&client_pin).map_err(Error::Serialization)?;
-        trace!("client subcommmand: {}", pretty_hex(&output));
-
-        Ok(output)
-    }
-}
-
-impl<T> Request for T
+impl<T> RequestCtap2 for T
 where
     T: ClientPINSubCommand,
     T: fmt::Debug,
@@ -1155,29 +1895,44 @@ where
         Command::ClientPin
     }
 
-    fn minimum_version(&self) -> Version {
-        Version::CTAP2
+    fn wire_format<Dev>(&self, dev: &mut Dev) -> Result<Vec<u8>, transport::Error>
+    where
+        Dev: FidoDevice,
+    {
+        let client_pin = self.as_client_pin()?;
+        let output = to_vec(&client_pin).map_err(Error::Serialization)?;
+        trace!("client subcommmand: {}", pretty_hex(&output));
+
+        Ok(output)
     }
 
-    fn parse_response(&self, input: &[u8]) -> Result<Self::Output, Error> {
+    fn handle_response_ctap2<Dev>(
+        &self,
+        _dev: &mut Dev,
+        input: &[u8],
+    ) -> Result<Self::Output, TransportError>
+    where
+        Dev: FidoDevice,
+    {
         trace!("Client pin subcomand response: {}", pretty_hex(&input));
 
         if input.is_empty() {
-            return Err(Error::InputTooSmall);
+            return Err(Error::InputTooSmall).map_err(TransportError::Command);
         }
         let status: StatusCode = input[0].into();
         debug!("response status code: {:?}", status);
         if input.len() > 1 {
             if status.is_ok() {
                 <T as ClientPINSubCommand>::parse_response_payload(self, &input[1..])
+                    .map_err(TransportError::Command)
             } else {
                 let data: Value = from_slice(&input[1..]).map_err(Error::Parsing)?;
-                Err(Error::StatusCode(status, Some(data)))
+                Err(Error::StatusCode(status, Some(data))).map_err(TransportError::Command)
             }
         } else if status.is_ok() {
-            Err(Error::InputTooSmall)
+            Err(Error::InputTooSmall).map_err(TransportError::Command)
         } else {
-            Err(Error::StatusCode(status, None))
+            Err(Error::StatusCode(status, None)).map_err(TransportError::Command)
         }
     }
 }
@@ -1277,10 +2032,16 @@ impl AsRef<[u8]> for PinToken {
 
 #[cfg(test)]
 pub mod test {
-    use super::{AuthenticatorInfo, MakeCredentials, Request};
-    use crate::ctap::{CollectedClientData, WebauthnType};
-    use crate::ctap2::server::{Alg, PublicKeyCredentialParameters, RelyingParty, User};
     use serde_cbor::de::from_slice;
+
+    use super::{AuthenticatorInfo, MakeCredentials, Request};
+    use crate::ctap::{CollectedClientData, Origin, WebauthnType};
+    use crate::ctap2::server::{
+        Alg, PublicKeyCredentialParameters, RelyingParty, RelyingPartyData, User,
+    };
+    use crate::transport::hid::HIDDevice;
+    use crate::transport::platform::device::Device;
+    use crate::transport::platform::TestCase;
 
     pub const MAKE_CREDENTIALS_SAMPLE_RESPONSE: [u8; 666] =
         include!("tests/MAKE_CREDENTIALS_SAMPLE_RESPONSE,in");
@@ -1292,24 +2053,25 @@ pub mod test {
             CollectedClientData {
                 type_: WebauthnType::Create,
                 challenge: challenge.clone().into(),
-                origin: String::from("https://www.example.com"),
+                origin: Origin::Some(String::from("https://www.example.com")),
                 token_binding: None,
             },
-            RelyingParty {
+            RelyingParty::Data(RelyingPartyData {
                 id: String::from("example.com"),
-            },
-            User {
+            }),
+            Some(User {
                 id: vec![0],
                 icon: None,
                 name: String::from("j.doe"),
                 display_name: None,
-            },
+            }),
             vec![PublicKeyCredentialParameters { alg: Alg::ES256 }],
             Vec::new(),
             None,
             None,
         );
-        let reply = req.parse_response(&MAKE_CREDENTIALS_SAMPLE_RESPONSE[..]);
+        let mut device = Device::new(TestCase::WriteError).unwrap();
+        let reply = req.handle_response(&mut device, &MAKE_CREDENTIALS_SAMPLE_RESPONSE[..]);
 
         assert!(reply.is_ok());
         let (reply, _) = reply.unwrap();

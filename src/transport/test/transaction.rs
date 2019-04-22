@@ -4,7 +4,7 @@
 
 //use runloop::RunLoop;
 
-use util::OnceCallback;
+use util::ErrorCallback;
 
 use super::TestCase;
 
@@ -15,14 +15,10 @@ fn always_alive() -> bool {
 }
 
 impl Transaction {
-    pub fn new<F, T>(
-        _timeout: u64,
-        _callback: OnceCallback<T>,
-        new_device_cb: F,
-    ) -> Result<Self, ::Error>
+    pub fn new<F, EC>(_timeout: u64, _callback: EC, new_device_cb: F) -> Result<Self, ::Error>
     where
+        EC: ErrorCallback,
         F: Fn(TestCase, &Fn() -> bool) + Sync + Send + 'static,
-        T: 'static,
     {
         let test_case = TestCase::active();
         new_device_cb(test_case, &always_alive);

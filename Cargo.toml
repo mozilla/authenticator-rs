@@ -41,6 +41,7 @@ hmac = "0.7.0"
 nom = "4.2"
 cose = {path = "cose"}
 openssl = "0.10"
+der-parser = "1.1.1"
 
 [dependencies.serde_cbor]
 git = "https://github.com/baloo/cbor"

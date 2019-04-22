@@ -19,13 +19,21 @@ impl TestCase {
     pub fn activate(value: TestCase) {
         // ENABLED_TEST will return older value in error side of a result, just
         // ignore it.
-        debug!("enabling test_case={:?} in {:?}", value, std::thread::current().id());
+        debug!(
+            "enabling test_case={:?} in {:?}",
+            value,
+            std::thread::current().id()
+        );
         ENABLED_TEST.with(|v| v.replace(value));
     }
 
     pub fn active() -> TestCase {
         let value = ENABLED_TEST.with(|v| v.clone().into_inner());
-        debug!("enabling test_case={:?} in {:?}", value, std::thread::current().id());
+        debug!(
+            "enabling test_case={:?} in {:?}",
+            value,
+            std::thread::current().id()
+        );
         value
     }
 }

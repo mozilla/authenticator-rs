@@ -9,11 +9,11 @@ use transport::platform::device::Device;
 use transport::platform::transaction::Transaction;
 use transport::{Error, FidoDevice};
 //use u2fprotocol::{u2f_init_device, u2f_is_keyhandle_valid, u2f_register, u2f_sign};
-use util::OnceCallback;
+use util::{Callback, OnceCallback, OnceCallbackMap};
 
 use crate::ctap::CollectedClientData;
 use crate::ctap2::attestation::AttestationObject;
-use crate::ctap2::commands::MakeCredentials;
+use crate::ctap2::commands::{AssertionObject, GetAssertion, MakeCredentials};
 
 //fn is_valid_transport(transports: ::AuthenticatorTransports) -> bool {
 //    transports.is_empty() || transports.contains(::AuthenticatorTransports::USB)
@@ -54,12 +54,14 @@ impl StateMachine {
         Default::default()
     }
 
-    pub fn register(
-        &mut self,
-        timeout: u64,
-        params: MakeCredentials,
-        callback: OnceCallback<(AttestationObject, CollectedClientData)>,
-    ) {
+    pub fn register<CB>(&mut self, timeout: u64, params: MakeCredentials, callback: CB)
+    where
+        CB: Callback<Input = (AttestationObject, CollectedClientData)>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+    {
         // Abort any prior register/sign calls.
         self.cancel();
         let cbc = callback.clone();
@@ -118,93 +120,50 @@ impl StateMachine {
         self.transaction = Some(try_or!(transaction, |e| cbc.call(Err(e))));
     }
 
-    //pub fn sign(
-    //    &mut self,
-    //    flags: ::SignFlags,
-    //    timeout: u64,
-    //    challenge: Vec<u8>,
-    //    app_ids: Vec<::AppId>,
-    //    key_handles: Vec<::KeyHandle>,
-    //    callback: OnceCallback<::SignResult>,
-    //) {
-    //    // Abort any prior register/sign calls.
-    //    self.cancel();
+    pub fn sign<CB>(&mut self, timeout: u64, command: GetAssertion, callback: CB)
+    where
+        CB: Callback<Input = AssertionObject> + Clone + Send + Sync + 'static,
+    {
+        // Abort any prior register/sign calls.
+        self.cancel();
 
-    //    let cbc = callback.clone();
+        let cbc = callback.clone();
 
-    //    let transaction = Transaction::new(timeout, cbc.clone(), move |info, alive| {
-    //        // Create a new device.
-    //        let dev = &mut match Device::new(info) {
-    //            Ok(dev) => dev,
-    //            _ => return,
-    //        };
+        let transaction = Transaction::new(timeout, callback.clone(), move |info, alive| {
+            // TODO(baloo): what is alive about? have to ask jcj
+            // Create a new device.
+            let dev = &mut match Device::new(info) {
+                Ok(dev) => dev,
+                Err(e) => {
+                    info!("error happened with device: {}", e);
+                    return;
+                }
+            };
 
-    //        // Try initializing it.
-    //        if !dev.is_u2f() || !u2f_init_device(dev) {
-    //            return;
-    //        }
+            // Try initializing it.
+            if let Err(e) = dev.init() {
+                info!("error while initializing device: {}", e);
+                return;
+            }
 
-    //        // We currently don't support user verification because we can't
-    //        // ask tokens whether they do support that. If the flag is set,
-    //        // ignore all tokens for now.
-    //        //
-    //        // Technically, this is a ConstraintError because we shouldn't talk
-    //        // to this authenticator in the first place. But the result is the
-    //        // same anyway.
-    //        if !flags.is_empty() {
-    //            return;
-    //        }
+            let resp = dev.send_msg(&command);
+            match resp {
+                Ok(resp) => callback.call(Ok(resp)),
+                // TODO(baloo): if key_handle is invalid for this device, it
+                //              should reply something like:
+                //              CTAP2_ERR_INVALID_CREDENTIAL
+                //              have to check
+                Err(ref e) if e.device_unsupported() || e.unsupported_command() => {}
+                Err(Error::Command(ref e)) if e.device_busy() => {}
+                Err(e) => {
+                    warn!("error happened: {}", e);
+                    callback.call(Err(::Error::Unknown));
+                }
+            }
+        });
 
-    //        // For each appId, try all key handles. If there's at least one
-    //        // valid key handle for an appId, we'll use that appId below.
-    //        let (app_id, valid_handles) =
-    //            find_valid_key_handles(&app_ids, &key_handles, |app_id, key_handle| {
-    //                u2f_is_keyhandle_valid(dev, &challenge, app_id, &key_handle.credential)
-    //                    .unwrap_or(false) /* no match on failure */
-    //            });
-
-    //        // Aggregate distinct transports from all given credentials.
-    //        let transports = key_handles
-    //            .iter()
-    //            .fold(::AuthenticatorTransports::empty(), |t, k| t | k.transports);
-
-    //        // We currently only support USB. If the RP specifies transports
-    //        // and doesn't include USB it's probably lying.
-    //        if !is_valid_transport(transports) {
-    //            return;
-    //        }
-
-    //        while alive() {
-    //            // If the device matches none of the given key handles
-    //            // then just make it blink with bogus data.
-    //            if valid_handles.is_empty() {
-    //                let blank = vec![0u8; PARAMETER_SIZE];
-    //                if u2f_register(dev, &blank, &blank).is_ok() {
-    //                    callback.call(Err(::Error::InvalidState));
-    //                    break;
-    //                }
-    //            } else {
-    //                // Otherwise, try to sign.
-    //                for key_handle in &valid_handles {
-    //                    if let Ok(bytes) = u2f_sign(dev, &challenge, app_id, &key_handle.credential)
-    //                    {
-    //                        callback.call(Ok((
-    //                            app_id.clone(),
-    //                            key_handle.credential.clone(),
-    //                            bytes,
-    //                        )));
-    //                        break;
-    //                    }
-    //                }
-    //            }
-
-    //            // Sleep a bit before trying again.
-    //            thread::sleep(Duration::from_millis(100));
-    //        }
-    //    });
-
-    //    self.transaction = Some(try_or!(transaction, |e| cbc.call(Err(e))));
-    //}
+        self.transaction = Some(try_or!(transaction, move |e| cbc.call(Err(e))));
+    }
 
     // This blocks.
     pub fn cancel(&mut self) {

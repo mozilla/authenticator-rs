@@ -1,4 +1,5 @@
 use std::fmt;
+use std::io;
 
 use serde_bytes::ByteBuf;
 use serde_cbor::error;
@@ -9,41 +10,90 @@ use serde::de::MapAccess;
 use serde::de::{self, Deserialize, Deserializer, Unexpected, Visitor};
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
-#[cfg(test)]
 use sha2::{Digest, Sha256};
 
-#[cfg(test)]
 use crate::ctap2::attestation::RpIdHash;
+use crate::AuthenticatorTransports;
+use crate::KeyHandle;
 
 #[derive(Debug, Serialize)]
 #[cfg_attr(test, derive(Deserialize))]
-pub struct RelyingParty {
+pub struct RelyingPartyData {
     // TODO(baloo): spec is wrong !!!!111
     //              https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html#commands
     //              in the example "A PublicKeyCredentialRpEntity DOM object defined as follows:"
+    //              inconsistent with https://w3c.github.io/webauthn/#sctn-rp-credential-params
     pub id: String,
+    // TODO(baloo): need to add name and icon fields (optionals)
+}
+
+// Note: This enum is provided to make old api work. This should be deprecated and use the full
+//       RelyingPartyData instead
+#[derive(Debug)]
+pub enum RelyingParty {
+    Data(RelyingPartyData),
+    #[deprecated(
+        note = "RelyingParty::Hash is deprecated, ctap2 needs full object with the full id"
+    )]
+    // and ctap1 hash can be derived from full object, see RelyingParty::hash below
+    Hash(RpIdHash),
+}
+
+#[cfg(test)]
+impl<'de> Deserialize<'de> for RelyingParty {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        RelyingPartyData::deserialize(deserializer).map(RelyingParty::Data)
+    }
 }
 
 impl RelyingParty {
     pub fn to_ctap2(&self) -> Result<Vec<u8>, error::Error> {
-        ser::to_vec(self)
+        match *self {
+            RelyingParty::Data(ref d) => ser::to_vec(d),
+            _ => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "you provided rp id hash, but I need full object",
+            )
+            .into()),
+        }
     }
 
-    #[cfg(test)]
     pub fn hash(&self) -> RpIdHash {
-        let mut hasher = Sha256::new();
-        hasher.input(&self.id.as_bytes()[..]);
+        match *self {
+            RelyingParty::Data(ref d) => {
+                let mut hasher = Sha256::new();
+                hasher.input(&d.id.as_bytes()[..]);
 
-        let mut output = [0u8; 32];
-        let len = output.len();
-        output.copy_from_slice(&hasher.result().as_slice()[..len]);
+                let mut output = [0u8; 32];
+                let len = output.len();
+                output.copy_from_slice(&hasher.result().as_slice()[..len]);
 
-        RpIdHash(output)
+                RpIdHash(output)
+            }
+            RelyingParty::Hash(ref d) => d.clone(),
+        }
+    }
+
+    pub fn is_hash(&self) -> bool {
+        match *self {
+            RelyingParty::Hash(_) => true,
+            _ => false,
+        }
+    }
+
+    #[deprecated(
+        note = "RelyingParty::Hash is deprecated, ctap2 needs full object with the full id"
+    )]
+    pub fn new_hash(data: &[u8]) -> Result<Self, ()> {
+        Ok(RelyingParty::Hash(RpIdHash::from(data)?))
     }
 }
 
-#[derive(Debug, Serialize, Clone, Eq, PartialEq)]
-#[cfg_attr(test, derive(Deserialize))]
+// TODO(baloo): should we rename this PublicKeyCredentialUserEntity ?
+#[derive(Debug, Serialize, Clone, Eq, PartialEq, Deserialize)]
 pub struct User {
     #[serde(with = "serde_bytes")]
     pub id: Vec<u8>,
@@ -259,10 +309,27 @@ impl<'de> Deserialize<'de> for Transport {
     }
 }
 
+impl From<AuthenticatorTransports> for Vec<Transport> {
+    fn from(t: AuthenticatorTransports) -> Self {
+        let mut transports = Vec::new();
+        if t.contains(AuthenticatorTransports::USB) {
+            transports.push(Transport::USB);
+        }
+        if t.contains(AuthenticatorTransports::NFC) {
+            transports.push(Transport::NFC);
+        }
+        if t.contains(AuthenticatorTransports::BLE) {
+            transports.push(Transport::BLE);
+        }
+
+        transports
+    }
+}
+
 #[derive(Debug)]
 pub struct PublicKeyCredentialDescriptor {
-    id: Vec<u8>,
-    transports: Vec<Transport>,
+    pub id: Vec<u8>,
+    pub transports: Vec<Transport>,
 }
 
 impl Serialize for PublicKeyCredentialDescriptor {
@@ -349,20 +416,27 @@ impl<'de> Deserialize<'de> for PublicKeyCredentialDescriptor {
     }
 }
 
+impl From<&KeyHandle> for PublicKeyCredentialDescriptor {
+    fn from(kh: &KeyHandle) -> Self {
+        Self {
+            id: kh.credential.clone(),
+            transports: kh.transports.into(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
-    use super::Alg;
-    use super::PublicKeyCredentialDescriptor;
-    use super::PublicKeyCredentialParameters;
-    use super::RelyingParty;
-    use super::Transport;
-    use super::User;
+    use super::{
+        Alg, PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty,
+        RelyingPartyData, Transport, User,
+    };
 
     #[test]
     fn serialize_rp() {
-        let rp = RelyingParty {
+        let rp = RelyingParty::Data(RelyingPartyData {
             id: String::from("Acme"),
-        };
+        });
 
         let payload = rp.to_ctap2();
         let payload = payload.unwrap();

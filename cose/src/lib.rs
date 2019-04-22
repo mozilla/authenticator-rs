@@ -119,9 +119,9 @@ enum KeyType {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicKey {
-    curve: EllipticCurve,
+    pub curve: EllipticCurve,
     // TODO(baloo): yeah, I know jcj :) I shouldn't be using bytes in asn.1 here :p
-    bytes: Vec<u8>,
+    pub bytes: Vec<u8>,
 }
 
 impl PublicKey {
@@ -142,10 +142,7 @@ impl PublicKey {
     }
 
     pub fn new(curve: EllipticCurve, bytes: Vec<u8>) -> Self {
-        PublicKey {
-            curve,
-            bytes,
-        }
+        PublicKey { curve, bytes }
     }
 }
 

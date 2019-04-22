@@ -2,13 +2,13 @@ use std::fmt;
 
 #[cfg(test)]
 use serde::de::{self, Deserialize, Deserializer, Visitor};
-use serde::ser::{Serialize, SerializeMap, Serializer};
+use serde::ser::{Error, Serialize, SerializeMap, Serializer};
 use serde_json as json;
 use sha2::{Digest, Sha256};
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum Version {
-    //    CTAP1,
+    CTAP1,
     CTAP2,
 }
 
@@ -114,12 +114,48 @@ impl From<Vec<u8>> for Challenge {
     }
 }
 
+impl AsRef<[u8]> for Challenge {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
+
+// Note(baloo): Origin has the same signature as std::option::Option<String>, but
+//              I marked None variant as deprecated so we can track its usage
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Origin {
+    Some(String),
+    #[deprecated(
+        note = "Origin::None is provided for old api support, this should be removed as soon as Manager.sign is removed"
+    )]
+    None,
+}
+
+impl Origin {
+    #[inline]
+    pub fn is_none(&self) -> bool {
+        Origin::None == *self
+    }
+}
+
+impl Serialize for Origin {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match *self {
+            Origin::Some(ref origin) => serializer.serialize_str(origin),
+            _ => Err(S::Error::custom("trying to serialize origin from v1 api")),
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Clone, PartialEq, Eq)]
 pub struct CollectedClientData {
     #[serde(rename = "type")]
     pub type_: WebauthnType,
     pub challenge: Challenge,
-    pub origin: String,
+    pub origin: Origin,
     #[serde(rename = "tokenBinding", skip_serializing_if = "Option::is_none")]
     pub token_binding: Option<TokenBinding>,
 }
@@ -200,7 +236,7 @@ impl CollectedClientData {
 
 #[cfg(test)]
 mod test {
-    use super::{Challenge, CollectedClientData, TokenBinding, WebauthnType};
+    use super::{Challenge, CollectedClientData, Origin, TokenBinding, WebauthnType};
     use serde_json as json;
 
     #[test]
@@ -233,7 +269,7 @@ mod test {
         let client_data = CollectedClientData {
             type_: WebauthnType::Create,
             challenge: Challenge(vec![0x00, 0x01, 0x02, 0x03]),
-            origin: String::from("example.com"),
+            origin: Origin::Some(String::from("example.com")),
             token_binding: Some(TokenBinding::Present(vec![0x00, 0x01, 0x02, 0x03])),
         };
 

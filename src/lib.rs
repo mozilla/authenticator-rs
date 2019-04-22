@@ -37,6 +37,7 @@ extern crate pretty_hex;
 extern crate serde_json;
 extern crate sha2;
 // TODO(baloo): this has to be replaced by nss at some point
+extern crate der_parser;
 extern crate openssl;
 
 #[cfg(test)]
@@ -54,16 +55,17 @@ extern crate untrusted;
 mod consts;
 mod statemachine;
 //mod u2fprotocol;
-//mod u2ftypes;
 mod ctap;
+mod u2ftypes;
 
 pub mod ctap2;
 mod transport;
 
 mod manager;
-pub use manager::FidoManager;
-#[allow(deprecated)]
 pub use manager::U2FManager;
+
+mod webauthn;
+pub use webauthn::Manager;
 
 //mod capi;
 //pub use capi::*;
@@ -97,7 +99,9 @@ pub struct KeyHandle {
 
 pub type AppId = Vec<u8>;
 pub type RegisterResult = Vec<u8>;
-pub type SignResult = (AppId, Vec<u8>, Vec<u8>);
+pub type Handle = Vec<u8>;
+pub type SignData = Vec<u8>;
+pub type SignResult = (AppId, Handle, SignData);
 
 #[derive(Debug, Clone, Copy)]
 pub enum Error {

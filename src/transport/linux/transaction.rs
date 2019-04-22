@@ -5,7 +5,7 @@
 use runloop::RunLoop;
 use std::path::PathBuf;
 use transport::platform::monitor::Monitor;
-use util::OnceCallback;
+use util::ErrorCallback;
 
 pub struct Transaction {
     // Handle to the thread loop.
@@ -13,14 +13,10 @@ pub struct Transaction {
 }
 
 impl Transaction {
-    pub fn new<F, T>(
-        timeout: u64,
-        callback: OnceCallback<T>,
-        new_device_cb: F,
-    ) -> Result<Self, ::Error>
+    pub fn new<F, EC>(timeout: u64, callback: EC, new_device_cb: F) -> Result<Self, ::Error>
     where
+        EC: ErrorCallback + Send + 'static,
         F: Fn(PathBuf, &Fn() -> bool) + Sync + Send + 'static,
-        T: 'static,
     {
         let thread = RunLoop::new_with_timeout(
             move |alive| {
@@ -28,10 +24,10 @@ impl Transaction {
                 let mut monitor = Monitor::new(new_device_cb);
 
                 // Start polling for new devices.
-                try_or!(monitor.run(alive), |_| callback.call(Err(::Error::Unknown)));
+                try_or!(monitor.run(alive), |_| callback.errcall(::Error::Unknown));
 
                 // Send an error, if the callback wasn't called already.
-                callback.call(Err(::Error::NotAllowed));
+                callback.errcall(::Error::NotAllowed);
             },
             timeout,
         )

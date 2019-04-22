@@ -13,11 +13,11 @@ use serde_bytes::ByteBuf;
 use super::server::Alg;
 use super::utils::from_slice_stream;
 
-#[derive(Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct RpIdHash(pub [u8; 32]);
 
 impl RpIdHash {
-    fn from(src: &[u8]) -> Result<RpIdHash, ()> {
+    pub fn from(src: &[u8]) -> Result<RpIdHash, ()> {
         let mut payload = [0u8; 32];
         if src.len() != payload.len() {
             Err(())
@@ -32,6 +32,12 @@ impl fmt::Debug for RpIdHash {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let value = base64::encode_config(&self.0[..], base64::URL_SAFE_NO_PAD);
         write!(f, "RpIdHash({})", value)
+    }
+}
+
+impl AsRef<[u8]> for RpIdHash {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
     }
 }
 
@@ -55,6 +61,10 @@ impl AAGuid {
             payload.copy_from_slice(src);
             Ok(AAGuid(payload))
         }
+    }
+
+    pub fn empty() -> Self {
+        AAGuid([0u8; 16])
     }
 }
 
@@ -253,6 +263,12 @@ impl Serialize for AuthenticatorData {
 /// x509 encoded attestation certificate
 pub struct AttestationCertificate(Vec<u8>);
 
+impl AsRef<[u8]> for AttestationCertificate {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
+
 impl<'de> Deserialize<'de> for AttestationCertificate {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -289,6 +305,12 @@ impl fmt::Debug for Signature {
     }
 }
 
+impl AsRef<[u8]> for Signature {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum AttestationStatement {
     None,
@@ -299,13 +321,32 @@ pub enum AttestationStatement {
     //TPM,
     //AndroidKey,
     //AndroidSafetyNet,
-    //FidoU2F,
+    FidoU2F(AttestationStatementFidoU2F),
     // TODO(baloo): should we do an Unknow version? most likely
 }
 
 impl AttestationStatement {
     pub fn is_none(&self) -> bool {
         *self == AttestationStatement::None
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+// See https://www.w3.org/TR/webauthn/#fido-u2f-attestation
+pub struct AttestationStatementFidoU2F {
+    pub sig: Signature,
+
+    #[serde(rename = "x5c")]
+    /// Certificate chain in x509 format
+    pub attestation_cert: Vec<AttestationCertificate>,
+}
+
+impl AttestationStatementFidoU2F {
+    pub fn new(cert: &[u8], signature: &[u8]) -> Self {
+        AttestationStatementFidoU2F {
+            sig: Signature(ByteBuf::from(signature)),
+            attestation_cert: vec![AttestationCertificate(Vec::from(cert))],
+        }
     }
 }
 
@@ -323,6 +364,7 @@ pub struct AttestationStatementPacked {
 
 #[derive(Debug, PartialEq, Eq)]
 enum AttestationFormat {
+    FidoU2F,
     Packed,
     None,
     // TOOD(baloo): only packed is implemented for now see spec:
@@ -330,7 +372,6 @@ enum AttestationFormat {
     //TPM,
     //AndroidKey,
     //AndroidSafetyNet,
-    //FidoU2F,
 }
 
 impl<'de> Deserialize<'de> for AttestationFormat {
@@ -352,6 +393,7 @@ impl<'de> Deserialize<'de> for AttestationFormat {
                 E: SerdeError,
             {
                 match v {
+                    "fido-u2f" => Ok(AttestationFormat::FidoU2F),
                     "packed" => Ok(AttestationFormat::Packed),
                     "none" => Ok(AttestationFormat::None),
                     other => Err(de::Error::custom(format!("unexpected value {}", other))),
@@ -421,6 +463,10 @@ impl<'de> Deserialize<'de> for AttestationObject {
                                 AttestationFormat::Packed => {
                                     att_statement =
                                         Some(AttestationStatement::Packed(map.next_value()?));
+                                }
+                                AttestationFormat::FidoU2F => {
+                                    att_statement =
+                                        Some(AttestationStatement::FidoU2F(map.next_value()?));
                                 }
                             }
                         }

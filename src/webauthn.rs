@@ -2,19 +2,19 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use std::io::{self, Write};
+use std::io;
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::time::Duration;
 
 use crate::ctap::{Challenge, CollectedClientData, Origin, WebauthnType};
-use crate::ctap2::attestation::{AttestationObject, AttestationStatement};
+use crate::ctap2::attestation::AttestationObject;
 use crate::ctap2::commands::{
     AssertionObject, GetAssertion, MakeCredentials, MakeCredentialsOptions, Pin,
 };
 use crate::ctap2::server::{PublicKeyCredentialParameters, RelyingParty, RelyingPartyData, User};
 #[cfg(test)]
 use crate::transport::platform::TestCase;
-use crate::{RegisterFlags, SignFlags};
+use crate::SignFlags;
 use consts::PARAMETER_SIZE;
 use runloop::RunLoop;
 use statemachine::StateMachine;
@@ -24,7 +24,7 @@ enum QueueAction {
     Register {
         timeout: u64,
         params: MakeCredentials,
-        callback: OnceCallbackMap<(AttestationObject, CollectedClientData), ::RegisterResult>,
+        callback: OnceCallback<(AttestationObject, CollectedClientData)>,
     },
     Sign {
         timeout: u64,
@@ -38,14 +38,13 @@ pub(crate) enum Capability {
     Fido2 = 2,
 }
 
-#[deprecated(note = "U2FManager has been deprecated in favor of Manager")]
-pub struct U2FManager {
+pub struct Manager {
     queue: RunLoop,
     tx: Sender<QueueAction>,
     filter: Option<Capability>,
 }
 
-impl U2FManager {
+impl Manager {
     pub fn new() -> io::Result<Self> {
         let (tx, rx) = channel();
 
@@ -109,98 +108,49 @@ impl U2FManager {
 
     pub fn register<F>(
         &self,
-        flags: ::RegisterFlags,
+        relying_party: String,
+        origin: String,
         timeout: u64,
         challenge: Vec<u8>,
-        application: ::AppId,
-        key_handles: Vec<::KeyHandle>,
+        user: User,
+        pub_cred_params: Vec<PublicKeyCredentialParameters>,
+        pin: Option<Pin>,
         callback: F,
     ) -> Result<(), ::Error>
     where
-        F: FnOnce(Result<::RegisterResult, ::Error>),
+        F: FnOnce(Result<(AttestationObject, CollectedClientData), ::Error>),
         F: Send + 'static,
     {
-        if challenge.len() != PARAMETER_SIZE || application.len() != PARAMETER_SIZE {
-            return Err(::Error::Unknown);
-        }
-        let challenge = Challenge::from(challenge);
+        //if challenge.len() != PARAMETER_SIZE || application.len() != PARAMETER_SIZE {
+        //    return Err(::Error::Unknown);
+        //}
+
+        //for key_handle in &key_handles {
+        //    if key_handle.credential.len() > 256 {
+        //        return Err(::Error::Unknown);
+        //    }
+        //}
+
+        let callback = OnceCallback::new(callback);
+
+        let rp = RelyingParty::Data(RelyingPartyData { id: relying_party });
+        let origin = Origin::Some(origin);
 
         let client_data = CollectedClientData {
             type_: WebauthnType::Create,
-            challenge,
-            origin: Origin::None,
+            challenge: challenge.clone().into(),
+            origin,
             token_binding: None,
         };
-
-        let mut excluded_handles = Vec::with_capacity(key_handles.len());
-        for key_handle in &key_handles {
-            if key_handle.credential.len() > 256 {
-                return Err(::Error::Unknown);
-            }
-
-            excluded_handles.push(key_handle.into());
-        }
-
-        let options = MakeCredentialsOptions {
-            user_validation: flags.contains(RegisterFlags::REQUIRE_USER_VERIFICATION),
-            ..MakeCredentialsOptions::default()
-        };
-
-        let callback = OnceCallback::new(callback);
-        let callback = callback.map(
-            |(attestation_object, collected_client_data): (
-                AttestationObject,
-                CollectedClientData,
-            )| {
-                let mut cursor = io::Cursor::new(Vec::new());
-                // 1 byte:   register response = 0x05
-                cursor
-                    .write_all(&[0x05])
-                    .expect("unable to write reserved byte");
-
-                let credential_data = attestation_object.auth_data.credential_data.unwrap();
-                // 64 bytes: public_key
-                cursor
-                    .write_all(&credential_data.credential_public_key.bytes[..])
-                    .expect("unable to write public_key");
-
-                // 1 byte: key_handle_len
-                cursor
-                    .write_all(&[credential_data.credential_id.len() as u8])
-                    .expect("unable to write key_handle_len");
-
-                // N bytes: Key_handle
-                cursor
-                    .write_all(&credential_data.credential_id[..])
-                    .expect("unable to write key_handle");
-
-                // N bytes: attestation
-                let u2f = match attestation_object.att_statement {
-                    AttestationStatement::FidoU2F(u2f) => u2f,
-                    _ => panic!("u2f statement format expected"),
-                };
-                cursor
-                    .write_all(u2f.attestation_cert[0].as_ref())
-                    .expect("unable to write attestation");
-                // N bytes: signature
-                cursor
-                    .write_all(u2f.sig.as_ref())
-                    .expect("unable to write signature");
-
-                cursor.into_inner()
-            },
-        );
-
-        let rp = RelyingParty::new_hash(&application).map_err(|_| ::Error::Unknown)?;
 
         let register = MakeCredentials::new(
             client_data,
             rp,
-            None,
+            Some(user),
+            pub_cred_params.clone(),
             Vec::new(),
-            excluded_handles,
             None,
-            None,
+            pin,
         );
 
         let action = QueueAction::Register {
@@ -257,9 +207,7 @@ impl U2FManager {
         //    return;
         //}
         let options = MakeCredentialsOptions {
-            // TODO(baloo): user_validation is required for yubikeys, not sure why
-            //user_validation: flags.contains(SignFlags::REQUIRE_USER_VERIFICATION),
-            user_validation: true,
+            user_validation: flags.contains(SignFlags::REQUIRE_USER_VERIFICATION),
             ..MakeCredentialsOptions::default()
         };
 
@@ -301,7 +249,7 @@ impl U2FManager {
     }
 }
 
-impl Drop for U2FManager {
+impl Drop for Manager {
     fn drop(&mut self) {
         self.queue.cancel();
     }

@@ -7,7 +7,7 @@ use std::sync::mpsc;
 use crate::ctap2::commands::Pin;
 use crate::ctap2::server::{Alg, PublicKeyCredentialParameters, User};
 use crate::transport::platform::TestCase;
-use crate::FidoManager;
+use crate::Manager;
 
 mod common;
 
@@ -17,7 +17,7 @@ fn test_write_error() {
     debug!("activating writeerror");
     TestCase::activate(TestCase::WriteError);
 
-    let manager = FidoManager::new().unwrap();
+    let manager = Manager::new().unwrap();
     let (tx, rx) = mpsc::channel();
 
     manager
@@ -50,7 +50,7 @@ fn test_simple_fido2() {
     common::setup();
     TestCase::activate(TestCase::Fido2Simple);
 
-    let manager = FidoManager::new().unwrap();
+    let manager = Manager::new().unwrap();
     let (tx, rx) = mpsc::channel();
 
     manager
