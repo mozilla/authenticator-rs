@@ -122,91 +122,92 @@ where
 // Internal Device Commands
 ////////////////////////////////////////////////////////////////////////
 
-fn init_device<T>(dev: &mut T, nonce: &[u8]) -> io::Result<()>
-where
-    T: U2FDevice + Read + Write,
-{
-    assert_eq!(nonce.len(), INIT_NONCE_SIZE);
-    let raw = sendrecv(dev, U2FHID_INIT, nonce)?;
-    dev.set_cid(U2FHIDInitResp::read(&raw, nonce)?);
+//fn init_device<T>(dev: &mut T, nonce: &[u8]) -> io::Result<()>
+//where
+//    T: U2FDevice + Read + Write,
+//{
+//    assert_eq!(nonce.len(), INIT_NONCE_SIZE);
+//
+//    let raw = sendrecv(dev, U2FHID_INIT, nonce)?;
+//    dev.set_cid(U2FHIDInitResp::read(&raw, nonce)?);
+//
+//    Ok(())
+//}
 
-    Ok(())
-}
-
-fn is_v2_device<T>(dev: &mut T) -> io::Result<bool>
-where
-    T: U2FDevice + Read + Write,
-{
-    let (data, status) = send_apdu(dev, U2F_VERSION, 0x00, &[])?;
-    let actual = CString::new(data)?;
-    let expected = CString::new("U2F_V2")?;
-    status_word_to_result(status, actual == expected)
-}
+//fn is_v2_device<T>(dev: &mut T) -> io::Result<bool>
+//where
+//    T: U2FDevice + Read + Write,
+//{
+//    let (data, status) = send_apdu(dev, U2F_VERSION, 0x00, &[])?;
+//    let actual = CString::new(data)?;
+//    let expected = CString::new("U2F_V2")?;
+//    status_word_to_result(status, actual == expected)
+//}
 
 ////////////////////////////////////////////////////////////////////////
 // Error Handling
 ////////////////////////////////////////////////////////////////////////
 
-fn status_word_to_result<T>(status: [u8; 2], val: T) -> io::Result<T> {
-    use self::io::ErrorKind::{InvalidData, InvalidInput};
-
-    match status {
-        SW_NO_ERROR => Ok(val),
-        SW_WRONG_DATA => Err(io::Error::new(InvalidData, "wrong data")),
-        SW_WRONG_LENGTH => Err(io::Error::new(InvalidInput, "wrong length")),
-        SW_CONDITIONS_NOT_SATISFIED => Err(io_err("conditions not satisfied")),
-        _ => Err(io_err(&format!("failed with status {:?}", status))),
-    }
-}
+//fn status_word_to_result<T>(status: [u8; 2], val: T) -> io::Result<T> {
+//    use self::io::ErrorKind::{InvalidData, InvalidInput};
+//
+//    match status {
+//        SW_NO_ERROR => Ok(val),
+//        SW_WRONG_DATA => Err(io::Error::new(InvalidData, "wrong data")),
+//        SW_WRONG_LENGTH => Err(io::Error::new(InvalidInput, "wrong length")),
+//        SW_CONDITIONS_NOT_SATISFIED => Err(io_err("conditions not satisfied")),
+//        _ => Err(io_err(&format!("failed with status {:?}", status))),
+//    }
+//}
 
 ////////////////////////////////////////////////////////////////////////
 // Device Communication Functions
 ////////////////////////////////////////////////////////////////////////
 
-pub fn sendrecv<T>(dev: &mut T, cmd: u8, send: &[u8]) -> io::Result<Vec<u8>>
-where
-    T: U2FDevice + Read + Write,
-{
-    // Send initialization packet.
-    let mut count = U2FHIDInit::write(dev, cmd, send)?;
+//pub fn sendrecv<T>(dev: &mut T, cmd: u8, send: &[u8]) -> io::Result<Vec<u8>>
+//where
+//    T: U2FDevice + Read + Write,
+//{
+//    // Send initialization packet.
+//    let mut count = U2FHIDInit::write(dev, cmd, send)?;
+//
+//    // Send continuation packets.
+//    let mut sequence = 0u8;
+//    while count < send.len() {
+//        count += U2FHIDCont::write(dev, sequence, &send[count..])?;
+//        sequence += 1;
+//    }
+//
+//    // Now we read. This happens in 2 chunks: The initial packet, which has the
+//    // size we expect overall, then continuation packets, which will fill in
+//    // data until we have everything.
+//    let mut data = U2FHIDInit::read(dev)?;
+//
+//    let mut sequence = 0u8;
+//    while data.len() < data.capacity() {
+//        let max = data.capacity() - data.len();
+//        data.extend_from_slice(&U2FHIDCont::read(dev, sequence, max)?);
+//        sequence += 1;
+//    }
+//
+//    Ok(data)
+//}
 
-    // Send continuation packets.
-    let mut sequence = 0u8;
-    while count < send.len() {
-        count += U2FHIDCont::write(dev, sequence, &send[count..])?;
-        sequence += 1;
-    }
-
-    // Now we read. This happens in 2 chunks: The initial packet, which has the
-    // size we expect overall, then continuation packets, which will fill in
-    // data until we have everything.
-    let mut data = U2FHIDInit::read(dev)?;
-
-    let mut sequence = 0u8;
-    while data.len() < data.capacity() {
-        let max = data.capacity() - data.len();
-        data.extend_from_slice(&U2FHIDCont::read(dev, sequence, max)?);
-        sequence += 1;
-    }
-
-    Ok(data)
-}
-
-fn send_apdu<T>(dev: &mut T, cmd: u8, p1: u8, send: &[u8]) -> io::Result<(Vec<u8>, [u8; 2])>
-where
-    T: U2FDevice + Read + Write,
-{
-    let apdu = U2FAPDUHeader::serialize(cmd, p1, send)?;
-    let mut data = sendrecv(dev, U2FHID_MSG, &apdu)?;
-
-    if data.len() < 2 {
-        return Err(io_err("unexpected response"));
-    }
-
-    let split_at = data.len() - 2;
-    let status = data.split_off(split_at);
-    Ok((data, [status[0], status[1]]))
-}
+//fn send_apdu<T>(dev: &mut T, cmd: u8, p1: u8, send: &[u8]) -> io::Result<(Vec<u8>, [u8; 2])>
+//where
+//    T: U2FDevice + Read + Write,
+//{
+//    let apdu = U2FAPDUHeader::serialize(cmd, p1, send)?;
+//    let mut data = sendrecv(dev, U2FHID_MSG, &apdu)?;
+//
+//    if data.len() < 2 {
+//        return Err(io_err("unexpected response"));
+//    }
+//
+//    let split_at = data.len() - 2;
+//    let status = data.split_off(split_at);
+//    Ok((data, [status[0], status[1]]))
+//}
 
 ////////////////////////////////////////////////////////////////////////
 // Tests

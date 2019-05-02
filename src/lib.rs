@@ -5,63 +5,70 @@
 #[macro_use]
 mod util;
 
-#[cfg(any(target_os = "linux", target_os = "freebsd"))]
-pub mod hidproto;
-
 #[cfg(any(target_os = "linux"))]
 extern crate libudev;
-
-#[cfg(any(target_os = "linux"))]
-#[path = "linux/mod.rs"]
-pub mod platform;
 
 #[cfg(any(target_os = "freebsd"))]
 extern crate devd_rs;
 
-#[cfg(any(target_os = "freebsd"))]
-#[path = "freebsd/mod.rs"]
-pub mod platform;
-
 #[cfg(any(target_os = "macos"))]
 extern crate core_foundation;
-
-#[cfg(any(target_os = "macos"))]
-#[path = "macos/mod.rs"]
-pub mod platform;
-
-#[cfg(any(target_os = "windows"))]
-#[path = "windows/mod.rs"]
-pub mod platform;
-
-#[cfg(not(any(
-    target_os = "linux",
-    target_os = "freebsd",
-    target_os = "macos",
-    target_os = "windows"
-)))]
-#[path = "stub/mod.rs"]
-pub mod platform;
 
 extern crate boxfnonce;
 extern crate libc;
 #[macro_use]
 extern crate log;
+extern crate base64;
+extern crate byteorder;
 extern crate rand;
 extern crate runloop;
-
 #[macro_use]
 extern crate bitflags;
+#[macro_use]
+extern crate nom;
+extern crate serde;
+extern crate serde_bytes;
+extern crate serde_cbor;
+#[macro_use]
+extern crate serde_derive;
+extern crate cose;
+extern crate hmac;
+extern crate pretty_hex;
+extern crate serde_json;
+extern crate sha2;
+// TODO(baloo): this has to be replaced by nss at some point
+extern crate der_parser;
+extern crate openssl;
+
+#[cfg(test)]
+#[macro_use]
+extern crate hex_literal;
+#[cfg(test)]
+extern crate once_cell;
+#[cfg(test)]
+extern crate ring;
+#[cfg(test)]
+extern crate simple_logger;
+#[cfg(test)]
+extern crate untrusted;
 
 mod consts;
 mod statemachine;
-mod u2fprotocol;
+//mod u2fprotocol;
+mod ctap;
 mod u2ftypes;
+
+pub mod ctap2;
+mod transport;
 
 mod manager;
 pub use manager::U2FManager;
 
-mod capi;
-pub use capi::*;
+mod webauthn;
+pub use webauthn::Manager;
+
+//mod capi;
+//pub use capi::*;
 
 // Keep this in sync with the constants in u2fhid-capi.h.
 bitflags! {
@@ -92,7 +99,9 @@ pub struct KeyHandle {
 
 pub type AppId = Vec<u8>;
 pub type RegisterResult = Vec<u8>;
-pub type SignResult = (AppId, Vec<u8>, Vec<u8>);
+pub type Handle = Vec<u8>;
+pub type SignData = Vec<u8>;
+pub type SignResult = (AppId, Handle, SignData);
 
 #[derive(Debug, Clone, Copy)]
 pub enum Error {
@@ -109,3 +118,6 @@ pub use consts::*;
 pub use u2fprotocol::*;
 #[cfg(fuzzing)]
 pub use u2ftypes::*;
+
+#[cfg(test)]
+mod tests;

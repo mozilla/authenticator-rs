@@ -30,13 +30,16 @@ pub const U2FHID_IF_VERSION: u32 = 2; // Current interface implementation versio
 pub const U2FHID_FRAME_TIMEOUT: u32 = 500; // Default frame timeout in ms
 pub const U2FHID_TRANS_TIMEOUT: u32 = 3000; // Default message timeout in ms
 
-// U2FHID native commands
-pub const U2FHID_PING: u8 = (TYPE_INIT | 0x01); // Echo data through local processor only
-pub const U2FHID_MSG: u8 = (TYPE_INIT | 0x03); // Send U2F message frame
-pub const U2FHID_LOCK: u8 = (TYPE_INIT | 0x04); // Send lock channel command
-pub const U2FHID_INIT: u8 = (TYPE_INIT | 0x06); // Channel initialization
-pub const U2FHID_WINK: u8 = (TYPE_INIT | 0x08); // Send device identification wink
-pub const U2FHID_ERROR: u8 = (TYPE_INIT | 0x3f); // Error response
+// CTAPHID native commands
+pub const CTAPHID_PING: u8 = (TYPE_INIT | 0x01); // Echo data through local processor only
+pub const CTAPHID_MSG: u8 = (TYPE_INIT | 0x03); // Send U2F message frame
+pub const CTAPHID_LOCK: u8 = (TYPE_INIT | 0x04); // Send lock channel command
+pub const CTAPHID_INIT: u8 = (TYPE_INIT | 0x06); // Channel initialization
+pub const CTAPHID_WINK: u8 = (TYPE_INIT | 0x08); // Send device identification wink
+pub const CTAPHID_CBOR: u8 = (TYPE_INIT | 0x10); // Encapsulated CBOR encoded message
+pub const CTAPHID_CANCEL: u8 = (TYPE_INIT | 0x11); // Cancel outstanding requests
+pub const CTAPHID_ERROR: u8 = (TYPE_INIT | 0x3f); // Error response
+pub const CTAPHID_KEEPALIVE: u8 = (TYPE_INIT | 0x3b); // Should be sent a an authenticator every 100ms and whenever a status changes
 
 // U2FHID_MSG commands
 pub const U2F_VENDOR_FIRST: u8 = (TYPE_INIT | 0x40); // First vendor defined command
