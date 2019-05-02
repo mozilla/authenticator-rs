@@ -218,10 +218,11 @@ impl<'de> Deserialize<'de> for ClientDataHash {
 
 impl CollectedClientData {
     pub fn hash(&self) -> json::Result<ClientDataHash> {
-        // TODO(baloo): this could use a bit more spec, there is no ordering specified. Are spaces
-        //              allowed? Is this needed for support between vendors? Does it need to be
-        //              stable across browsers? Maybe send an email to the mailing list.
-        //              https://w3c.github.io/webauthn/#collectedclientdata-json-serialized-client-data
+        // WebIDL's dictionary definition specifies that the order of the struct
+        // is exactly as the WebIDL specification declares it, with an algorithm
+        // for partial dictionaries, so that's how interop works for these
+        // things.
+        // See: https://heycam.github.io/webidl/#dfn-dictionary
         let data = json::to_vec(&self)?;
 
         let mut hasher = Sha256::new();
