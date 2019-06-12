@@ -6,8 +6,9 @@ extern crate log;
 
 use crate::consts::{CID_BROADCAST, MAX_HID_RPT_SIZE};
 use crate::platform::iokit::*;
-use crate::u2ftypes::U2FDevice;
+use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
 use core_foundation::base::*;
+use core_foundation::string::*;
 use std::convert::TryInto;
 use std::io;
 use std::io::{Read, Write};
@@ -20,20 +21,40 @@ pub struct Device {
     device_ref: IOHIDDeviceRef,
     cid: [u8; 4],
     report_rx: Receiver<Vec<u8>>,
+    dev_info: Option<U2FDeviceInfo>,
 }
 
 impl Device {
-    pub fn new(dev_info: (IOHIDDeviceRef, Receiver<Vec<u8>>)) -> io::Result<Self> {
-        let (device_ref, report_rx) = dev_info;
+    pub fn new(dev_ids: (IOHIDDeviceRef, Receiver<Vec<u8>>)) -> io::Result<Self> {
+        let (device_ref, report_rx) = dev_ids;
         Ok(Self {
             device_ref,
             cid: CID_BROADCAST,
             report_rx,
+            dev_info: None,
         })
     }
 
     pub fn is_u2f(&self) -> bool {
         true
+    }
+
+    unsafe fn get_property_macos(&self, prop_name: &str) -> io::Result<String> {
+        let prop_ref = IOHIDDeviceGetProperty(
+            self.device_ref,
+            CFString::new(prop_name).as_concrete_TypeRef(),
+        );
+        if prop_ref.is_null() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "IOHIDDeviceGetProperty received nullptr for property {}",
+                    prop_name
+                ),
+            ));
+        }
+
+        Ok(CFString::from_void(prop_ref).to_string())
     }
 }
 
@@ -107,5 +128,19 @@ impl U2FDevice for Device {
 
     fn out_rpt_size(&self) -> usize {
         MAX_HID_RPT_SIZE
+    }
+
+    fn get_property(&self, prop_name: &str) -> io::Result<String> {
+        unsafe { self.get_property_macos(prop_name) }
+    }
+
+    fn get_device_info(&self) -> U2FDeviceInfo {
+        // unwrap is okay, as dev_info must have already been set, else
+        // a programmer error
+        self.dev_info.clone().unwrap()
+    }
+
+    fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {
+        self.dev_info = Some(dev_info);
     }
 }

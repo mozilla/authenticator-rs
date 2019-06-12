@@ -100,8 +100,8 @@ pub struct KeyHandle {
 }
 
 pub type AppId = Vec<u8>;
-pub type RegisterResult = Vec<u8>;
-pub type SignResult = (AppId, Vec<u8>, Vec<u8>);
+pub type RegisterResult = (Vec<u8>, u2ftypes::U2FDeviceInfo);
+pub type SignResult = (AppId, Vec<u8>, Vec<u8>, u2ftypes::U2FDeviceInfo);
 
 #[derive(Debug, Clone, Copy)]
 pub enum Error {

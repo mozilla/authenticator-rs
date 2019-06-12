@@ -45,6 +45,8 @@ pub const U2F_REGISTER: u8 = 0x01; // Registration command
 pub const U2F_AUTHENTICATE: u8 = 0x02; // Authenticate/sign command
 pub const U2F_VERSION: u8 = 0x03; // Read version string command
 
+pub const YKPIV_INS_GET_VERSION: u8 = 0xfd; // Get firmware version, yubico ext
+
 // U2F_REGISTER command defines
 pub const U2F_REGISTER_ID: u8 = 0x05; // Version 2 registration identifier
 pub const U2F_REGISTER_HASH_ID: u8 = 0x00; // Version 2 hash identintifier
