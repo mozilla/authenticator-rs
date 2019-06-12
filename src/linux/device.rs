@@ -80,4 +80,15 @@ impl U2FDevice for Device {
     fn set_cid(&mut self, cid: [u8; 4]) {
         self.cid = cid;
     }
+
+    fn get_device_info(&self) -> DeviceInfo {
+        let vendor = "vendor (not implemented)";
+        let device = "device (not implemented)";
+        let firmware = "firmware (not implemented)";
+        DeviceInfo {
+            vendor_name: vendor.as_bytes().to_vec(),
+            device_name: device.as_bytes().to_vec(),
+            firmware_id: firmware.as_bytes().to_vec(),
+        }
+    }
 }

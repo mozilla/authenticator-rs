@@ -21,6 +21,7 @@ fn trace_hex(data: &[u8]) {
 pub trait U2FDevice {
     fn get_cid(&self) -> &[u8; 4];
     fn set_cid(&mut self, cid: [u8; 4]);
+    fn get_device_info(&self) -> DeviceInfo;
 }
 
 // Init structure for U2F Communications. Tells the receiver what channel

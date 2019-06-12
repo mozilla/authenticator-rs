@@ -42,4 +42,8 @@ impl U2FDevice for Device {
     fn set_cid(&mut self, cid: [u8; 4]) {
         panic!("not implemented");
     }
+
+    fn get_device_info(&self) -> DeviceInfo {
+        panic!("not implemented");
+    }
 }
