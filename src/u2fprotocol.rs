@@ -118,6 +118,13 @@ where
     Ok(status == SW_CONDITIONS_NOT_SATISFIED)
 }
 
+pub fn u2f_device_info<T>(dev: &mut T) -> io::Result<DeviceInfo>
+where
+    T: U2FDevice + Read + Write,
+{
+    Err(io_err("not impl"))
+}
+
 ////////////////////////////////////////////////////////////////////////
 // Internal Device Commands
 ////////////////////////////////////////////////////////////////////////

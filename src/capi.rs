@@ -22,6 +22,9 @@ const RESBUF_ID_REGISTRATION: u8 = 0;
 const RESBUF_ID_KEYHANDLE: u8 = 1;
 const RESBUF_ID_SIGNATURE: u8 = 2;
 const RESBUF_ID_APPID: u8 = 3;
+const RESBUF_ID_VENDOR_NAME: u8 = 4;
+const RESBUF_ID_DEVICE_NAME: u8 = 5;
+const RESBUF_ID_FIRMWARE_ID: u8 = 6;
 
 // Generates a new 64-bit transaction id with collision probability 2^-32.
 fn new_tid() -> u64 {
@@ -189,9 +192,12 @@ pub unsafe extern "C" fn rust_u2f_mgr_register(
         key_handles,
         move |rv| {
             let result = match rv {
-                Ok(registration) => {
+                Ok((registration, dev_info)) => {
                     let mut bufs = HashMap::new();
                     bufs.insert(RESBUF_ID_REGISTRATION, registration);
+                    bufs.insert(RESBUF_ID_VENDOR_NAME, dev_info.vendor_name);
+                    bufs.insert(RESBUF_ID_DEVICE_NAME, dev_info.device_name);
+                    bufs.insert(RESBUF_ID_FIRMWARE_ID, dev_info.firmware_id);
                     U2FResult::Success(bufs)
                 }
                 Err(e) => U2FResult::Error(e),
@@ -241,11 +247,14 @@ pub unsafe extern "C" fn rust_u2f_mgr_sign(
     let tid = new_tid();
     let res = (*mgr).sign(flags, timeout, challenge, app_ids, key_handles, move |rv| {
         let result = match rv {
-            Ok((app_id, key_handle, signature)) => {
+            Ok((app_id, key_handle, signature, dev_info)) => {
                 let mut bufs = HashMap::new();
                 bufs.insert(RESBUF_ID_KEYHANDLE, key_handle);
                 bufs.insert(RESBUF_ID_SIGNATURE, signature);
                 bufs.insert(RESBUF_ID_APPID, app_id);
+                bufs.insert(RESBUF_ID_VENDOR_NAME, dev_info.vendor_name);
+                bufs.insert(RESBUF_ID_DEVICE_NAME, dev_info.device_name);
+                bufs.insert(RESBUF_ID_FIRMWARE_ID, dev_info.firmware_id);
                 U2FResult::Success(bufs)
             }
             Err(e) => U2FResult::Error(e),

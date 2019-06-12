@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use std::{cmp, io};
+use std::{cmp, fmt, io, str};
 
 use consts::*;
 use util::io_err;
@@ -183,5 +183,23 @@ impl U2FAPDUHeader {
         bytes[7..7 + data.len()].copy_from_slice(data);
 
         Ok(bytes)
+    }
+}
+
+pub struct DeviceInfo {
+    pub vendor_name: Vec<u8>,
+    pub device_name: Vec<u8>,
+    pub firmware_id: Vec<u8>,
+}
+
+impl fmt::Display for DeviceInfo {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "Vendor: {}, Device: {}, Firmware: {}",
+            str::from_utf8(&self.vendor_name).unwrap(),
+            str::from_utf8(&self.device_name).unwrap(),
+            str::from_utf8(&self.firmware_id).unwrap()
+        )
     }
 }

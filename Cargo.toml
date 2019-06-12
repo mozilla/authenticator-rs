@@ -1,6 +1,6 @@
 [package]
 name = "authenticator"
-version = "0.2.6"
+version = "0.2.7"
 authors = ["J.C. Jones <jc@mozilla.com>", "Tim Taubert <ttaubert@mozilla.com>", "Kyle Machulis <kyle@nonpolynomial.com>"]
 repository = "https://github.com/mozilla/authenticator-rs/"
 license = "MPL-2.0"

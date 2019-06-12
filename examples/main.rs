@@ -69,15 +69,19 @@ fn main() {
             app_bytes.clone(),
             vec![],
             move |rv| {
-                tx.send(rv.unwrap()).unwrap();
+                tx.send(rv).unwrap();
             },
         )
         .unwrap();
 
-    let register_data = try_or!(rx.recv(), |_| {
+    let register_result = try_or!(rx.recv(), |_| {
         panic!("Problem receiving, unable to continue");
     });
+    let (register_data, device_info) =
+        register_result.unwrap_or_else(|e| panic!("Registration failed: {:?}", e));
+
     println!("Register result: {}", base64::encode(&register_data));
+    println!("Device info: {}", &device_info);
     println!("Asking a security key to sign now, with the data from the register...");
     let credential = u2f_get_key_handle_from_register_response(&register_data).unwrap();
     let key_handle = KeyHandle {
@@ -95,15 +99,19 @@ fn main() {
             vec![app_bytes],
             vec![key_handle],
             move |rv| {
-                tx.send(rv.unwrap()).unwrap();
+                tx.send(rv).unwrap();
             },
         )
         .unwrap();
 
-    let (_, handle_used, sign_data) = try_or!(rx.recv(), |_| {
-        println!("Problem receiving");
+    let sign_result = try_or!(rx.recv(), |_| {
+        panic!("Problem receiving, unable to continue");
     });
+    let (_, handle_used, sign_data, device_info) =
+        sign_result.unwrap_or_else(|e| panic!("Sign failed: {:?}", e));
+
     println!("Sign result: {}", base64::encode(&sign_data));
     println!("Key handle used: {}", base64::encode(&handle_used));
+    println!("Device info: {}", &device_info);
     println!("Done.");
 }
