@@ -9,14 +9,14 @@ use std::os::windows::io::AsRawHandle;
 
 use super::winapi::DeviceCapabilities;
 use crate::consts::{CID_BROADCAST, FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID, MAX_HID_RPT_SIZE};
-
-use crate::u2ftypes::U2FDevice;
+use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
 
 #[derive(Debug)]
 pub struct Device {
     path: String,
     file: File,
     cid: [u8; 4],
+    dev_info: Option<U2FDeviceInfo>,
 }
 
 impl Device {
@@ -26,6 +26,7 @@ impl Device {
             path,
             file,
             cid: CID_BROADCAST,
+            dev_info: None,
         })
     }
 
@@ -78,5 +79,19 @@ impl U2FDevice for Device {
 
     fn out_rpt_size(&self) -> usize {
         MAX_HID_RPT_SIZE
+    }
+
+    fn get_property(&self, _prop_name: &str) -> io::Result<String> {
+        Err(io::Error::new(io::ErrorKind::Other, "Not implemented"))
+    }
+
+    fn get_device_info(&self) -> U2FDeviceInfo {
+        // unwrap is okay, as dev_info must have already been set, else
+        // a programmer error
+        self.dev_info.clone().unwrap()
+    }
+
+    fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {
+        self.dev_info = Some(dev_info);
     }
 }

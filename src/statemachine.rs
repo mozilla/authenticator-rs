@@ -6,6 +6,7 @@ use crate::consts::PARAMETER_SIZE;
 use crate::platform::device::Device;
 use crate::platform::transaction::Transaction;
 use crate::u2fprotocol::{u2f_init_device, u2f_is_keyhandle_valid, u2f_register, u2f_sign};
+use crate::u2ftypes::U2FDevice;
 use crate::util::StateCallback;
 use std::thread;
 use std::time::Duration;
@@ -103,7 +104,8 @@ impl StateMachine {
                         break;
                     }
                 } else if let Ok(bytes) = u2f_register(dev, &challenge, &application) {
-                    callback.call(Ok(bytes));
+                    let dev_info = dev.get_device_info();
+                    callback.call(Ok((bytes, dev_info)));
                     break;
                 }
 
@@ -187,10 +189,12 @@ impl StateMachine {
                     for key_handle in &valid_handles {
                         if let Ok(bytes) = u2f_sign(dev, &challenge, app_id, &key_handle.credential)
                         {
+                            let dev_info = dev.get_device_info();
                             callback.call(Ok((
                                 app_id.clone(),
                                 key_handle.credential.clone(),
                                 bytes,
+                                dev_info,
                             )));
                             break 'outer;
                         }

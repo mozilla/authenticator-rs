@@ -2,17 +2,21 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use std::{cmp, io};
+use std::{cmp, fmt, io, str};
 
 use crate::consts::*;
 use crate::util::io_err;
 
 use log;
 
-fn trace_hex(data: &[u8]) {
+pub fn to_hex(data: &[u8], joiner: &str) -> String {
+    let parts: Vec<String> = data.iter().map(|byte| format!("{:02x}", byte)).collect();
+    parts.join(joiner)
+}
+
+pub fn trace_hex(data: &[u8]) {
     if log_enabled!(log::Level::Trace) {
-        let parts: Vec<String> = data.iter().map(|byte| format!("{:02x}", byte)).collect();
-        trace!("USB send: {}", parts.join(""));
+        trace!("USB send: {}", to_hex(data, ""));
     }
 }
 
@@ -37,6 +41,10 @@ pub trait U2FDevice {
     fn out_cont_data_size(&self) -> usize {
         self.out_rpt_size() - CONT_HEADER_SIZE
     }
+
+    fn get_property(&self, prop_name: &str) -> io::Result<String>;
+    fn get_device_info(&self) -> U2FDeviceInfo;
+    fn set_device_info(&mut self, dev_info: U2FDeviceInfo);
 }
 
 // Init structure for U2F Communications. Tells the receiver what channel
@@ -157,10 +165,17 @@ impl U2FHIDCont {
 //
 // https://fidoalliance.org/specs/fido-u2f-v1.0-nfc-bt-amendment-20150514/fido-u2f-hid-protocol.
 // html#u2fhid_init
-pub struct U2FHIDInitResp {}
+pub struct U2FHIDInitResp {
+    pub cid: [u8; 4],
+    pub version_interface: u8,
+    pub version_major: u8,
+    pub version_minor: u8,
+    pub version_build: u8,
+    pub cap_flags: u8,
+}
 
 impl U2FHIDInitResp {
-    pub fn read(data: &[u8], nonce: &[u8]) -> io::Result<[u8; 4]> {
+    pub fn read(data: &[u8], nonce: &[u8]) -> io::Result<U2FHIDInitResp> {
         assert_eq!(nonce.len(), INIT_NONCE_SIZE);
 
         if data.len() != INIT_NONCE_SIZE + 9 {
@@ -171,9 +186,21 @@ impl U2FHIDInitResp {
             return Err(io_err("invalid nonce"));
         }
 
-        let mut cid = [0u8; 4];
-        cid.copy_from_slice(&data[INIT_NONCE_SIZE..INIT_NONCE_SIZE + 4]);
-        Ok(cid)
+        let rsp = U2FHIDInitResp {
+            cid: [
+                data[INIT_NONCE_SIZE],
+                data[INIT_NONCE_SIZE + 1],
+                data[INIT_NONCE_SIZE + 2],
+                data[INIT_NONCE_SIZE + 3],
+            ],
+            version_interface: data[INIT_NONCE_SIZE + 4],
+            version_major: data[INIT_NONCE_SIZE + 5],
+            version_minor: data[INIT_NONCE_SIZE + 6],
+            version_build: data[INIT_NONCE_SIZE + 7],
+            cap_flags: data[INIT_NONCE_SIZE + 8],
+        };
+
+        Ok(rsp)
     }
 }
 
@@ -190,6 +217,7 @@ impl U2FAPDUHeader {
 
         // Size of header + data + 2 zero bytes for maximum return size.
         let mut bytes = vec![0u8; U2FAPDUHEADER_SIZE + data.len() + 2];
+        // cla is always 0 for our requirements
         bytes[1] = ins;
         bytes[2] = p1;
         // p2 is always 0, at least, for our requirements.
@@ -199,5 +227,32 @@ impl U2FAPDUHeader {
         bytes[7..7 + data.len()].copy_from_slice(data);
 
         Ok(bytes)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct U2FDeviceInfo {
+    pub vendor_name: Vec<u8>,
+    pub device_name: Vec<u8>,
+    pub version_interface: u8,
+    pub version_major: u8,
+    pub version_minor: u8,
+    pub version_build: u8,
+    pub cap_flags: u8,
+}
+
+impl fmt::Display for U2FDeviceInfo {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "Vendor: {}, Device: {}, Interface: {}, Firmware: v{}.{}.{}, Capabilities: {}",
+            str::from_utf8(&self.vendor_name).unwrap(),
+            str::from_utf8(&self.device_name).unwrap(),
+            &self.version_interface,
+            &self.version_major,
+            &self.version_minor,
+            &self.version_build,
+            to_hex(&[self.cap_flags], ":"),
+        )
     }
 }
