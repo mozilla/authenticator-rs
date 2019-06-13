@@ -6,6 +6,7 @@ extern crate log;
 
 use consts::{CID_BROADCAST, HID_RPT_SIZE};
 use core_foundation::base::*;
+use core_foundation::string::*;
 use platform::iokit::*;
 use std::io;
 use std::io::{Read, Write};
@@ -33,6 +34,19 @@ impl Device {
 
     pub fn is_u2f(&self) -> bool {
         true
+    }
+
+    unsafe fn get_property(&self, prop_name: &str) -> io::Result<String> {
+        let prop_ref = IOHIDDeviceGetProperty(self.device_ref,
+                                        CFString::new(prop_name)
+                                        .as_concrete_TypeRef());
+        if prop_ref.is_null() {
+            return Err(io::Error::new(io::ErrorKind::InvalidData,
+                       format!("IOHIDDeviceGetProperty received nullptr for property {}",
+                               prop_name)));
+        }
+
+        Ok(CFString::from_void(prop_ref).to_string())
     }
 }
 
@@ -101,9 +115,21 @@ impl U2FDevice for Device {
     }
 
     fn get_device_info(&self) -> DeviceInfo {
-        let vendor = "vendor (not implemented)";
-        let device = "device (not implemented)";
-        let firmware = "firmware (not implemented)";
+        let vendor = match unsafe { self.get_property("Manufacturer") } {
+            Ok(v) => v,
+            _ => String::from("Unknown Vendor"),
+        };
+
+        let device = match unsafe { self.get_property("Product") } {
+            Ok(v) => v,
+            _ => String::from("Unknown Device"),
+        };
+
+        let firmware = match unsafe { self.get_property("not working") } {
+            Ok(v) => v,
+            _ => String::from("Unknown Firmware"),
+        };
+
         DeviceInfo {
             vendor_name: vendor.as_bytes().to_vec(),
             device_name: device.as_bytes().to_vec(),

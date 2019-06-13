@@ -220,6 +220,10 @@ extern "C" {
         report: *const u8,
         reportLength: CFIndex,
     ) -> IOReturn;
+    pub fn IOHIDDeviceGetProperty(
+        device: IOHIDDeviceRef,
+        key: CFStringRef,
+    ) -> CFTypeRef;
 }
 
 ////////////////////////////////////////////////////////////////////////
