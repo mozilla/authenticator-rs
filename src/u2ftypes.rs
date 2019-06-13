@@ -9,10 +9,14 @@ use util::io_err;
 
 use log;
 
-fn trace_hex(data: &[u8]) {
+pub fn to_hex(data: &[u8], joiner: &str) -> String {
+    let parts: Vec<String> = data.iter().map(|byte| format!("{:02x}", byte)).collect();
+    parts.join(joiner)
+}
+
+pub fn trace_hex(data: &[u8]) {
     if log_enabled!(log::Level::Trace) {
-        let parts: Vec<String> = data.iter().map(|byte| format!("{:02x}", byte)).collect();
-        trace!("USB send: {}", parts.join(""));
+        trace!("USB send: {}", to_hex(data, ""));
     }
 }
 
@@ -21,7 +25,7 @@ fn trace_hex(data: &[u8]) {
 pub trait U2FDevice {
     fn get_cid(&self) -> &[u8; 4];
     fn set_cid(&mut self, cid: [u8; 4]);
-    fn get_device_info(&self) -> DeviceInfo;
+    fn get_property(&self, prop_name: &str) -> io::Result<String>;
 }
 
 // Init structure for U2F Communications. Tells the receiver what channel
@@ -175,6 +179,7 @@ impl U2FAPDUHeader {
 
         // Size of header + data + 2 zero bytes for maximum return size.
         let mut bytes = vec![0u8; U2FAPDUHEADER_SIZE + data.len() + 2];
+        // cla is always 0 for our requirements
         bytes[1] = ins;
         bytes[2] = p1;
         // p2 is always 0, at least, for our requirements.
@@ -200,7 +205,7 @@ impl fmt::Display for DeviceInfo {
             "Vendor: {}, Device: {}, Firmware: {}",
             str::from_utf8(&self.vendor_name).unwrap(),
             str::from_utf8(&self.device_name).unwrap(),
-            str::from_utf8(&self.firmware_id).unwrap()
+            to_hex(&self.firmware_id, ":"),
         )
     }
 }

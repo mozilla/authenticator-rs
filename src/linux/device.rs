@@ -81,14 +81,7 @@ impl U2FDevice for Device {
         self.cid = cid;
     }
 
-    fn get_device_info(&self) -> DeviceInfo {
-        let vendor = "vendor (not implemented)";
-        let device = "device (not implemented)";
-        let firmware = "firmware (not implemented)";
-        DeviceInfo {
-            vendor_name: vendor.as_bytes().to_vec(),
-            device_name: device.as_bytes().to_vec(),
-            firmware_id: firmware.as_bytes().to_vec(),
-        }
+    fn get_property(&self, _prop_name: &str) -> io::Result<String> {
+        Err(io::Error::new(io::ErrorKind::Other, "Not implemented"))
     }
 }

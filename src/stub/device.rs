@@ -43,7 +43,7 @@ impl U2FDevice for Device {
         panic!("not implemented");
     }
 
-    fn get_device_info(&self) -> DeviceInfo {
-        panic!("not implemented");
+    fn get_property(&self, prop_name: &str) -> io::Result<String> {
+        panic!("not implemented")
     }
 }

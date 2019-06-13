@@ -122,7 +122,34 @@ pub fn u2f_device_info<T>(dev: &mut T) -> io::Result<DeviceInfo>
 where
     T: U2FDevice + Read + Write,
 {
-    Ok(dev.get_device_info())
+    let vendor = match dev.get_property("Manufacturer") {
+        Ok(v) => v,
+        _ => String::from("Unknown Vendor"),
+    };
+
+    let device = match dev.get_property("Product") {
+        Ok(v) => v,
+        _ => String::from("Unknown Device"),
+    };
+
+    let (data, status) = send_apdu(dev, YKPIV_INS_GET_VERSION, 0x00, &[])?;
+
+    println!(
+        "YKPIV_INS_GET_VERSION: {} {}",
+        to_hex(&data, ":"),
+        to_hex(&status, ":")
+    );
+
+    let firmware = match status {
+        SW_NO_ERROR => data,
+        _ => vec![],
+    };
+
+    Ok(DeviceInfo {
+        vendor_name: vendor.as_bytes().to_vec(),
+        device_name: device.as_bytes().to_vec(),
+        firmware_id: firmware,
+    })
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -231,7 +258,7 @@ mod tests {
         use std::io::{Read, Write};
 
         use consts::{CID_BROADCAST, HID_RPT_SIZE};
-        use u2ftypes::{DeviceInfo, U2FDevice};
+        use u2ftypes::U2FDevice;
 
         pub struct TestDevice {
             cid: [u8; 4],
@@ -308,15 +335,8 @@ mod tests {
                 self.cid = cid;
             }
 
-            fn get_device_info(&self) -> DeviceInfo {
-                let vendor = "vendor";
-                let device = "device";
-                let firmware = "firmware";
-                DeviceInfo {
-                    vendor_name: vendor.as_bytes().to_vec(),
-                    device_name: device.as_bytes().to_vec(),
-                    firmware_id: firmware.as_bytes().to_vec(),
-                }
+            fn get_property(&self, prop_name: &str) -> io::Result<String> {
+                Ok(String::from(format!("{} not implemented", prop_name)))
             }
         }
     }
@@ -420,11 +440,8 @@ mod tests {
     #[test]
     fn test_get_device_info() {
         let device = platform::TestDevice::new();
-        let info = device.get_device_info();
 
-        assert_eq!(info.vendor_name, "vendor".as_bytes().to_vec());
-        assert_eq!(info.device_name, "device".as_bytes().to_vec());
-        assert_eq!(info.firmware_id, "firmware".as_bytes().to_vec());
+        assert_eq!(device.get_property("a").unwrap(), "a not implemented");
     }
 
 }

@@ -85,4 +85,8 @@ impl U2FDevice for Device {
     fn set_cid(&mut self, cid: [u8; 4]) {
         self.cid = cid;
     }
+
+    fn get_property(&self, _prop_name: &str) -> io::Result<String> {
+        Err(io::Error::new(io::ErrorKind::Other, "Not implemented"))
+    }
 }

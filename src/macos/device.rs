@@ -12,7 +12,7 @@ use std::io;
 use std::io::{Read, Write};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::Duration;
-use u2ftypes::{DeviceInfo, U2FDevice};
+use u2ftypes::U2FDevice;
 
 const READ_TIMEOUT: u64 = 15;
 
@@ -36,14 +36,19 @@ impl Device {
         true
     }
 
-    unsafe fn get_property(&self, prop_name: &str) -> io::Result<String> {
-        let prop_ref = IOHIDDeviceGetProperty(self.device_ref,
-                                        CFString::new(prop_name)
-                                        .as_concrete_TypeRef());
+    unsafe fn get_property_macos(&self, prop_name: &str) -> io::Result<String> {
+        let prop_ref = IOHIDDeviceGetProperty(
+            self.device_ref,
+            CFString::new(prop_name).as_concrete_TypeRef(),
+        );
         if prop_ref.is_null() {
-            return Err(io::Error::new(io::ErrorKind::InvalidData,
-                       format!("IOHIDDeviceGetProperty received nullptr for property {}",
-                               prop_name)));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "IOHIDDeviceGetProperty received nullptr for property {}",
+                    prop_name
+                ),
+            ));
         }
 
         Ok(CFString::from_void(prop_ref).to_string())
@@ -114,26 +119,7 @@ impl U2FDevice for Device {
         self.cid = cid;
     }
 
-    fn get_device_info(&self) -> DeviceInfo {
-        let vendor = match unsafe { self.get_property("Manufacturer") } {
-            Ok(v) => v,
-            _ => String::from("Unknown Vendor"),
-        };
-
-        let device = match unsafe { self.get_property("Product") } {
-            Ok(v) => v,
-            _ => String::from("Unknown Device"),
-        };
-
-        let firmware = match unsafe { self.get_property("not working") } {
-            Ok(v) => v,
-            _ => String::from("Unknown Firmware"),
-        };
-
-        DeviceInfo {
-            vendor_name: vendor.as_bytes().to_vec(),
-            device_name: device.as_bytes().to_vec(),
-            firmware_id: firmware.as_bytes().to_vec(),
-        }
+    fn get_property(&self, prop_name: &str) -> io::Result<String> {
+        unsafe { self.get_property_macos(prop_name) }
     }
 }
