@@ -171,7 +171,7 @@ impl U2FHIDInitResp {
 
         let rsp = U2FHIDInitResp {
             cid: [
-                data[INIT_NONCE_SIZE + 0],
+                data[INIT_NONCE_SIZE],
                 data[INIT_NONCE_SIZE + 1],
                 data[INIT_NONCE_SIZE + 2],
                 data[INIT_NONCE_SIZE + 3],

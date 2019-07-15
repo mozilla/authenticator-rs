@@ -133,10 +133,10 @@ where
 
     let vendor = dev
         .get_property("Manufacturer")
-        .unwrap_or(String::from("Unknown Vendor"));
+        .unwrap_or_else(|_| String::from("Unknown Vendor"));
     let product = dev
         .get_property("Product")
-        .unwrap_or(String::from("Unknown Device"));
+        .unwrap_or_else(|_| String::from("Unknown Device"));
 
     dev.set_device_info(U2FDeviceInfo {
         vendor_name: vendor.as_bytes().to_vec(),
@@ -322,7 +322,7 @@ mod tests {
             }
 
             fn get_property(&self, prop_name: &str) -> io::Result<String> {
-                Ok(String::from(format!("{} not implemented", prop_name)))
+                Ok(format!("{} not implemented", prop_name))
             }
             fn get_device_info(&self) -> U2FDeviceInfo {
                 self.dev_info.clone().unwrap()
