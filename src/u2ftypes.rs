@@ -213,7 +213,7 @@ impl U2FAPDUHeader {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct U2FDeviceInfo {
     pub vendor_name: Vec<u8>,
     pub device_name: Vec<u8>,
