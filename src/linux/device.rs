@@ -10,7 +10,7 @@ use std::io::{Read, Write};
 use std::os::unix::prelude::*;
 
 use consts::CID_BROADCAST;
-use platform::hidraw;
+use platform::{hidraw, monitor};
 use u2ftypes::{U2FDevice, U2FDeviceInfo};
 use util::from_unix_result;
 
@@ -83,8 +83,8 @@ impl U2FDevice for Device {
         self.cid = cid;
     }
 
-    fn get_property(&self, _prop_name: &str) -> io::Result<String> {
-        Err(io::Error::new(io::ErrorKind::Other, "Not implemented"))
+    fn get_property(&self, prop_name: &str) -> io::Result<String> {
+        monitor::get_property_linux(&self.path, prop_name)
     }
 
     fn get_device_info(&self) -> U2FDeviceInfo {
