@@ -12,7 +12,7 @@ use std::io;
 use std::io::{Read, Write};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::Duration;
-use u2ftypes::U2FDevice;
+use u2ftypes::{U2FDevice, U2FDeviceInfo};
 
 const READ_TIMEOUT: u64 = 15;
 
@@ -20,15 +20,17 @@ pub struct Device {
     device_ref: IOHIDDeviceRef,
     cid: [u8; 4],
     report_rx: Receiver<Vec<u8>>,
+    dev_info: Option<U2FDeviceInfo>,
 }
 
 impl Device {
-    pub fn new(dev_info: (IOHIDDeviceRef, Receiver<Vec<u8>>)) -> io::Result<Self> {
-        let (device_ref, report_rx) = dev_info;
+    pub fn new(dev_ids: (IOHIDDeviceRef, Receiver<Vec<u8>>)) -> io::Result<Self> {
+        let (device_ref, report_rx) = dev_ids;
         Ok(Self {
             device_ref,
             cid: CID_BROADCAST,
             report_rx,
+            dev_info: None,
         })
     }
 
@@ -121,5 +123,15 @@ impl U2FDevice for Device {
 
     fn get_property(&self, prop_name: &str) -> io::Result<String> {
         unsafe { self.get_property_macos(prop_name) }
+    }
+
+    fn get_device_info(&self) -> U2FDeviceInfo {
+        // unwrap is okay, as dev_info must have already been set, else
+        // a programmer error
+        self.dev_info.clone().unwrap()
+    }
+
+    fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {
+        self.dev_info = Some(dev_info);
     }
 }

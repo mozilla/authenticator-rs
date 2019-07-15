@@ -118,40 +118,6 @@ where
     Ok(status == SW_CONDITIONS_NOT_SATISFIED)
 }
 
-pub fn u2f_device_info<T>(dev: &mut T) -> io::Result<DeviceInfo>
-where
-    T: U2FDevice + Read + Write,
-{
-    let vendor = match dev.get_property("Manufacturer") {
-        Ok(v) => v,
-        _ => String::from("Unknown Vendor"),
-    };
-
-    let device = match dev.get_property("Product") {
-        Ok(v) => v,
-        _ => String::from("Unknown Device"),
-    };
-
-    let (data, status) = send_apdu(dev, YKPIV_INS_GET_VERSION, 0x00, &[])?;
-
-    println!(
-        "YKPIV_INS_GET_VERSION: {} {}",
-        to_hex(&data, ":"),
-        to_hex(&status, ":")
-    );
-
-    let firmware = match status {
-        SW_NO_ERROR => data,
-        _ => vec![],
-    };
-
-    Ok(DeviceInfo {
-        vendor_name: vendor.as_bytes().to_vec(),
-        device_name: device.as_bytes().to_vec(),
-        firmware_id: firmware,
-    })
-}
-
 ////////////////////////////////////////////////////////////////////////
 // Internal Device Commands
 ////////////////////////////////////////////////////////////////////////
@@ -162,7 +128,28 @@ where
 {
     assert_eq!(nonce.len(), INIT_NONCE_SIZE);
     let raw = sendrecv(dev, U2FHID_INIT, nonce)?;
-    dev.set_cid(U2FHIDInitResp::read(&raw, nonce)?);
+    let rsp = U2FHIDInitResp::read(&raw, nonce)?;
+    dev.set_cid(rsp.cid);
+
+    let vendor = match dev.get_property("Manufacturer") {
+        Ok(v) => v,
+        _ => String::from("Unknown Vendor"),
+    };
+
+    let product = match dev.get_property("Product") {
+        Ok(v) => v,
+        _ => String::from("Unknown Device"),
+    };
+
+    dev.set_device_info(U2FDeviceInfo {
+        vendor_name: vendor.as_bytes().to_vec(),
+        device_name: product.as_bytes().to_vec(),
+        version_interface: rsp.version_interface,
+        version_major: rsp.version_major,
+        version_minor: rsp.version_minor,
+        version_build: rsp.version_build,
+        cap_flags: rsp.cap_flags,
+    });
 
     Ok(())
 }
@@ -258,12 +245,13 @@ mod tests {
         use std::io::{Read, Write};
 
         use consts::{CID_BROADCAST, HID_RPT_SIZE};
-        use u2ftypes::U2FDevice;
+        use u2ftypes::{U2FDevice, U2FDeviceInfo};
 
         pub struct TestDevice {
             cid: [u8; 4],
             reads: Vec<[u8; HID_RPT_SIZE]>,
             writes: Vec<[u8; HID_RPT_SIZE + 1]>,
+            dev_info: Option<U2FDeviceInfo>,
         }
 
         impl TestDevice {
@@ -272,6 +260,7 @@ mod tests {
                     cid: CID_BROADCAST,
                     reads: vec![],
                     writes: vec![],
+                    dev_info: None,
                 }
             }
 
@@ -338,6 +327,13 @@ mod tests {
             fn get_property(&self, prop_name: &str) -> io::Result<String> {
                 Ok(String::from(format!("{} not implemented", prop_name)))
             }
+            fn get_device_info(&self) -> U2FDeviceInfo {
+                self.dev_info.clone().unwrap()
+            }
+
+            fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {
+                self.dev_info = Some(dev_info);
+            }
         }
     }
 
@@ -366,6 +362,13 @@ mod tests {
 
         init_device(&mut device, &nonce).unwrap();
         assert_eq!(device.get_cid(), &cid);
+
+        let dev_info = device.get_device_info();
+        assert_eq!(dev_info.version_interface, 0x02);
+        assert_eq!(dev_info.version_major, 0x04);
+        assert_eq!(dev_info.version_minor, 0x01);
+        assert_eq!(dev_info.version_build, 0x08);
+        assert_eq!(dev_info.cap_flags, 0x01);
     }
 
     #[test]
@@ -438,7 +441,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_device_info() {
+    fn test_get_property() {
         let device = platform::TestDevice::new();
 
         assert_eq!(device.get_property("a").unwrap(), "a not implemented");

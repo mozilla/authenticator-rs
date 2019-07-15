@@ -7,9 +7,8 @@ use platform::device::Device;
 use platform::transaction::Transaction;
 use std::thread;
 use std::time::Duration;
-use u2fprotocol::{
-    u2f_device_info, u2f_init_device, u2f_is_keyhandle_valid, u2f_register, u2f_sign,
-};
+use u2fprotocol::{u2f_init_device, u2f_is_keyhandle_valid, u2f_register, u2f_sign};
+use u2ftypes::U2FDevice;
 use util::OnceCallback;
 
 fn is_valid_transport(transports: ::AuthenticatorTransports) -> bool {
@@ -105,8 +104,7 @@ impl StateMachine {
                         break;
                     }
                 } else if let Ok(bytes) = u2f_register(dev, &challenge, &application) {
-                    let dev_info = try_or!(u2f_device_info(dev), |_e| callback
-                        .call(Err(::Error::InvalidState)));
+                    let dev_info = dev.get_device_info();
                     callback.call(Ok((bytes, dev_info)));
                     break;
                 }
@@ -189,8 +187,7 @@ impl StateMachine {
                     for key_handle in &valid_handles {
                         if let Ok(bytes) = u2f_sign(dev, &challenge, app_id, &key_handle.credential)
                         {
-                            let dev_info = try_or!(u2f_device_info(dev), |_e| callback
-                                .call(Err(::Error::InvalidState)));
+                            let dev_info = dev.get_device_info();
                             callback.call(Ok((
                                 app_id.clone(),
                                 key_handle.credential.clone(),
