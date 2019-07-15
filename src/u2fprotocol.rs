@@ -131,15 +131,12 @@ where
     let rsp = U2FHIDInitResp::read(&raw, nonce)?;
     dev.set_cid(rsp.cid);
 
-    let vendor = match dev.get_property("Manufacturer") {
-        Ok(v) => v,
-        _ => String::from("Unknown Vendor"),
-    };
-
-    let product = match dev.get_property("Product") {
-        Ok(v) => v,
-        _ => String::from("Unknown Device"),
-    };
+    let vendor = dev
+        .get_property("Manufacturer")
+        .unwrap_or(String::from("Unknown Vendor"));
+    let product = dev
+        .get_property("Product")
+        .unwrap_or(String::from("Unknown Device"));
 
     dev.set_device_info(U2FDeviceInfo {
         vendor_name: vendor.as_bytes().to_vec(),
