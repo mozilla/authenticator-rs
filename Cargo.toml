@@ -33,6 +33,9 @@ boxfnonce = "0.0.3"
 runloop = "0.1.0"
 bitflags = "1.0"
 
+[build-dependencies]
+bindgen = "0.51"
+
 [dev-dependencies]
 sha2 = "^0.8"
 base64 = "^0.10"

@@ -5,5 +5,6 @@
 pub mod device;
 pub mod transaction;
 
+mod hidwrapper;
 mod hidraw;
 mod monitor;
