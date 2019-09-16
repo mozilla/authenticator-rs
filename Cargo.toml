@@ -6,6 +6,9 @@ repository = "https://github.com/mozilla/authenticator-rs/"
 license = "MPL-2.0"
 description = "Library for interacting with CTAP1/2 security keys for Web Authentication. Used by Firefox."
 
+[features]
+binding-recompile = ["bindgen"]
+
 [target.'cfg(target_os = "linux")'.dependencies]
 libudev = "^0.2"
 
@@ -25,6 +28,9 @@ features = [
     "setupapi",
 ]
 
+[build-dependencies]
+bindgen = { version = "0.51", optional = true }
+
 [dependencies]
 rand = "0.6"
 log = "0.4"
@@ -32,9 +38,6 @@ libc = "0.2"
 boxfnonce = "0.0.3"
 runloop = "0.1.0"
 bitflags = "1.0"
-
-[build-dependencies]
-bindgen = "0.51"
 
 [dev-dependencies]
 sha2 = "^0.8"
