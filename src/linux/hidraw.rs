@@ -8,9 +8,9 @@ extern crate libc;
 use std::io;
 use std::os::unix::io::RawFd;
 
+use super::hidwrapper::{_HIDIOCGRDESC, _HIDIOCGRDESCSIZE};
 use hidproto::*;
 use util::{from_unix_result, io_err};
-use super::hidwrapper::{_HIDIOCGRDESCSIZE, _HIDIOCGRDESC};
 
 #[allow(non_camel_case_types)]
 #[repr(C)]
@@ -28,14 +28,14 @@ type IocType = libc::c_int;
 
 pub unsafe fn hidiocgrdescsize(
     fd: libc::c_int,
-    val: *mut ::libc::c_int
+    val: *mut ::libc::c_int,
 ) -> io::Result<libc::c_int> {
     from_unix_result(libc::ioctl(fd, _HIDIOCGRDESCSIZE as IocType, val))
 }
 
 pub unsafe fn hidiocgrdesc(
     fd: libc::c_int,
-    val: *mut LinuxReportDescriptor
+    val: *mut LinuxReportDescriptor,
 ) -> io::Result<libc::c_int> {
     from_unix_result(libc::ioctl(fd, _HIDIOCGRDESC as IocType, val))
 }
