@@ -6,7 +6,6 @@
 extern crate libc;
 
 use std::io;
-use std::mem;
 use std::os::unix::io::RawFd;
 
 use hidproto::*;
