@@ -32,7 +32,7 @@ features = [
 bindgen = { version = "0.51", optional = true }
 
 [dependencies]
-rand = "0.6"
+rand = "0.7"
 log = "0.4"
 libc = "0.2"
 boxfnonce = "0.0.3"
