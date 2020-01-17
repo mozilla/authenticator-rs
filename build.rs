@@ -5,7 +5,7 @@ extern crate bindgen;
 use std::path::PathBuf;
 
 #[cfg(any(not(target_os = "linux"), not(feature = "binding-recompile")))]
-fn main () {}
+fn main() {}
 
 #[cfg(all(target_os = "linux", feature = "binding-recompile"))]
 fn main() {
