@@ -17,6 +17,9 @@ include!("ioctl_mipsle.rs");
 #[cfg(all(target_arch = "mips", target_endian = "big"))]
 include!("ioctl_mipsbe.rs");
 
+#[cfg(all(target_arch = "mips64", target_endian = "little"))]
+include!("ioctl_mips64le.rs");
+
 #[cfg(all(target_arch = "powerpc", target_endian = "little"))]
 include!("ioctl_powerpcle.rs");
 
