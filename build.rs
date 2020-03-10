@@ -25,6 +25,8 @@ fn main() {
         "ioctl_mipsbe.rs"
     } else if cfg!(all(target_arch = "mips", target_endian = "little")) {
         "ioctl_mipsle.rs"
+    } else if cfg!(all(target_arch = "mips64", target_endian = "little")) {
+        "ioctl_mips64le.rs"
     } else if cfg!(all(target_arch = "powerpc", target_endian = "little")) {
         "ioctl_powerpcle.rs"
     } else if cfg!(all(target_arch = "powerpc", target_endian = "big")) {
