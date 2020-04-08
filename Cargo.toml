@@ -16,7 +16,7 @@ libudev = "^0.2"
 devd-rs = "0.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-core-foundation = "0.6.2"
+core-foundation = "0.7"
 
 [target.'cfg(target_os = "windows")'.dependencies.winapi]
 version = "0.3"
