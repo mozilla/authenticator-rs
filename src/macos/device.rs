@@ -4,7 +4,7 @@
 
 extern crate log;
 
-use consts::{CID_BROADCAST, HID_RPT_SIZE};
+use consts::{CID_BROADCAST, MAX_HID_RPT_SIZE};
 use core_foundation::base::*;
 use platform::iokit::*;
 use std::convert::TryInto;
@@ -99,5 +99,13 @@ impl U2FDevice for Device {
 
     fn set_cid(&mut self, cid: [u8; 4]) {
         self.cid = cid;
+    }
+
+    fn in_rpt_size(&self) -> usize {
+        MAX_HID_RPT_SIZE
+    }
+
+    fn out_rpt_size(&self) -> usize {
+        MAX_HID_RPT_SIZE
     }
 }

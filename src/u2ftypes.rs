@@ -21,6 +21,22 @@ fn trace_hex(data: &[u8]) {
 pub trait U2FDevice {
     fn get_cid(&self) -> &[u8; 4];
     fn set_cid(&mut self, cid: [u8; 4]);
+
+    fn in_rpt_size(&self) -> usize;
+    fn in_init_data_size(&self) -> usize {
+        self.in_rpt_size() - INIT_HEADER_SIZE
+    }
+    fn in_cont_data_size(&self) -> usize {
+        self.in_rpt_size() - CONT_HEADER_SIZE
+    }
+
+    fn out_rpt_size(&self) -> usize;
+    fn out_init_data_size(&self) -> usize {
+        self.out_rpt_size() - INIT_HEADER_SIZE
+    }
+    fn out_cont_data_size(&self) -> usize {
+        self.out_rpt_size() - CONT_HEADER_SIZE
+    }
 }
 
 // Init structure for U2F Communications. Tells the receiver what channel
@@ -36,21 +52,21 @@ impl U2FHIDInit {
     where
         T: U2FDevice + io::Read,
     {
-        let mut frame = [0u8; HID_RPT_SIZE];
+        let mut frame = vec![0u8; dev.in_rpt_size()];
         let mut count = dev.read(&mut frame)?;
 
         while dev.get_cid() != &frame[..4] {
             count = dev.read(&mut frame)?;
         }
 
-        if count != HID_RPT_SIZE {
+        if count != dev.in_rpt_size() {
             return Err(io_err("invalid init packet"));
         }
 
         let cap = (frame[5] as usize) << 8 | (frame[6] as usize);
         let mut data = Vec::with_capacity(cap);
 
-        let len = cmp::min(cap, INIT_DATA_SIZE);
+        let len = cmp::min(cap, dev.in_init_data_size());
         data.extend_from_slice(&frame[7..7 + len]);
 
         Ok(data)
@@ -64,13 +80,13 @@ impl U2FHIDInit {
             return Err(io_err("payload length > 2^16"));
         }
 
-        let mut frame = [0; HID_RPT_SIZE + 1];
+        let mut frame = vec![0u8; dev.out_rpt_size() + 1];
         frame[1..5].copy_from_slice(dev.get_cid());
         frame[5] = cmd;
         frame[6] = (data.len() >> 8) as u8;
         frame[7] = data.len() as u8;
 
-        let count = cmp::min(data.len(), INIT_DATA_SIZE);
+        let count = cmp::min(data.len(), dev.out_init_data_size());
         frame[8..8 + count].copy_from_slice(&data[..count]);
         trace_hex(&frame);
 
@@ -96,14 +112,14 @@ impl U2FHIDCont {
     where
         T: U2FDevice + io::Read,
     {
-        let mut frame = [0u8; HID_RPT_SIZE];
+        let mut frame = vec![0u8; dev.in_rpt_size()];
         let mut count = dev.read(&mut frame)?;
 
         while dev.get_cid() != &frame[..4] {
             count = dev.read(&mut frame)?;
         }
 
-        if count != HID_RPT_SIZE {
+        if count != dev.in_rpt_size() {
             return Err(io_err("invalid cont packet"));
         }
 
@@ -111,7 +127,7 @@ impl U2FHIDCont {
             return Err(io_err("invalid sequence number"));
         }
 
-        let max = cmp::min(max, CONT_DATA_SIZE);
+        let max = cmp::min(max, dev.in_cont_data_size());
         Ok(frame[5..5 + max].to_vec())
     }
 
@@ -119,11 +135,11 @@ impl U2FHIDCont {
     where
         T: U2FDevice + io::Write,
     {
-        let mut frame = [0; HID_RPT_SIZE + 1];
+        let mut frame = vec![0u8; dev.out_rpt_size() + 1];
         frame[1..5].copy_from_slice(dev.get_cid());
         frame[5] = seq;
 
-        let count = cmp::min(data.len(), CONT_DATA_SIZE);
+        let count = cmp::min(data.len(), dev.out_cont_data_size());
         frame[6..6 + count].copy_from_slice(&data[..count]);
         trace_hex(&frame);
 

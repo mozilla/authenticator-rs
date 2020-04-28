@@ -8,7 +8,7 @@ use std::ffi::OsString;
 use std::io::{Read, Result, Write};
 use std::mem;
 
-use consts::CID_BROADCAST;
+use consts::{CID_BROADCAST, MAX_HID_RPT_SIZE};
 use platform::monitor::FidoDev;
 use u2ftypes::U2FDevice;
 use util::{from_unix_result, io_err};
@@ -119,5 +119,13 @@ impl U2FDevice for Device {
 
     fn set_cid(&mut self, cid: [u8; 4]) {
         self.cid = cid;
+    }
+
+    fn in_rpt_size(&self) -> usize {
+        MAX_HID_RPT_SIZE
+    }
+
+    fn out_rpt_size(&self) -> usize {
+        MAX_HID_RPT_SIZE
     }
 }

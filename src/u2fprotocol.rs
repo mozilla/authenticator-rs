@@ -223,13 +223,16 @@ mod tests {
         use std::io;
         use std::io::{Read, Write};
 
-        use consts::{CID_BROADCAST, HID_RPT_SIZE};
+        use consts::CID_BROADCAST;
         use u2ftypes::U2FDevice;
+
+        const IN_HID_RPT_SIZE: usize = 64;
+        const OUT_HID_RPT_SIZE: usize = 64;
 
         pub struct TestDevice {
             cid: [u8; 4],
-            reads: Vec<[u8; HID_RPT_SIZE]>,
-            writes: Vec<[u8; HID_RPT_SIZE + 1]>,
+            reads: Vec<[u8; IN_HID_RPT_SIZE]>,
+            writes: Vec<[u8; OUT_HID_RPT_SIZE + 1]>,
         }
 
         impl TestDevice {
@@ -243,7 +246,7 @@ mod tests {
 
             pub fn add_write(&mut self, packet: &[u8], fill_value: u8) {
                 // Add one to deal with record index check
-                let mut write = [fill_value; HID_RPT_SIZE + 1];
+                let mut write = [fill_value; OUT_HID_RPT_SIZE + 1];
                 // Make sure we start with a 0, for HID record index
                 write[0] = 0;
                 // Clone packet data in at 1, since front is padded with HID record index
@@ -252,7 +255,7 @@ mod tests {
             }
 
             pub fn add_read(&mut self, packet: &[u8], fill_value: u8) {
-                let mut read = [fill_value; HID_RPT_SIZE];
+                let mut read = [fill_value; IN_HID_RPT_SIZE];
                 read[..packet.len()].clone_from_slice(packet);
                 self.reads.push(read);
             }
@@ -299,6 +302,14 @@ mod tests {
 
             fn set_cid(&mut self, cid: [u8; 4]) {
                 self.cid = cid;
+            }
+
+            fn in_rpt_size(&self) -> usize {
+                IN_HID_RPT_SIZE
+            }
+
+            fn out_rpt_size(&self) -> usize {
+                OUT_HID_RPT_SIZE
             }
         }
     }
