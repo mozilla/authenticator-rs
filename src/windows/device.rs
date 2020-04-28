@@ -8,7 +8,7 @@ use std::io::{Read, Write};
 use std::os::windows::io::AsRawHandle;
 
 use super::winapi::DeviceCapabilities;
-use consts::{CID_BROADCAST, FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID, HID_RPT_SIZE};
+use consts::{CID_BROADCAST, FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID, MAX_HID_RPT_SIZE};
 
 use u2ftypes::U2FDevice;
 
@@ -46,7 +46,7 @@ impl PartialEq for Device {
 impl Read for Device {
     fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
         // Windows always includes the report ID.
-        let mut input = [0u8; HID_RPT_SIZE + 1];
+        let mut input = [0u8; MAX_HID_RPT_SIZE + 1];
         let _ = self.file.read(&mut input)?;
         bytes.clone_from_slice(&input[1..]);
         Ok(bytes.len() as usize)
@@ -70,5 +70,13 @@ impl U2FDevice for Device {
 
     fn set_cid(&mut self, cid: [u8; 4]) {
         self.cid = cid;
+    }
+
+    fn in_rpt_size(&self) -> usize {
+        MAX_HID_RPT_SIZE
+    }
+
+    fn out_rpt_size(&self) -> usize {
+        MAX_HID_RPT_SIZE
     }
 }
