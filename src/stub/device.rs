@@ -42,4 +42,12 @@ impl U2FDevice for Device {
     fn set_cid(&mut self, cid: [u8; 4]) {
         panic!("not implemented");
     }
+
+    fn in_rpt_size(&self) -> usize {
+        panic!("not implemented");
+    }
+
+    fn out_rpt_size(&self) -> usize {
+        panic!("not implemented");
+    }
 }

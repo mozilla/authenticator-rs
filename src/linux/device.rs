@@ -18,6 +18,8 @@ use util::from_unix_result;
 pub struct Device {
     path: OsString,
     fd: libc::c_int,
+    in_rpt_size: usize,
+    out_rpt_size: usize,
     cid: [u8; 4],
 }
 
@@ -26,9 +28,12 @@ impl Device {
         let cstr = CString::new(path.as_bytes())?;
         let fd = unsafe { libc::open(cstr.as_ptr(), libc::O_RDWR) };
         let fd = from_unix_result(fd)?;
+        let (in_rpt_size, out_rpt_size) = hidraw::read_hid_rpt_sizes_or_defaults(fd);
         Ok(Self {
             path,
             fd,
+            in_rpt_size,
+            out_rpt_size,
             cid: CID_BROADCAST,
         })
     }
@@ -79,5 +84,13 @@ impl U2FDevice for Device {
 
     fn set_cid(&mut self, cid: [u8; 4]) {
         self.cid = cid;
+    }
+
+    fn in_rpt_size(&self) -> usize {
+        self.in_rpt_size
+    }
+
+    fn out_rpt_size(&self) -> usize {
+        self.out_rpt_size
     }
 }
