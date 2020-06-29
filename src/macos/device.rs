@@ -16,8 +16,15 @@ use u2ftypes::U2FDevice;
 
 const READ_TIMEOUT: u64 = 15;
 
+fn get_hid_rpt_sizes(_device_ref: IOHIDDeviceRef) -> (usize, usize) {
+    // TODO: read the descriptors and use hidproto::read_hid_rpt_sizes
+    (MAX_HID_RPT_SIZE, MAX_HID_RPT_SIZE)
+}
+
 pub struct Device {
     device_ref: IOHIDDeviceRef,
+    in_rpt_size: usize,
+    out_rpt_size: usize,
     cid: [u8; 4],
     report_rx: Receiver<Vec<u8>>,
 }
@@ -25,8 +32,11 @@ pub struct Device {
 impl Device {
     pub fn new(dev_info: (IOHIDDeviceRef, Receiver<Vec<u8>>)) -> io::Result<Self> {
         let (device_ref, report_rx) = dev_info;
+        let (in_rpt_size, out_rpt_size) = get_hid_rpt_sizes(device_ref);
         Ok(Self {
             device_ref,
+            in_rpt_size,
+            out_rpt_size,
             cid: CID_BROADCAST,
             report_rx,
         })
@@ -61,7 +71,7 @@ impl Read for Device {
 
 impl Write for Device {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        assert_eq!(bytes.len(), HID_RPT_SIZE + 1);
+        assert_eq!(bytes.len(), self.out_rpt_size() + 1);
 
         let report_id = i64::from(bytes[0]);
         // Skip report number when not using numbered reports.
@@ -102,10 +112,10 @@ impl U2FDevice for Device {
     }
 
     fn in_rpt_size(&self) -> usize {
-        MAX_HID_RPT_SIZE
+        self.in_rpt_size
     }
 
     fn out_rpt_size(&self) -> usize {
-        MAX_HID_RPT_SIZE
+        self.out_rpt_size
     }
 }
