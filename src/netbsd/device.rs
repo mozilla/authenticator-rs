@@ -4,10 +4,10 @@
 
 extern crate libc;
 
-use std::mem;
+use std::io;
 use std::io::Read;
 use std::io::Write;
-use std::io;
+use std::mem;
 
 use consts::CID_BROADCAST;
 use consts::HID_RPT_SIZE;
@@ -24,7 +24,10 @@ pub struct Device {
 
 impl Device {
     pub fn new(fd: Fd) -> io::Result<Self> {
-        Ok(Self { fd, cid: CID_BROADCAST })
+        Ok(Self {
+            fd,
+            cid: CID_BROADCAST,
+        })
     }
 
     pub fn is_u2f(&mut self) -> bool {
@@ -52,14 +55,14 @@ impl Device {
         for i in 0..10 {
             let mut buf = vec![0u8; 1 + HID_RPT_SIZE];
 
-            buf[0] = 0;         // report number
-            buf[1] = 0xff;      // CID_BROADCAST
+            buf[0] = 0; // report number
+            buf[1] = 0xff; // CID_BROADCAST
             buf[2] = 0xff;
             buf[3] = 0xff;
             buf[4] = 0xff;
-            buf[5] = 0x81;      // ping
+            buf[5] = 0x81; // ping
             buf[6] = 0;
-            buf[7] = 1;         // one byte
+            buf[7] = 1; // one byte
 
             self.write(&buf[..])?;
 
@@ -108,9 +111,7 @@ impl Write for Device {
         // Always skip the first byte (report number)
         let data = &buf[1..];
         let data_ptr = data.as_ptr() as *const libc::c_void;
-        let nwrit = unsafe {
-            libc::write(self.fd.fileno, data_ptr, data.len())
-        };
+        let nwrit = unsafe { libc::write(self.fd.fileno, data_ptr, data.len()) };
         if nwrit == -1 {
             return Err(io::Error::last_os_error());
         }

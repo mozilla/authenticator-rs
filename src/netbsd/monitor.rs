@@ -44,13 +44,11 @@ where
                 match Fd::open(&uhidpath, libc::O_RDWR | libc::O_CLOEXEC) {
                     Ok(uhid) => {
                         self.add_device(uhid, OsString::from(&uhidpath));
-                    },
-                    Err(ref err) => {
-                        match err.raw_os_error() {
-                            Some(libc::EBUSY) => continue,
-                            Some(libc::ENOENT) => break,
-                            _ => self.remove_device(OsString::from(&uhidpath)),
-                        }
+                    }
+                    Err(ref err) => match err.raw_os_error() {
+                        Some(libc::EBUSY) => continue,
+                        Some(libc::ENOENT) => break,
+                        _ => self.remove_device(OsString::from(&uhidpath)),
                     },
                 }
             }

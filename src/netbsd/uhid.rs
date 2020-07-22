@@ -9,8 +9,8 @@ use std::mem;
 use std::os::raw::c_int;
 use std::os::raw::c_uchar;
 
-use hidproto::ReportDescriptor;
 use hidproto::has_fido_usage;
+use hidproto::ReportDescriptor;
 use platform::fd::Fd;
 use util::io_err;
 
@@ -27,11 +27,9 @@ const IOC_IN: u32 = 0x80000000;
 
 macro_rules! ioctl {
     ($dir:expr, $name:ident, $group:expr, $nr:expr, $ty:ty) => {
-        unsafe fn $name(fd: libc::c_int, val: *mut $ty)
-                -> io::Result<libc::c_int> {
+        unsafe fn $name(fd: libc::c_int, val: *mut $ty) -> io::Result<libc::c_int> {
             let ioc = ($dir as u32)
-                | ((mem::size_of::<$ty>() as u32 & IOCPARM_MASK)
-                   << IOCPARM_SHIFT)
+                | ((mem::size_of::<$ty>() as u32 & IOCPARM_MASK) << IOCPARM_SHIFT)
                 | (($group as u32) << IOCGROUP_SHIFT)
                 | ($nr as u32);
             let rv = libc::ioctl(fd, ioc as libc::c_ulong, val);
