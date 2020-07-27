@@ -1,12 +1,14 @@
-sudo: false
+os:
+  - linux
+  - windows
+
 language: rust
-cache: cargo
 rust:
   - stable
-  - beta
   - nightly
+cache: cargo
 
-matrix:
+jobs:
   allow_failures:
     - rust: nightly
 
@@ -16,18 +18,13 @@ addons:
       - build-essential
       - libudev-dev
 
-before_install:
-  - pkg-config --list-all
-  - pkg-config --libs libudev
-  - pkg-config --modversion libudev
-
 install:
-  - rustup component add rustfmt-preview
-  - rustup component add clippy-preview
+  - rustup component add rustfmt
+  - rustup component add clippy
 
 script:
 - |
-  if [ "$TRAVIS_RUST_VERSION" == "nightly" ] ; then
+  if [ "$TRAVIS_RUST_VERSION" == "nightly" ] && [ "$TRAVIS_OS_NAME" == "windows" ] ; then
     export ASAN_OPTIONS="detect_odr_violation=1:leak_check_at_exit=0:detect_leaks=0"
     export RUSTFLAGS="-Z sanitizer=address"
   fi
