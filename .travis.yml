@@ -29,7 +29,7 @@ script:
     export RUSTFLAGS="-Z sanitizer=address"
   fi
 - |
-  if [ "$TRAVIS_RUST_VERSION" == "stable" ] ; then
+  if [ "$TRAVIS_RUST_VERSION" == "stable" ] && [ "$TRAVIS_OS_NAME" == "linux" ] ; then
     echo "Running rustfmt"
     cargo fmt --all -- --check
     echo "Running clippy"
