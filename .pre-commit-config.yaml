@@ -9,3 +9,27 @@
     - id: end-of-file-fixer
     - id: requirements-txt-fixer
     - id: trailing-whitespace
+- repo: local
+  hooks:
+    - id: rustfmt
+      name: Check rustfmt
+      language: system
+      entry: cargo +nightly fmt -- --check
+      pass_filenames: false
+      files: '.rs$'
+- repo: local
+  hooks:
+    - id: tests
+      name: Run tests
+      language: system
+      entry: cargo test
+      pass_filenames: false
+      files: '.rs$'
+- repo: local
+  hooks:
+    - id: clippy
+      name: Check clippy
+      language: system
+      entry: cargo clippy --all-targets -- -A renamed_and_removed_lints -A clippy::new-ret-no-self -D warnings
+      pass_filenames: false
+      files: '.rs$'
