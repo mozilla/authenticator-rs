@@ -66,10 +66,12 @@ impl U2FDevice for TestDevice {
     }
 }
 
-fuzz_target!(|data: &[u8]| if data.len() > 0 {
-    let cmd = data[0];
-    let data = &data[1..];
-    let mut dev = TestDevice::new();
-    let res = sendrecv(&mut dev, cmd, data);
-    assert_eq!(data, &res.unwrap()[..]);
+fuzz_target!(|data: &[u8]| {
+    if data.len() > 0 {
+        let cmd = data[0];
+        let data = &data[1..];
+        let mut dev = TestDevice::new();
+        let res = sendrecv(&mut dev, cmd, data);
+        assert_eq!(data, &res.unwrap()[..]);
+    }
 });
