@@ -33,6 +33,9 @@ script:
     export RUSTFLAGS="-Z sanitizer=address"
   fi
 - |
+  cargo install cargo-fuzz
+  cargo +nightly fuzz build
+- |
   if [ "$TRAVIS_RUST_VERSION" == "stable" ] ; then
     echo "Running rustfmt"
     cargo fmt --all -- --check
