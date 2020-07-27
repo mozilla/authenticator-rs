@@ -6,6 +6,6 @@ docker build -t local_cross:powerpc64le-unknown-linux-gnu -f powerpc64le-unknown
 popd
 
 cross test --target x86_64-unknown-linux-gnu
-cross test --target x86_64-unknown-netbsd
-cross test --target powerpc64le-unknown-linux-gnu
-cross test --target x86_64-pc-windows-gnu
+cross build --target x86_64-unknown-netbsd
+cross build --target powerpc64le-unknown-linux-gnu
+cross build --target x86_64-pc-windows-gnu
