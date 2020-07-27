@@ -10,7 +10,7 @@ extern crate authenticator;
 use std::{cmp, io};
 
 use authenticator::{sendrecv, U2FDevice};
-use authenticator::{CID_BROADCAST, HID_RPT_SIZE};
+use authenticator::{CID_BROADCAST, MAX_HID_RPT_SIZE};
 
 struct TestDevice<'a> {
     cid: [u8; 4],
@@ -28,8 +28,8 @@ impl<'a> TestDevice<'a> {
 
 impl<'a> io::Read for TestDevice<'a> {
     fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
-        assert!(bytes.len() == HID_RPT_SIZE);
-        let max = cmp::min(self.data.len(), HID_RPT_SIZE);
+        assert!(bytes.len() == MAX_HID_RPT_SIZE);
+        let max = cmp::min(self.data.len(), MAX_HID_RPT_SIZE);
         bytes[..max].copy_from_slice(&self.data[..max]);
         self.data = &self.data[max..];
         Ok(max)
@@ -38,7 +38,7 @@ impl<'a> io::Read for TestDevice<'a> {
 
 impl<'a> io::Write for TestDevice<'a> {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        assert!(bytes.len() == HID_RPT_SIZE + 1);
+        assert!(bytes.len() == MAX_HID_RPT_SIZE + 1);
         Ok(bytes.len())
     }
 
@@ -54,6 +54,14 @@ impl<'a> U2FDevice for TestDevice<'a> {
 
     fn set_cid(&mut self, cid: [u8; 4]) {
         self.cid = cid;
+    }
+
+    fn in_rpt_size(&self) -> usize {
+        MAX_HID_RPT_SIZE
+    }
+
+    fn out_rpt_size(&self) -> usize {
+        MAX_HID_RPT_SIZE
     }
 }
 

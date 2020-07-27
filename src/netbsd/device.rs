@@ -10,7 +10,7 @@ use std::io::Write;
 use std::mem;
 
 use consts::CID_BROADCAST;
-use consts::HID_RPT_SIZE;
+use consts::MAX_HID_RPT_SIZE;
 use platform::fd::Fd;
 use platform::uhid;
 use u2ftypes::U2FDevice;
@@ -53,7 +53,7 @@ impl Device {
 
     fn ping(&mut self) -> io::Result<()> {
         for i in 0..10 {
-            let mut buf = vec![0u8; 1 + HID_RPT_SIZE];
+            let mut buf = vec![0u8; 1 + MAX_HID_RPT_SIZE];
 
             buf[0] = 0; // report number
             buf[1] = 0xff; // CID_BROADCAST
@@ -131,5 +131,13 @@ impl U2FDevice for Device {
 
     fn set_cid(&mut self, cid: [u8; 4]) {
         self.cid = cid;
+    }
+
+    fn in_rpt_size(&self) -> usize {
+        MAX_HID_RPT_SIZE
+    }
+
+    fn out_rpt_size(&self) -> usize {
+        MAX_HID_RPT_SIZE
     }
 }

@@ -61,7 +61,7 @@ impl Read for Device {
 
 impl Write for Device {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        assert_eq!(bytes.len(), HID_RPT_SIZE + 1);
+        assert_eq!(bytes.len(), self.out_rpt_size() + 1);
 
         let report_id = i64::from(bytes[0]);
         // Skip report number when not using numbered reports.
