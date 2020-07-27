@@ -23,8 +23,8 @@ impl Device {
     pub fn new(path: String) -> io::Result<Self> {
         let file = OpenOptions::new().read(true).write(true).open(&path)?;
         Ok(Self {
-            path: path,
-            file: file,
+            path,
+            file,
             cid: CID_BROADCAST,
         })
     }
