@@ -65,9 +65,11 @@ impl<'a> U2FDevice for TestDevice<'a> {
     }
 }
 
-fuzz_target!(|data: &[u8]| if data.len() > 0 {
-    let cmd = data[0];
-    let data = &data[1..];
-    let mut dev = TestDevice::new(data);
-    let _ = sendrecv(&mut dev, cmd, data);
+fuzz_target!(|data: &[u8]| {
+    if data.len() > 0 {
+        let cmd = data[0];
+        let data = &data[1..];
+        let mut dev = TestDevice::new(data);
+        let _ = sendrecv(&mut dev, cmd, data);
+    }
 });
