@@ -112,6 +112,13 @@ pub enum Error {
     NotAllowed = 5,
 }
 
+#[derive(Debug, Clone)]
+pub enum StatusUpdate {
+    DeviceAvailable { dev_info: u2ftypes::U2FDeviceInfo },
+    DeviceUnavailable { dev_info: u2ftypes::U2FDeviceInfo },
+    Success { dev_info: u2ftypes::U2FDeviceInfo },
+}
+
 #[cfg(fuzzing)]
 pub use consts::*;
 #[cfg(fuzzing)]

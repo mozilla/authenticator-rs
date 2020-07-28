@@ -18,6 +18,7 @@ enum QueueAction {
         challenge: Vec<u8>,
         application: crate::AppId,
         key_handles: Vec<crate::KeyHandle>,
+        status: Sender<crate::StatusUpdate>,
         callback: StateCallback<Result<crate::RegisterResult, crate::Error>>,
     },
     Sign {
@@ -26,6 +27,7 @@ enum QueueAction {
         challenge: Vec<u8>,
         app_ids: Vec<crate::AppId>,
         key_handles: Vec<crate::KeyHandle>,
+        status: Sender<crate::StatusUpdate>,
         callback: StateCallback<Result<crate::SignResult, crate::Error>>,
     },
     Cancel,
@@ -52,6 +54,7 @@ impl U2FManager {
                         challenge,
                         application,
                         key_handles,
+                        status,
                         callback,
                     }) => {
                         // This must not block, otherwise we can't cancel.
@@ -61,6 +64,7 @@ impl U2FManager {
                             challenge,
                             application,
                             key_handles,
+                            status,
                             callback,
                         );
                     }
@@ -70,10 +74,19 @@ impl U2FManager {
                         challenge,
                         app_ids,
                         key_handles,
+                        status,
                         callback,
                     }) => {
                         // This must not block, otherwise we can't cancel.
-                        sm.sign(flags, timeout, challenge, app_ids, key_handles, callback);
+                        sm.sign(
+                            flags,
+                            timeout,
+                            challenge,
+                            app_ids,
+                            key_handles,
+                            status,
+                            callback,
+                        );
                     }
                     Ok(QueueAction::Cancel) => {
                         // Cancelling must block so that we don't start a new
@@ -101,6 +114,7 @@ impl U2FManager {
         challenge: Vec<u8>,
         application: crate::AppId,
         key_handles: Vec<crate::KeyHandle>,
+        status: Sender<crate::StatusUpdate>,
         callback: F,
     ) -> Result<(), crate::Error>
     where
@@ -124,6 +138,7 @@ impl U2FManager {
             challenge,
             application,
             key_handles,
+            status,
             callback,
         };
         self.tx.send(action).map_err(|_| crate::Error::Unknown)
@@ -136,6 +151,7 @@ impl U2FManager {
         challenge: Vec<u8>,
         app_ids: Vec<crate::AppId>,
         key_handles: Vec<crate::KeyHandle>,
+        status: Sender<crate::StatusUpdate>,
         callback: F,
     ) -> Result<(), crate::Error>
     where
@@ -169,6 +185,7 @@ impl U2FManager {
             challenge,
             app_ids,
             key_handles,
+            status,
             callback,
         };
         self.tx.send(action).map_err(|_| crate::Error::Unknown)

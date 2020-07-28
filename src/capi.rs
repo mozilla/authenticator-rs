@@ -5,6 +5,7 @@
 use libc::size_t;
 use rand::{thread_rng, Rng};
 use std::collections::HashMap;
+use std::sync::mpsc::channel;
 use std::{ptr, slice};
 
 use crate::U2FManager;
@@ -229,6 +230,8 @@ pub unsafe extern "C" fn rust_u2f_mgr_register(
     let application = from_raw(application_ptr, application_len);
     let key_handles = (*khs).clone();
 
+    let (tx, _rx) = channel::<crate::StatusUpdate>();
+
     let tid = new_tid();
     let res = (*mgr).register(
         flags,
@@ -236,6 +239,7 @@ pub unsafe extern "C" fn rust_u2f_mgr_register(
         challenge,
         application,
         key_handles,
+        tx,
         move |rv| {
             let result = match rv {
                 Ok((registration, dev_info)) => {
@@ -295,26 +299,36 @@ pub unsafe extern "C" fn rust_u2f_mgr_sign(
     let app_ids = (*app_ids).clone();
     let key_handles = (*khs).clone();
 
-    let tid = new_tid();
-    let res = (*mgr).sign(flags, timeout, challenge, app_ids, key_handles, move |rv| {
-        let result = match rv {
-            Ok((app_id, key_handle, signature, dev_info)) => {
-                let mut bufs = HashMap::new();
-                bufs.insert(RESBUF_ID_KEYHANDLE, key_handle);
-                bufs.insert(RESBUF_ID_SIGNATURE, signature);
-                bufs.insert(RESBUF_ID_APPID, app_id);
-                bufs.insert(RESBUF_ID_VENDOR_NAME, dev_info.vendor_name);
-                bufs.insert(RESBUF_ID_DEVICE_NAME, dev_info.device_name);
-                bufs.insert(RESBUF_ID_FIRMWARE_MAJOR, vec![dev_info.version_major]);
-                bufs.insert(RESBUF_ID_FIRMWARE_MINOR, vec![dev_info.version_minor]);
-                bufs.insert(RESBUF_ID_FIRMWARE_BUILD, vec![dev_info.version_build]);
-                U2FResult::Success(bufs)
-            }
-            Err(e) => U2FResult::Error(e),
-        };
+    let (tx, _rx) = channel::<crate::StatusUpdate>();
 
-        callback(tid, Box::into_raw(Box::new(result)));
-    });
+    let tid = new_tid();
+    let res = (*mgr).sign(
+        flags,
+        timeout,
+        challenge,
+        app_ids,
+        key_handles,
+        tx,
+        move |rv| {
+            let result = match rv {
+                Ok((app_id, key_handle, signature, dev_info)) => {
+                    let mut bufs = HashMap::new();
+                    bufs.insert(RESBUF_ID_KEYHANDLE, key_handle);
+                    bufs.insert(RESBUF_ID_SIGNATURE, signature);
+                    bufs.insert(RESBUF_ID_APPID, app_id);
+                    bufs.insert(RESBUF_ID_VENDOR_NAME, dev_info.vendor_name);
+                    bufs.insert(RESBUF_ID_DEVICE_NAME, dev_info.device_name);
+                    bufs.insert(RESBUF_ID_FIRMWARE_MAJOR, vec![dev_info.version_major]);
+                    bufs.insert(RESBUF_ID_FIRMWARE_MINOR, vec![dev_info.version_minor]);
+                    bufs.insert(RESBUF_ID_FIRMWARE_BUILD, vec![dev_info.version_build]);
+                    U2FResult::Success(bufs)
+                }
+                Err(e) => U2FResult::Error(e),
+            };
+
+            callback(tid, Box::into_raw(Box::new(result)));
+        },
+    );
 
     if res.is_ok() {
         tid

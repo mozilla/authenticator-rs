@@ -8,6 +8,8 @@ use crate::platform::transaction::Transaction;
 use crate::u2fprotocol::{u2f_init_device, u2f_is_keyhandle_valid, u2f_register, u2f_sign};
 use crate::u2ftypes::U2FDevice;
 use crate::util::StateCallback;
+use std::sync::mpsc::Sender;
+use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 
@@ -40,6 +42,19 @@ where
     (&app_ids[0], vec![])
 }
 
+fn send_status(status_mutex: &Mutex<Sender<crate::StatusUpdate>>, msg: crate::StatusUpdate) {
+    match status_mutex.lock() {
+        Ok(s) => match s.send(msg) {
+            Ok(_) => {}
+            Err(e) => error!("Couldn't send status: {:?}", e),
+        },
+        Err(e) => {
+            error!("Couldn't obtain status mutex: {:?}", e);
+            return;
+        }
+    };
+}
+
 #[derive(Default)]
 pub struct StateMachine {
     transaction: Option<Transaction>,
@@ -57,12 +72,14 @@ impl StateMachine {
         challenge: Vec<u8>,
         application: crate::AppId,
         key_handles: Vec<crate::KeyHandle>,
+        status: Sender<crate::StatusUpdate>,
         callback: StateCallback<Result<crate::RegisterResult, crate::Error>>,
     ) {
         // Abort any prior register/sign calls.
         self.cancel();
 
         let cbc = callback.clone();
+        let status_mutex = Mutex::new(status);
 
         let transaction = Transaction::new(timeout, cbc.clone(), move |info, alive| {
             // Create a new device.
@@ -87,6 +104,13 @@ impl StateMachine {
                 return;
             }
 
+            send_status(
+                &status_mutex,
+                crate::StatusUpdate::DeviceAvailable {
+                    dev_info: dev.get_device_info(),
+                },
+            );
+
             // Iterate the exclude list and see if there are any matches.
             // If so, we'll keep polling the device anyway to test for user
             // consent, to be consistent with CTAP2 device behavior.
@@ -105,6 +129,12 @@ impl StateMachine {
                     }
                 } else if let Ok(bytes) = u2f_register(dev, &challenge, &application) {
                     let dev_info = dev.get_device_info();
+                    send_status(
+                        &status_mutex,
+                        crate::StatusUpdate::Success {
+                            dev_info: dev.get_device_info(),
+                        },
+                    );
                     callback.call(Ok((bytes, dev_info)));
                     break;
                 }
@@ -112,6 +142,13 @@ impl StateMachine {
                 // Sleep a bit before trying again.
                 thread::sleep(Duration::from_millis(100));
             }
+
+            send_status(
+                &status_mutex,
+                crate::StatusUpdate::DeviceUnavailable {
+                    dev_info: dev.get_device_info(),
+                },
+            );
         });
 
         self.transaction = Some(try_or!(transaction, |e| cbc.call(Err(e))));
@@ -124,12 +161,15 @@ impl StateMachine {
         challenge: Vec<u8>,
         app_ids: Vec<crate::AppId>,
         key_handles: Vec<crate::KeyHandle>,
+        status: Sender<crate::StatusUpdate>,
         callback: StateCallback<Result<crate::SignResult, crate::Error>>,
     ) {
         // Abort any prior register/sign calls.
         self.cancel();
 
         let cbc = callback.clone();
+
+        let status_mutex = Mutex::new(status);
 
         let transaction = Transaction::new(timeout, cbc.clone(), move |info, alive| {
             // Create a new device.
@@ -175,6 +215,13 @@ impl StateMachine {
                 return;
             }
 
+            send_status(
+                &status_mutex,
+                crate::StatusUpdate::DeviceAvailable {
+                    dev_info: dev.get_device_info(),
+                },
+            );
+
             'outer: while alive() {
                 // If the device matches none of the given key handles
                 // then just make it blink with bogus data.
@@ -190,6 +237,12 @@ impl StateMachine {
                         if let Ok(bytes) = u2f_sign(dev, &challenge, app_id, &key_handle.credential)
                         {
                             let dev_info = dev.get_device_info();
+                            send_status(
+                                &status_mutex,
+                                crate::StatusUpdate::Success {
+                                    dev_info: dev.get_device_info(),
+                                },
+                            );
                             callback.call(Ok((
                                 app_id.clone(),
                                 key_handle.credential.clone(),
@@ -204,6 +257,13 @@ impl StateMachine {
                 // Sleep a bit before trying again.
                 thread::sleep(Duration::from_millis(100));
             }
+
+            send_status(
+                &status_mutex,
+                crate::StatusUpdate::DeviceUnavailable {
+                    dev_info: dev.get_device_info(),
+                },
+            );
         });
 
         self.transaction = Some(try_or!(transaction, |e| cbc.call(Err(e))));
