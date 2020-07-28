@@ -5,10 +5,12 @@
 extern crate authenticator;
 extern crate base64;
 extern crate sha2;
-use authenticator::{AuthenticatorTransports, KeyHandle, RegisterFlags, SignFlags, U2FManager};
+use authenticator::{
+    AuthenticatorTransports, KeyHandle, RegisterFlags, SignFlags, StatusUpdate, U2FManager,
+};
 use sha2::{Digest, Sha256};
-use std::io;
-use std::sync::mpsc::channel;
+use std::sync::mpsc::{channel, RecvError};
+use std::{io, thread};
 
 extern crate env_logger;
 extern crate log;
@@ -60,7 +62,26 @@ fn main() {
     let manager = U2FManager::new().unwrap();
     let flags = RegisterFlags::empty();
 
-    let (tx, rx) = channel();
+    let (status_tx, status_rx) = channel::<StatusUpdate>();
+    thread::spawn(move || loop {
+        match status_rx.recv() {
+            Ok(StatusUpdate::DeviceAvailable { dev_info }) => {
+                println!("STATUS: device available: {}", dev_info)
+            }
+            Ok(StatusUpdate::DeviceUnavailable { dev_info }) => {
+                println!("STATUS: device unavailable: {}", dev_info)
+            }
+            Ok(StatusUpdate::Success { dev_info }) => {
+                println!("STATUS: success using device: {}", dev_info);
+            }
+            Err(RecvError) => {
+                println!("STATUS: end");
+                return;
+            }
+        }
+    });
+
+    let (register_tx, register_rx) = channel();
     manager
         .register(
             flags,
@@ -68,13 +89,14 @@ fn main() {
             chall_bytes.clone(),
             app_bytes.clone(),
             vec![],
+            status_tx.clone(),
             move |rv| {
-                tx.send(rv).unwrap();
+                register_tx.send(rv).unwrap();
             },
         )
         .unwrap();
 
-    let register_result = try_or!(rx.recv(), |_| {
+    let register_result = try_or!(register_rx.recv(), |_| {
         panic!("Problem receiving, unable to continue");
     });
     let (register_data, device_info) =
@@ -90,7 +112,7 @@ fn main() {
     };
 
     let flags = SignFlags::empty();
-    let (tx, rx) = channel();
+    let (sign_tx, sign_rx) = channel();
     manager
         .sign(
             flags,
@@ -98,13 +120,14 @@ fn main() {
             chall_bytes,
             vec![app_bytes],
             vec![key_handle],
+            status_tx,
             move |rv| {
-                tx.send(rv).unwrap();
+                sign_tx.send(rv).unwrap();
             },
         )
         .unwrap();
 
-    let sign_result = try_or!(rx.recv(), |_| {
+    let sign_result = try_or!(sign_rx.recv(), |_| {
         panic!("Problem receiving, unable to continue");
     });
     let (_, handle_used, sign_data, device_info) =
