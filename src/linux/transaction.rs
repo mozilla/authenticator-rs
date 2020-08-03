@@ -5,7 +5,7 @@
 use platform::monitor::Monitor;
 use runloop::RunLoop;
 use std::ffi::OsString;
-use util::OnceCallback;
+use util::StateCallback;
 
 pub struct Transaction {
     // Handle to the thread loop.
@@ -15,7 +15,7 @@ pub struct Transaction {
 impl Transaction {
     pub fn new<F, T>(
         timeout: u64,
-        callback: OnceCallback<T>,
+        callback: StateCallback<Result<T, ::Error>>,
         new_device_cb: F,
     ) -> Result<Self, ::Error>
     where

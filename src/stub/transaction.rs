@@ -2,14 +2,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use util::OnceCallback;
+use util::StateCallback;
 
 pub struct Transaction {}
 
 impl Transaction {
     pub fn new<F, T>(
         timeout: u64,
-        callback: OnceCallback<T>,
+        callback: StateCallback<Result<T, ::Error>>,
         new_device_cb: F,
     ) -> Result<Self, ::Error>
     where
