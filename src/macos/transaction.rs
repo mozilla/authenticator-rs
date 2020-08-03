@@ -24,7 +24,7 @@ pub struct Transaction {
 impl Transaction {
     pub fn new<F, T>(
         timeout: u64,
-        callback: StateCallback<T>,
+        callback: StateCallback<Result<T, ::Error>>,
         new_device_cb: F,
     ) -> Result<Self, ::Error>
     where

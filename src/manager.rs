@@ -18,7 +18,7 @@ enum QueueAction {
         challenge: Vec<u8>,
         application: ::AppId,
         key_handles: Vec<::KeyHandle>,
-        callback: StateCallback<::RegisterResult>,
+        callback: StateCallback<Result<::RegisterResult, ::Error>>,
     },
     Sign {
         flags: ::SignFlags,
@@ -26,7 +26,7 @@ enum QueueAction {
         challenge: Vec<u8>,
         app_ids: Vec<::AppId>,
         key_handles: Vec<::KeyHandle>,
-        callback: StateCallback<::SignResult>,
+        callback: StateCallback<Result<::SignResult, ::Error>>,
     },
     Cancel,
 }
