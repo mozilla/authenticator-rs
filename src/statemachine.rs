@@ -8,7 +8,7 @@ use platform::transaction::Transaction;
 use std::thread;
 use std::time::Duration;
 use u2fprotocol::{u2f_init_device, u2f_is_keyhandle_valid, u2f_register, u2f_sign};
-use util::OnceCallback;
+use util::StateCallback;
 
 fn is_valid_transport(transports: ::AuthenticatorTransports) -> bool {
     transports.is_empty() || transports.contains(::AuthenticatorTransports::USB)
@@ -56,7 +56,7 @@ impl StateMachine {
         challenge: Vec<u8>,
         application: ::AppId,
         key_handles: Vec<::KeyHandle>,
-        callback: OnceCallback<::RegisterResult>,
+        callback: StateCallback<::RegisterResult>,
     ) {
         // Abort any prior register/sign calls.
         self.cancel();
@@ -122,7 +122,7 @@ impl StateMachine {
         challenge: Vec<u8>,
         app_ids: Vec<::AppId>,
         key_handles: Vec<::KeyHandle>,
-        callback: OnceCallback<::SignResult>,
+        callback: StateCallback<::SignResult>,
     ) {
         // Abort any prior register/sign calls.
         self.cancel();

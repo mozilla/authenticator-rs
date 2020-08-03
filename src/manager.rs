@@ -9,7 +9,7 @@ use std::time::Duration;
 use consts::PARAMETER_SIZE;
 use runloop::RunLoop;
 use statemachine::StateMachine;
-use util::OnceCallback;
+use util::StateCallback;
 
 enum QueueAction {
     Register {
@@ -18,7 +18,7 @@ enum QueueAction {
         challenge: Vec<u8>,
         application: ::AppId,
         key_handles: Vec<::KeyHandle>,
-        callback: OnceCallback<::RegisterResult>,
+        callback: StateCallback<::RegisterResult>,
     },
     Sign {
         flags: ::SignFlags,
@@ -26,7 +26,7 @@ enum QueueAction {
         challenge: Vec<u8>,
         app_ids: Vec<::AppId>,
         key_handles: Vec<::KeyHandle>,
-        callback: OnceCallback<::SignResult>,
+        callback: StateCallback<::SignResult>,
     },
     Cancel,
 }
@@ -104,7 +104,7 @@ impl U2FManager {
         callback: F,
     ) -> Result<(), ::Error>
     where
-        F: FnOnce(Result<::RegisterResult, ::Error>),
+        F: Fn(Result<::RegisterResult, ::Error>),
         F: Send + 'static,
     {
         if challenge.len() != PARAMETER_SIZE || application.len() != PARAMETER_SIZE {
@@ -117,7 +117,7 @@ impl U2FManager {
             }
         }
 
-        let callback = OnceCallback::new(callback);
+        let callback = StateCallback::new(Box::new(callback));
         let action = QueueAction::Register {
             flags,
             timeout,
@@ -139,7 +139,7 @@ impl U2FManager {
         callback: F,
     ) -> Result<(), ::Error>
     where
-        F: FnOnce(Result<::SignResult, ::Error>),
+        F: Fn(Result<::SignResult, ::Error>),
         F: Send + 'static,
     {
         if challenge.len() != PARAMETER_SIZE {
@@ -162,7 +162,7 @@ impl U2FManager {
             }
         }
 
-        let callback = OnceCallback::new(callback);
+        let callback = StateCallback::new(Box::new(callback));
         let action = QueueAction::Sign {
             flags,
             timeout,

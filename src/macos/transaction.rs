@@ -10,7 +10,7 @@ use platform::monitor::Monitor;
 use std::os::raw::c_void;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
-use util::OnceCallback;
+use util::StateCallback;
 
 // A transaction will run the given closure in a new thread, thereby using a
 // separate per-thread state machine for each HID. It will either complete or
@@ -24,7 +24,7 @@ pub struct Transaction {
 impl Transaction {
     pub fn new<F, T>(
         timeout: u64,
-        callback: OnceCallback<T>,
+        callback: StateCallback<T>,
         new_device_cb: F,
     ) -> Result<Self, ::Error>
     where

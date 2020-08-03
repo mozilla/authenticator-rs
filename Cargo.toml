@@ -35,7 +35,6 @@ bindgen = { version = "^0.51", optional = true }
 rand = "0.7"
 log = "0.4"
 libc = "0.2"
-boxfnonce = "0.0.3"
 runloop = "0.1.0"
 bitflags = "1.0"
 
