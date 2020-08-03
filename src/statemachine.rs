@@ -56,7 +56,7 @@ impl StateMachine {
         challenge: Vec<u8>,
         application: ::AppId,
         key_handles: Vec<::KeyHandle>,
-        callback: StateCallback<::RegisterResult>,
+        callback: StateCallback<Result<::RegisterResult, ::Error>>,
     ) {
         // Abort any prior register/sign calls.
         self.cancel();
@@ -122,7 +122,7 @@ impl StateMachine {
         challenge: Vec<u8>,
         app_ids: Vec<::AppId>,
         key_handles: Vec<::KeyHandle>,
-        callback: StateCallback<::SignResult>,
+        callback: StateCallback<Result<::SignResult, ::Error>>,
     ) {
         // Abort any prior register/sign calls.
         self.cancel();

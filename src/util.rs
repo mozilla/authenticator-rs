@@ -68,18 +68,17 @@ pub fn io_err(msg: &str) -> io::Error {
 }
 
 pub struct StateCallback<T> {
-    callback: Arc<Mutex<Option<Box<dyn Fn(Result<T, ::Error>,) + Send>>>>,
+    callback: Arc<Mutex<Option<Box<dyn Fn(T) + Send>>>>,
 }
 
 impl<T> StateCallback<T> {
-    pub fn new(cb: Box<dyn Fn(Result<T, ::Error>) + Send + 'static>) -> Self
-    {
+    pub fn new(cb: Box<dyn Fn(T) + Send + 'static>) -> Self {
         Self {
             callback: Arc::new(Mutex::new(Some(cb))),
         }
     }
 
-    pub fn call(&self, rv: Result<T, ::Error>) {
+    pub fn call(&self, rv: T) {
         if let Ok(mut cb) = self.callback.lock() {
             if let Some(cb) = cb.take() {
                 cb(rv);
