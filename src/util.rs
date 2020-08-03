@@ -7,8 +7,6 @@ extern crate libc;
 use std::io;
 use std::sync::{Arc, Mutex};
 
-use boxfnonce::SendBoxFnOnce;
-
 macro_rules! try_or {
     ($val:expr, $or:expr) => {
         match $val {
@@ -69,32 +67,28 @@ pub fn io_err(msg: &str) -> io::Error {
     io::Error::new(io::ErrorKind::Other, msg)
 }
 
-pub struct OnceCallback<T> {
-    callback: Arc<Mutex<Option<SendBoxFnOnce<(Result<T, ::Error>,)>>>>,
+pub struct StateCallback<T> {
+    callback: Arc<Mutex<Option<Box<dyn Fn(Result<T, ::Error>,) + Send>>>>,
 }
 
-impl<T> OnceCallback<T> {
-    pub fn new<F>(cb: F) -> Self
-    where
-        F: FnOnce(Result<T, ::Error>),
-        F: Send + 'static,
+impl<T> StateCallback<T> {
+    pub fn new(cb: Box<dyn Fn(Result<T, ::Error>) + Send + 'static>) -> Self
     {
-        let cb = Some(SendBoxFnOnce::from(cb));
         Self {
-            callback: Arc::new(Mutex::new(cb)),
+            callback: Arc::new(Mutex::new(Some(cb))),
         }
     }
 
     pub fn call(&self, rv: Result<T, ::Error>) {
         if let Ok(mut cb) = self.callback.lock() {
             if let Some(cb) = cb.take() {
-                cb.call(rv);
+                cb(rv);
             }
         }
     }
 }
 
-impl<T> Clone for OnceCallback<T> {
+impl<T> Clone for StateCallback<T> {
     fn clone(&self) -> Self {
         Self {
             callback: self.callback.clone(),

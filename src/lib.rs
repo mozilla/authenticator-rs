@@ -52,7 +52,6 @@ pub mod platform;
 #[path = "stub/mod.rs"]
 pub mod platform;
 
-extern crate boxfnonce;
 extern crate libc;
 #[macro_use]
 extern crate log;
