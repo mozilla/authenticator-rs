@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use runloop::RunLoop;
-use util::OnceCallback;
+use util::StateCallback;
 
 use platform::fd::Fd;
 use platform::monitor::Monitor;
@@ -16,7 +16,7 @@ pub struct Transaction {
 impl Transaction {
     pub fn new<F, T>(
         timeout: u64,
-        callback: OnceCallback<T>,
+        callback: StateCallback<Result<T, ::Error>>,
         new_device_cb: F,
     ) -> Result<Self, ::Error>
     where
