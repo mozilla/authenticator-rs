@@ -72,7 +72,7 @@ pub struct StateCallback<T> {
 }
 
 impl<T> StateCallback<T> {
-    pub fn new(cb: Box<dyn Fn(T) + Send + 'static>) -> Self {
+    pub fn new(cb: Box<dyn Fn(T) + Send>) -> Self {
         Self {
             callback: Arc::new(Mutex::new(Some(cb))),
         }
