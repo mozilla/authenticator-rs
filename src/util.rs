@@ -69,20 +69,32 @@ pub fn io_err(msg: &str) -> io::Error {
 
 pub struct StateCallback<T> {
     callback: Arc<Mutex<Option<Box<dyn Fn(T) + Send>>>>,
+    observer: Arc<Mutex<Option<Box<dyn Fn() + Send>>>>,
 }
 
 impl<T> StateCallback<T> {
     pub fn new(cb: Box<dyn Fn(T) + Send>) -> Self {
         Self {
             callback: Arc::new(Mutex::new(Some(cb))),
+            observer: Arc::new(Mutex::new(None)),
         }
     }
 
+    pub fn add_uncloneable_observer(&mut self, obs: Box<dyn Fn() + Send>) {
+        let mut opt = self.observer.lock().unwrap();
+        if opt.is_some() {
+            error!("Replacing an already-set observer.")
+        }
+        opt.replace(obs);
+    }
+
     pub fn call(&self, rv: T) {
-        if let Ok(mut cb) = self.callback.lock() {
-            if let Some(cb) = cb.take() {
-                cb(rv);
-            }
+        if let Some(cb) = self.callback.lock().unwrap().take() {
+            cb(rv);
+        }
+
+        if let Some(obs) = self.observer.lock().unwrap().take() {
+            obs();
         }
     }
 }
@@ -91,6 +103,7 @@ impl<T> Clone for StateCallback<T> {
     fn clone(&self) -> Self {
         Self {
             callback: self.callback.clone(),
+            observer: Arc::new(Mutex::new(None)),
         }
     }
 }

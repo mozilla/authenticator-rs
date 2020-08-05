@@ -61,6 +61,7 @@ extern crate runloop;
 #[macro_use]
 extern crate bitflags;
 
+pub mod authenticatorservice;
 mod consts;
 mod statemachine;
 mod u2fprotocol;
@@ -71,6 +72,8 @@ pub use crate::manager::U2FManager;
 
 mod capi;
 pub use crate::capi::*;
+
+mod virtualdevices;
 
 // Keep this in sync with the constants in u2fhid-capi.h.
 bitflags! {

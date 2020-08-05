@@ -15,6 +15,7 @@ maintenance = { status = "actively-developed" }
 
 [features]
 binding-recompile = ["bindgen"]
+webdriver = ["warp", "tokio", "serde"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libudev = "^0.2"
@@ -44,8 +45,12 @@ log = "0.4"
 libc = "0.2"
 runloop = "0.1.0"
 bitflags = "1.0"
+tokio = { version = "0.2", optional = true, features = ["macros"] }
+warp = { version = "0.2.2", optional = true }
+serde = { version = "1.0", optional = true, features = ["derive"] }
 
 [dev-dependencies]
 sha2 = "^0.8.2"
 base64 = "^0.10"
 env_logger = "^0.6"
+getopts = "^0.2"
