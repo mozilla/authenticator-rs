@@ -2,13 +2,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+use crate::authenticatorservice::AuthenticatorService;
+use crate::statecallback::StateCallback;
+use crate::{RegisterResult, SignResult};
 use libc::size_t;
 use rand::{thread_rng, Rng};
 use std::collections::HashMap;
 use std::sync::mpsc::channel;
 use std::{ptr, slice};
-
-use crate::U2FManager;
 
 type U2FAppIds = Vec<crate::AppId>;
 type U2FKeyHandles = Vec<crate::KeyHandle>;
@@ -42,8 +43,9 @@ unsafe fn from_raw(ptr: *const u8, len: usize) -> Vec<u8> {
 ///
 /// The handle returned by this method must be freed by the caller.
 #[no_mangle]
-pub extern "C" fn rust_u2f_mgr_new() -> *mut U2FManager {
-    if let Ok(mgr) = U2FManager::new() {
+pub extern "C" fn rust_u2f_mgr_new() -> *mut AuthenticatorService {
+    if let Ok(mut mgr) = AuthenticatorService::new() {
+        mgr.add_detected_transports();
         Box::into_raw(Box::new(mgr))
     } else {
         ptr::null_mut()
@@ -55,7 +57,7 @@ pub extern "C" fn rust_u2f_mgr_new() -> *mut U2FManager {
 /// This method must not be called on a handle twice, and the handle is unusable
 /// after.
 #[no_mangle]
-pub unsafe extern "C" fn rust_u2f_mgr_free(mgr: *mut U2FManager) {
+pub unsafe extern "C" fn rust_u2f_mgr_free(mgr: *mut AuthenticatorService) {
     if !mgr.is_null() {
         Box::from_raw(mgr);
     }
@@ -192,8 +194,8 @@ pub unsafe extern "C" fn rust_u2f_resbuf_copy(
 
 /// # Safety
 ///
-/// This method should not be called U2FManager handles after they've been freed
-/// or a double-free will occur
+/// This method should not be called on U2FResult handles after they've been
+/// freed or a double-free will occur
 #[no_mangle]
 pub unsafe extern "C" fn rust_u2f_res_free(res: *mut U2FResult) {
     if !res.is_null() {
@@ -203,10 +205,11 @@ pub unsafe extern "C" fn rust_u2f_res_free(res: *mut U2FResult) {
 
 /// # Safety
 ///
-/// This method should not be called U2FManager handles after they've been freed
+/// This method should not be called on AuthenticatorService handles after
+/// they've been freed
 #[no_mangle]
 pub unsafe extern "C" fn rust_u2f_mgr_register(
-    mgr: *mut U2FManager,
+    mgr: *mut AuthenticatorService,
     flags: u64,
     timeout: u64,
     callback: U2FCallback,
@@ -231,16 +234,10 @@ pub unsafe extern "C" fn rust_u2f_mgr_register(
     let key_handles = (*khs).clone();
 
     let (tx, _rx) = channel::<crate::StatusUpdate>();
-
     let tid = new_tid();
-    let res = (*mgr).register(
-        flags,
-        timeout,
-        challenge,
-        application,
-        key_handles,
-        tx,
-        move |rv| {
+
+    let state_callback =
+        StateCallback::<Result<RegisterResult, crate::Error>>::new(Box::new(move |rv| {
             let result = match rv {
                 Ok((registration, dev_info)) => {
                     let mut bufs = HashMap::new();
@@ -256,7 +253,16 @@ pub unsafe extern "C" fn rust_u2f_mgr_register(
             };
 
             callback(tid, Box::into_raw(Box::new(result)));
-        },
+        }));
+
+    let res = (*mgr).register(
+        flags,
+        timeout,
+        challenge,
+        application,
+        key_handles,
+        tx,
+        state_callback,
     );
 
     if res.is_ok() {
@@ -268,10 +274,11 @@ pub unsafe extern "C" fn rust_u2f_mgr_register(
 
 /// # Safety
 ///
-/// This method should not be called U2FManager handles after they've been freed
+/// This method should not be called on AuthenticatorService handles after
+/// they've been freed
 #[no_mangle]
 pub unsafe extern "C" fn rust_u2f_mgr_sign(
-    mgr: *mut U2FManager,
+    mgr: *mut AuthenticatorService,
     flags: u64,
     timeout: u64,
     callback: U2FCallback,
@@ -302,14 +309,8 @@ pub unsafe extern "C" fn rust_u2f_mgr_sign(
     let (tx, _rx) = channel::<crate::StatusUpdate>();
 
     let tid = new_tid();
-    let res = (*mgr).sign(
-        flags,
-        timeout,
-        challenge,
-        app_ids,
-        key_handles,
-        tx,
-        move |rv| {
+    let state_callback =
+        StateCallback::<Result<SignResult, crate::Error>>::new(Box::new(move |rv| {
             let result = match rv {
                 Ok((app_id, key_handle, signature, dev_info)) => {
                     let mut bufs = HashMap::new();
@@ -327,7 +328,16 @@ pub unsafe extern "C" fn rust_u2f_mgr_sign(
             };
 
             callback(tid, Box::into_raw(Box::new(result)));
-        },
+        }));
+
+    let res = (*mgr).sign(
+        flags,
+        timeout,
+        challenge,
+        app_ids,
+        key_handles,
+        tx,
+        state_callback,
     );
 
     if res.is_ok() {
@@ -339,9 +349,10 @@ pub unsafe extern "C" fn rust_u2f_mgr_sign(
 
 /// # Safety
 ///
-/// This method should not be called U2FManager handles after they've been freed
+/// This method should not be called AuthenticatorService handles after they've
+/// been freed
 #[no_mangle]
-pub unsafe extern "C" fn rust_u2f_mgr_cancel(mgr: *mut U2FManager) {
+pub unsafe extern "C" fn rust_u2f_mgr_cancel(mgr: *mut AuthenticatorService) {
     if !mgr.is_null() {
         // Ignore return value.
         let _ = (*mgr).cancel();

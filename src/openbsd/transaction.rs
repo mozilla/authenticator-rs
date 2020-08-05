@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use crate::platform::monitor::{FidoDev, Monitor};
-use crate::util::StateCallback;
+use crate::statecallback::StateCallback;
 use runloop::RunLoop;
 
 pub struct Transaction {
