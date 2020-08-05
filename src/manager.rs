@@ -6,9 +6,10 @@ use std::io;
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::time::Duration;
 
+use crate::authenticatorservice::AuthenticatorTransport;
 use crate::consts::PARAMETER_SIZE;
+use crate::statecallback::StateCallback;
 use crate::statemachine::StateMachine;
-use crate::util::StateCallback;
 use runloop::RunLoop;
 
 enum QueueAction {
@@ -106,21 +107,19 @@ impl U2FManager {
 
         Ok(Self { queue, tx })
     }
+}
 
-    pub fn register<F>(
-        &self,
+impl AuthenticatorTransport for U2FManager {
+    fn register(
+        &mut self,
         flags: crate::RegisterFlags,
         timeout: u64,
         challenge: Vec<u8>,
         application: crate::AppId,
         key_handles: Vec<crate::KeyHandle>,
         status: Sender<crate::StatusUpdate>,
-        callback: F,
-    ) -> Result<(), crate::Error>
-    where
-        F: Fn(Result<crate::RegisterResult, crate::Error>),
-        F: Send + 'static,
-    {
+        callback: StateCallback<Result<crate::RegisterResult, crate::Error>>,
+    ) -> Result<(), crate::Error> {
         if challenge.len() != PARAMETER_SIZE || application.len() != PARAMETER_SIZE {
             return Err(crate::Error::Unknown);
         }
@@ -131,7 +130,6 @@ impl U2FManager {
             }
         }
 
-        let callback = StateCallback::new(Box::new(callback));
         let action = QueueAction::Register {
             flags,
             timeout,
@@ -144,20 +142,16 @@ impl U2FManager {
         self.tx.send(action).map_err(|_| crate::Error::Unknown)
     }
 
-    pub fn sign<F>(
-        &self,
+    fn sign(
+        &mut self,
         flags: crate::SignFlags,
         timeout: u64,
         challenge: Vec<u8>,
         app_ids: Vec<crate::AppId>,
         key_handles: Vec<crate::KeyHandle>,
         status: Sender<crate::StatusUpdate>,
-        callback: F,
-    ) -> Result<(), crate::Error>
-    where
-        F: Fn(Result<crate::SignResult, crate::Error>),
-        F: Send + 'static,
-    {
+        callback: StateCallback<Result<crate::SignResult, crate::Error>>,
+    ) -> Result<(), crate::Error> {
         if challenge.len() != PARAMETER_SIZE {
             return Err(crate::Error::Unknown);
         }
@@ -178,7 +172,6 @@ impl U2FManager {
             }
         }
 
-        let callback = StateCallback::new(Box::new(callback));
         let action = QueueAction::Sign {
             flags,
             timeout,
@@ -191,7 +184,7 @@ impl U2FManager {
         self.tx.send(action).map_err(|_| crate::Error::Unknown)
     }
 
-    pub fn cancel(&self) -> Result<(), crate::Error> {
+    fn cancel(&mut self) -> Result<(), crate::Error> {
         self.tx
             .send(QueueAction::Cancel)
             .map_err(|_| crate::Error::Unknown)

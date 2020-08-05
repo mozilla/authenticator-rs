@@ -5,7 +5,6 @@
 extern crate libc;
 
 use std::io;
-use std::sync::{Arc, Mutex};
 
 macro_rules! try_or {
     ($val:expr, $or:expr) => {
@@ -65,32 +64,4 @@ pub fn from_unix_result<T: Signed>(rv: T) -> io::Result<T> {
 
 pub fn io_err(msg: &str) -> io::Error {
     io::Error::new(io::ErrorKind::Other, msg)
-}
-
-pub struct StateCallback<T> {
-    callback: Arc<Mutex<Option<Box<dyn Fn(T) + Send>>>>,
-}
-
-impl<T> StateCallback<T> {
-    pub fn new(cb: Box<dyn Fn(T) + Send>) -> Self {
-        Self {
-            callback: Arc::new(Mutex::new(Some(cb))),
-        }
-    }
-
-    pub fn call(&self, rv: T) {
-        if let Ok(mut cb) = self.callback.lock() {
-            if let Some(cb) = cb.take() {
-                cb(rv);
-            }
-        }
-    }
-}
-
-impl<T> Clone for StateCallback<T> {
-    fn clone(&self) -> Self {
-        Self {
-            callback: self.callback.clone(),
-        }
-    }
 }
