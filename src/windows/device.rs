@@ -8,9 +8,9 @@ use std::io::{Read, Write};
 use std::os::windows::io::AsRawHandle;
 
 use super::winapi::DeviceCapabilities;
-use consts::{CID_BROADCAST, FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID, MAX_HID_RPT_SIZE};
+use crate::consts::{CID_BROADCAST, FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID, MAX_HID_RPT_SIZE};
 
-use u2ftypes::U2FDevice;
+use crate::u2ftypes::U2FDevice;
 
 #[derive(Debug)]
 pub struct Device {

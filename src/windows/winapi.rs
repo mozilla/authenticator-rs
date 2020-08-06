@@ -10,14 +10,14 @@ use std::slice;
 use std::ffi::OsString;
 use std::os::windows::ffi::OsStringExt;
 
-use util::io_err;
+use crate::util::io_err;
 
 extern crate libc;
 extern crate winapi;
 
-use platform::winapi::winapi::shared::{guiddef, minwindef, ntdef, windef};
-use platform::winapi::winapi::shared::{hidclass, hidpi, hidusage};
-use platform::winapi::winapi::um::{handleapi, setupapi};
+use crate::platform::winapi::winapi::shared::{guiddef, minwindef, ntdef, windef};
+use crate::platform::winapi::winapi::shared::{hidclass, hidpi, hidusage};
+use crate::platform::winapi::winapi::um::{handleapi, setupapi};
 
 #[link(name = "setupapi")]
 extern "system" {

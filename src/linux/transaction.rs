@@ -2,10 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use platform::monitor::Monitor;
+use crate::platform::monitor::Monitor;
+use crate::util::StateCallback;
 use runloop::RunLoop;
 use std::ffi::OsString;
-use util::StateCallback;
 
 pub struct Transaction {
     // Handle to the thread loop.
@@ -15,9 +15,9 @@ pub struct Transaction {
 impl Transaction {
     pub fn new<F, T>(
         timeout: u64,
-        callback: StateCallback<Result<T, ::Error>>,
+        callback: StateCallback<Result<T, crate::Error>>,
         new_device_cb: F,
-    ) -> Result<Self, ::Error>
+    ) -> Result<Self, crate::Error>
     where
         F: Fn(OsString, &dyn Fn() -> bool) + Sync + Send + 'static,
         T: 'static,
@@ -28,14 +28,15 @@ impl Transaction {
                 let mut monitor = Monitor::new(new_device_cb);
 
                 // Start polling for new devices.
-                try_or!(monitor.run(alive), |_| callback.call(Err(::Error::Unknown)));
+                try_or!(monitor.run(alive), |_| callback
+                    .call(Err(crate::Error::Unknown)));
 
                 // Send an error, if the callback wasn't called already.
-                callback.call(Err(::Error::NotAllowed));
+                callback.call(Err(crate::Error::NotAllowed));
             },
             timeout,
         )
-        .map_err(|_| ::Error::Unknown)?;
+        .map_err(|_| crate::Error::Unknown)?;
 
         Ok(Self {
             thread: Some(thread),

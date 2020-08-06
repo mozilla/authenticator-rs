@@ -9,12 +9,12 @@ use std::io::Read;
 use std::io::Write;
 use std::mem;
 
-use consts::CID_BROADCAST;
-use consts::MAX_HID_RPT_SIZE;
-use platform::fd::Fd;
-use platform::uhid;
-use u2ftypes::U2FDevice;
-use util::io_err;
+use crate::consts::CID_BROADCAST;
+use crate::consts::MAX_HID_RPT_SIZE;
+use crate::platform::fd::Fd;
+use crate::platform::uhid;
+use crate::u2ftypes::U2FDevice;
+use crate::util::io_err;
 
 #[derive(Debug)]
 pub struct Device {

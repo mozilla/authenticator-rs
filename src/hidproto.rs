@@ -12,7 +12,7 @@
 use std::io;
 use std::mem;
 
-use consts::{FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID, INIT_HEADER_SIZE, MAX_HID_RPT_SIZE};
+use crate::consts::{FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID, INIT_HEADER_SIZE, MAX_HID_RPT_SIZE};
 
 // The 4 MSBs (the tag) are set when it's a long item.
 const HID_MASK_LONG_ITEM_TAG: u8 = 0b1111_0000;

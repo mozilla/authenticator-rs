@@ -8,10 +8,10 @@ use std::ffi::OsString;
 use std::io::{Read, Result, Write};
 use std::mem;
 
-use consts::{CID_BROADCAST, MAX_HID_RPT_SIZE};
-use platform::monitor::FidoDev;
-use u2ftypes::U2FDevice;
-use util::{from_unix_result, io_err};
+use crate::consts::{CID_BROADCAST, MAX_HID_RPT_SIZE};
+use crate::platform::monitor::FidoDev;
+use crate::u2ftypes::U2FDevice;
+use crate::util::{from_unix_result, io_err};
 
 #[derive(Debug)]
 pub struct Device {
