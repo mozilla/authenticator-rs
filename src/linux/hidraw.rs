@@ -9,9 +9,9 @@ use std::io;
 use std::os::unix::io::RawFd;
 
 use super::hidwrapper::{_HIDIOCGRDESC, _HIDIOCGRDESCSIZE};
-use consts::MAX_HID_RPT_SIZE;
-use hidproto::*;
-use util::{from_unix_result, io_err};
+use crate::consts::MAX_HID_RPT_SIZE;
+use crate::hidproto::*;
+use crate::util::{from_unix_result, io_err};
 
 #[allow(non_camel_case_types)]
 #[repr(C)]

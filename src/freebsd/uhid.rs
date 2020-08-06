@@ -8,8 +8,8 @@ use std::io;
 use std::os::unix::io::RawFd;
 use std::ptr;
 
-use hidproto::*;
-use util::from_unix_result;
+use crate::hidproto::*;
+use crate::util::from_unix_result;
 
 #[allow(non_camel_case_types)]
 #[repr(C)]
