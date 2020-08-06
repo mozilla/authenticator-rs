@@ -13,7 +13,7 @@ impl Transaction {
         new_device_cb: F,
     ) -> Result<Self, crate::Error>
     where
-        F: Fn(String, &Fn() -> bool),
+        F: Fn(String, &dyn Fn() -> bool),
     {
         callback.call(Err(crate::Error::NotSupported));
         Err(crate::Error::NotSupported)
