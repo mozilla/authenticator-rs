@@ -67,10 +67,10 @@ mod u2fprotocol;
 mod u2ftypes;
 
 mod manager;
-pub use manager::U2FManager;
+pub use crate::manager::U2FManager;
 
 mod capi;
-pub use capi::*;
+pub use crate::capi::*;
 
 // Keep this in sync with the constants in u2fhid-capi.h.
 bitflags! {
