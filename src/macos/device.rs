@@ -4,15 +4,15 @@
 
 extern crate log;
 
-use consts::{CID_BROADCAST, MAX_HID_RPT_SIZE};
+use crate::consts::{CID_BROADCAST, MAX_HID_RPT_SIZE};
+use crate::platform::iokit::*;
+use crate::u2ftypes::U2FDevice;
 use core_foundation::base::*;
-use platform::iokit::*;
 use std::convert::TryInto;
 use std::io;
 use std::io::{Read, Write};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::Duration;
-use u2ftypes::U2FDevice;
 
 const READ_TIMEOUT: u64 = 15;
 

@@ -7,15 +7,15 @@ use rand::{thread_rng, Rng};
 use std::collections::HashMap;
 use std::{ptr, slice};
 
-use U2FManager;
+use crate::U2FManager;
 
-type U2FAppIds = Vec<::AppId>;
-type U2FKeyHandles = Vec<::KeyHandle>;
+type U2FAppIds = Vec<crate::AppId>;
+type U2FKeyHandles = Vec<crate::KeyHandle>;
 type U2FCallback = extern "C" fn(u64, *mut U2FResult);
 
 pub enum U2FResult {
     Success(HashMap<u8, Vec<u8>>),
-    Error(::Error),
+    Error(crate::Error),
 }
 
 const RESBUF_ID_REGISTRATION: u8 = 0;
@@ -104,9 +104,9 @@ pub unsafe extern "C" fn rust_u2f_khs_add(
     key_handle_len: usize,
     transports: u8,
 ) {
-    (*khs).push(::KeyHandle {
+    (*khs).push(crate::KeyHandle {
         credential: from_raw(key_handle_ptr, key_handle_len),
-        transports: ::AuthenticatorTransports::from_bits_truncate(transports),
+        transports: crate::AuthenticatorTransports::from_bits_truncate(transports),
     });
 }
 
@@ -127,7 +127,7 @@ pub unsafe extern "C" fn rust_u2f_khs_free(khs: *mut U2FKeyHandles) {
 #[no_mangle]
 pub unsafe extern "C" fn rust_u2f_result_error(res: *const U2FResult) -> u8 {
     if res.is_null() {
-        return ::Error::Unknown as u8;
+        return crate::Error::Unknown as u8;
     }
 
     if let U2FResult::Error(ref err) = *res {
@@ -219,7 +219,7 @@ pub unsafe extern "C" fn rust_u2f_mgr_register(
         return 0;
     }
 
-    let flags = ::RegisterFlags::from_bits_truncate(flags);
+    let flags = crate::RegisterFlags::from_bits_truncate(flags);
     let challenge = from_raw(challenge_ptr, challenge_len);
     let application = from_raw(application_ptr, application_len);
     let key_handles = (*khs).clone();
@@ -280,7 +280,7 @@ pub unsafe extern "C" fn rust_u2f_mgr_sign(
         return 0;
     }
 
-    let flags = ::SignFlags::from_bits_truncate(flags);
+    let flags = crate::SignFlags::from_bits_truncate(flags);
     let challenge = from_raw(challenge_ptr, challenge_len);
     let app_ids = (*app_ids).clone();
     let key_handles = (*khs).clone();

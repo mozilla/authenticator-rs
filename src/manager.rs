@@ -6,27 +6,27 @@ use std::io;
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::time::Duration;
 
-use consts::PARAMETER_SIZE;
+use crate::consts::PARAMETER_SIZE;
+use crate::statemachine::StateMachine;
+use crate::util::StateCallback;
 use runloop::RunLoop;
-use statemachine::StateMachine;
-use util::StateCallback;
 
 enum QueueAction {
     Register {
-        flags: ::RegisterFlags,
+        flags: crate::RegisterFlags,
         timeout: u64,
         challenge: Vec<u8>,
-        application: ::AppId,
-        key_handles: Vec<::KeyHandle>,
-        callback: StateCallback<Result<::RegisterResult, ::Error>>,
+        application: crate::AppId,
+        key_handles: Vec<crate::KeyHandle>,
+        callback: StateCallback<Result<crate::RegisterResult, crate::Error>>,
     },
     Sign {
-        flags: ::SignFlags,
+        flags: crate::SignFlags,
         timeout: u64,
         challenge: Vec<u8>,
-        app_ids: Vec<::AppId>,
-        key_handles: Vec<::KeyHandle>,
-        callback: StateCallback<Result<::SignResult, ::Error>>,
+        app_ids: Vec<crate::AppId>,
+        key_handles: Vec<crate::KeyHandle>,
+        callback: StateCallback<Result<crate::SignResult, crate::Error>>,
     },
     Cancel,
 }
@@ -96,24 +96,24 @@ impl U2FManager {
 
     pub fn register<F>(
         &self,
-        flags: ::RegisterFlags,
+        flags: crate::RegisterFlags,
         timeout: u64,
         challenge: Vec<u8>,
-        application: ::AppId,
-        key_handles: Vec<::KeyHandle>,
+        application: crate::AppId,
+        key_handles: Vec<crate::KeyHandle>,
         callback: F,
-    ) -> Result<(), ::Error>
+    ) -> Result<(), crate::Error>
     where
-        F: Fn(Result<::RegisterResult, ::Error>),
+        F: Fn(Result<crate::RegisterResult, crate::Error>),
         F: Send + 'static,
     {
         if challenge.len() != PARAMETER_SIZE || application.len() != PARAMETER_SIZE {
-            return Err(::Error::Unknown);
+            return Err(crate::Error::Unknown);
         }
 
         for key_handle in &key_handles {
             if key_handle.credential.len() > 256 {
-                return Err(::Error::Unknown);
+                return Err(crate::Error::Unknown);
             }
         }
 
@@ -126,39 +126,39 @@ impl U2FManager {
             key_handles,
             callback,
         };
-        self.tx.send(action).map_err(|_| ::Error::Unknown)
+        self.tx.send(action).map_err(|_| crate::Error::Unknown)
     }
 
     pub fn sign<F>(
         &self,
-        flags: ::SignFlags,
+        flags: crate::SignFlags,
         timeout: u64,
         challenge: Vec<u8>,
-        app_ids: Vec<::AppId>,
-        key_handles: Vec<::KeyHandle>,
+        app_ids: Vec<crate::AppId>,
+        key_handles: Vec<crate::KeyHandle>,
         callback: F,
-    ) -> Result<(), ::Error>
+    ) -> Result<(), crate::Error>
     where
-        F: Fn(Result<::SignResult, ::Error>),
+        F: Fn(Result<crate::SignResult, crate::Error>),
         F: Send + 'static,
     {
         if challenge.len() != PARAMETER_SIZE {
-            return Err(::Error::Unknown);
+            return Err(crate::Error::Unknown);
         }
 
         if app_ids.is_empty() {
-            return Err(::Error::Unknown);
+            return Err(crate::Error::Unknown);
         }
 
         for app_id in &app_ids {
             if app_id.len() != PARAMETER_SIZE {
-                return Err(::Error::Unknown);
+                return Err(crate::Error::Unknown);
             }
         }
 
         for key_handle in &key_handles {
             if key_handle.credential.len() > 256 {
-                return Err(::Error::Unknown);
+                return Err(crate::Error::Unknown);
             }
         }
 
@@ -171,13 +171,13 @@ impl U2FManager {
             key_handles,
             callback,
         };
-        self.tx.send(action).map_err(|_| ::Error::Unknown)
+        self.tx.send(action).map_err(|_| crate::Error::Unknown)
     }
 
-    pub fn cancel(&self) -> Result<(), ::Error> {
+    pub fn cancel(&self) -> Result<(), crate::Error> {
         self.tx
             .send(QueueAction::Cancel)
-            .map_err(|_| ::Error::Unknown)
+            .map_err(|_| crate::Error::Unknown)
     }
 }
 

@@ -11,9 +11,9 @@ use std::ffi::CString;
 use std::io;
 use std::io::{Read, Write};
 
-use consts::*;
-use u2ftypes::*;
-use util::io_err;
+use crate::consts::*;
+use crate::u2ftypes::*;
+use crate::util::io_err;
 
 ////////////////////////////////////////////////////////////////////////
 // Device Commands
@@ -217,14 +217,14 @@ mod tests {
     use rand::{thread_rng, RngCore};
 
     use super::{init_device, send_apdu, sendrecv, U2FDevice};
-    use consts::{CID_BROADCAST, SW_NO_ERROR, U2FHID_INIT, U2FHID_MSG, U2FHID_PING};
+    use crate::consts::{CID_BROADCAST, SW_NO_ERROR, U2FHID_INIT, U2FHID_MSG, U2FHID_PING};
 
     mod platform {
         use std::io;
         use std::io::{Read, Write};
 
-        use consts::CID_BROADCAST;
-        use u2ftypes::U2FDevice;
+        use crate::consts::CID_BROADCAST;
+        use crate::u2ftypes::U2FDevice;
 
         const IN_HID_RPT_SIZE: usize = 64;
         const OUT_HID_RPT_SIZE: usize = 64;

@@ -6,7 +6,7 @@
 
 extern crate libc;
 
-use consts::{FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID};
+use crate::consts::{FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID};
 use core_foundation::array::*;
 use core_foundation::base::*;
 use core_foundation::dictionary::*;

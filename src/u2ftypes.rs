@@ -4,8 +4,8 @@
 
 use std::{cmp, io};
 
-use consts::*;
-use util::io_err;
+use crate::consts::*;
+use crate::util::io_err;
 
 use log;
 
