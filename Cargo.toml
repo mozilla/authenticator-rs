@@ -2,10 +2,16 @@
 name = "authenticator"
 version = "0.2.15"
 authors = ["J.C. Jones <jc@mozilla.com>", "Tim Taubert <ttaubert@mozilla.com>", "Kyle Machulis <kyle@nonpolynomial.com>"]
+keywords = ["ctap2", "u2f", "fido", "webauthn"]
+categories = ["cryptography", "hardware-support", "os"]
 repository = "https://github.com/mozilla/authenticator-rs/"
 license = "MPL-2.0"
 description = "Library for interacting with CTAP1/2 security keys for Web Authentication. Used by Firefox."
 edition = "2018"
+
+[badges]
+travis-ci = { repository = "mozilla/authenticator-rs", branch = "master" }
+maintenance = { status = "actively-developed" }
 
 [features]
 binding-recompile = ["bindgen"]
