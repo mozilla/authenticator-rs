@@ -54,6 +54,16 @@ impl Device {
             ));
         }
 
+        if CFGetTypeID(prop_ref) != CFStringGetTypeID() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "IOHIDDeviceGetProperty returned non-string type for property {}",
+                    prop_name
+                ),
+            ));
+        }
+
         Ok(CFString::from_void(prop_ref).to_string())
     }
 }
