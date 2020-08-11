@@ -3,8 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use authenticator::{
-    authenticatorservice::AuthenticatorService, AuthenticatorTransports, KeyHandle, RegisterFlags,
-    SignFlags, StatusUpdate,
+    authenticatorservice::AuthenticatorService, statecallback::StateCallback,
+    AuthenticatorTransports, KeyHandle, RegisterFlags, SignFlags, StatusUpdate,
 };
 use getopts::Options;
 use sha2::{Digest, Sha256};
@@ -57,15 +57,18 @@ fn main() {
 
     let mut manager =
         AuthenticatorService::new().expect("The auth service should initialize safely");
+
     if !matches.opt_present("no-u2f-usb-hid") {
         manager.add_u2f_usb_hid_platform_transports();
     }
+
+    #[cfg(target_os = "macos")]
     if matches.opt_present("touchid") {
-        #[cfg(target_os = "macos")]
         manager.add_macos_touchid_virtual_device();
     }
+
+    #[cfg(feature = "webdriver")]
     if matches.opt_present("webdriver") {
-        #[cfg(feature = "webdriver")]
         manager.add_webdriver_virtual_bus();
     }
 
@@ -105,6 +108,10 @@ fn main() {
     });
 
     let (register_tx, register_rx) = channel();
+    let callback = StateCallback::new(Box::new(move |rv| {
+        register_tx.send(rv).unwrap();
+    }));
+
     manager
         .register(
             flags,
@@ -113,9 +120,7 @@ fn main() {
             app_bytes.clone(),
             vec![],
             status_tx.clone(),
-            move |rv| {
-                register_tx.send(rv).unwrap();
-            },
+            callback,
         )
         .expect("Couldn't register");
 
@@ -136,6 +141,10 @@ fn main() {
     let flags = SignFlags::empty();
     let (sign_tx, sign_rx) = channel();
 
+    let callback = StateCallback::new(Box::new(move |rv| {
+        sign_tx.send(rv).unwrap();
+    }));
+
     if let Err(e) = manager.sign(
         flags,
         15_000,
@@ -143,9 +152,7 @@ fn main() {
         vec![app_bytes],
         vec![key_handle],
         status_tx,
-        move |rv| {
-            sign_tx.send(rv).unwrap();
-        },
+        callback,
     ) {
         panic!("Couldn't register: {:?}", e);
     }

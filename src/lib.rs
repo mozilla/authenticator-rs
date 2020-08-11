@@ -73,6 +73,7 @@ pub use crate::manager::U2FManager;
 mod capi;
 pub use crate::capi::*;
 
+pub mod statecallback;
 mod virtualdevices;
 
 // Keep this in sync with the constants in u2fhid-capi.h.
@@ -106,7 +107,7 @@ pub type AppId = Vec<u8>;
 pub type RegisterResult = (Vec<u8>, u2ftypes::U2FDeviceInfo);
 pub type SignResult = (AppId, Vec<u8>, Vec<u8>, u2ftypes::U2FDeviceInfo);
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Error {
     Unknown = 1,
     NotSupported = 2,

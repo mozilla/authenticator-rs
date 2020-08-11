@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use crate::authenticatorservice::AuthenticatorTransport;
 use crate::consts::PARAMETER_SIZE;
+use crate::statecallback::StateCallback;
 use crate::statemachine::StateMachine;
-use crate::util::StateCallback;
 use runloop::RunLoop;
 
 enum QueueAction {

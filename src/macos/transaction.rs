@@ -6,7 +6,7 @@ extern crate libc;
 
 use crate::platform::iokit::{CFRunLoopEntryObserver, IOHIDDeviceRef, SendableRunLoop};
 use crate::platform::monitor::Monitor;
-use crate::util::StateCallback;
+use crate::statecallback::StateCallback;
 use core_foundation::runloop::*;
 use std::os::raw::c_void;
 use std::sync::mpsc::{channel, Receiver, Sender};

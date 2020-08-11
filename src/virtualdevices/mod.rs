@@ -7,3 +7,5 @@ pub mod macos_touchid;
 
 #[cfg(feature = "webdriver")]
 pub mod webdriver;
+
+pub mod software_u2f;

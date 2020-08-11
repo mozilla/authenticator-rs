@@ -2,11 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use std::io;
 use std::sync::{mpsc::Sender, Arc, Mutex};
 
 use crate::consts::PARAMETER_SIZE;
-use crate::util::StateCallback;
+use crate::statecallback::StateCallback;
 
 pub trait AuthenticatorTransport {
     /// The implementation of this method must return quickly and should
@@ -43,10 +42,9 @@ pub struct AuthenticatorService {
 }
 
 fn clone_and_configure_cancellation_callback<T>(
-    callback: &StateCallback<T>,
+    mut callback: StateCallback<T>,
     transports_to_cancel: Vec<Arc<Mutex<Box<dyn AuthenticatorTransport + Send>>>>,
 ) -> StateCallback<T> {
-    let mut callback = callback.clone();
     callback.add_uncloneable_observer(Box::new(move || {
         debug!(
             "Callback observer is running, cancelling \
@@ -63,7 +61,7 @@ fn clone_and_configure_cancellation_callback<T>(
 }
 
 impl AuthenticatorService {
-    pub fn new() -> io::Result<Self> {
+    pub fn new() -> Result<Self, crate::Error> {
         Ok(Self {
             transports: Vec::new(),
         })
@@ -107,7 +105,7 @@ impl AuthenticatorService {
         }
     }
 
-    pub fn register<F>(
+    pub fn register(
         &mut self,
         flags: crate::RegisterFlags,
         timeout: u64,
@@ -115,12 +113,8 @@ impl AuthenticatorService {
         application: crate::AppId,
         key_handles: Vec<crate::KeyHandle>,
         status: Sender<crate::StatusUpdate>,
-        callback: F,
-    ) -> Result<(), crate::Error>
-    where
-        F: Fn(Result<crate::RegisterResult, crate::Error>),
-        F: Send + 'static,
-    {
+        callback: StateCallback<Result<crate::RegisterResult, crate::Error>>,
+    ) -> Result<(), crate::Error> {
         if challenge.len() != PARAMETER_SIZE || application.len() != PARAMETER_SIZE {
             return Err(crate::Error::Unknown);
         }
@@ -136,11 +130,20 @@ impl AuthenticatorService {
             return Err(crate::Error::NotSupported);
         }
 
-        let callback = StateCallback::new(Box::new(callback));
+        debug!(
+            "register called with {} transports, iterable is {}",
+            self.transports.len(),
+            iterable_transports.len()
+        );
 
         for (idx, transport_mutex) in iterable_transports.iter().enumerate() {
             let mut transports_to_cancel = iterable_transports.clone();
             transports_to_cancel.remove(idx);
+
+            debug!(
+                "register transports_to_cancel {}",
+                transports_to_cancel.len()
+            );
 
             transport_mutex.lock().unwrap().register(
                 flags.clone(),
@@ -149,14 +152,14 @@ impl AuthenticatorService {
                 application.clone(),
                 key_handles.clone(),
                 status.clone(),
-                clone_and_configure_cancellation_callback(&callback, transports_to_cancel),
+                clone_and_configure_cancellation_callback(callback.clone(), transports_to_cancel),
             )?;
         }
 
         Ok(())
     }
 
-    pub fn sign<F>(
+    pub fn sign(
         &mut self,
         flags: crate::SignFlags,
         timeout: u64,
@@ -164,12 +167,8 @@ impl AuthenticatorService {
         app_ids: Vec<crate::AppId>,
         key_handles: Vec<crate::KeyHandle>,
         status: Sender<crate::StatusUpdate>,
-        callback: F,
-    ) -> Result<(), crate::Error>
-    where
-        F: Fn(Result<crate::SignResult, crate::Error>),
-        F: Send + 'static,
-    {
+        callback: StateCallback<Result<crate::SignResult, crate::Error>>,
+    ) -> Result<(), crate::Error> {
         if challenge.len() != PARAMETER_SIZE {
             return Err(crate::Error::Unknown);
         }
@@ -195,8 +194,6 @@ impl AuthenticatorService {
             return Err(crate::Error::NotSupported);
         }
 
-        let callback = StateCallback::new(Box::new(callback));
-
         for (idx, transport_mutex) in iterable_transports.iter().enumerate() {
             let mut transports_to_cancel = iterable_transports.clone();
             transports_to_cancel.remove(idx);
@@ -208,7 +205,7 @@ impl AuthenticatorService {
                 app_ids.clone(),
                 key_handles.clone(),
                 status.clone(),
-                clone_and_configure_cancellation_callback(&callback, transports_to_cancel),
+                clone_and_configure_cancellation_callback(callback.clone(), transports_to_cancel),
             )?;
         }
 
@@ -225,5 +222,419 @@ impl AuthenticatorService {
         }
 
         Ok(())
+    }
+}
+
+////////////////////////////////////////////////////////////////////////
+// Tests
+////////////////////////////////////////////////////////////////////////
+
+#[cfg(test)]
+mod tests {
+    use super::{AuthenticatorService, AuthenticatorTransport};
+    use crate::consts::PARAMETER_SIZE;
+    use crate::statecallback::StateCallback;
+    use crate::{AuthenticatorTransports, KeyHandle, RegisterFlags, SignFlags, StatusUpdate};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc::{channel, Sender};
+    use std::sync::Arc;
+    use std::{io, thread};
+
+    fn init() {
+        let _ = env_logger::builder().is_test(true).try_init();
+    }
+
+    pub struct TestTransportDriver {
+        consent: bool,
+        was_cancelled: Arc<AtomicBool>,
+    }
+
+    impl TestTransportDriver {
+        pub fn new(consent: bool) -> io::Result<Self> {
+            Ok(Self {
+                consent,
+                was_cancelled: Arc::new(AtomicBool::new(false)),
+            })
+        }
+    }
+
+    impl TestTransportDriver {
+        fn dev_info(&self) -> crate::u2ftypes::U2FDeviceInfo {
+            crate::u2ftypes::U2FDeviceInfo {
+                vendor_name: String::from("Mozilla").into_bytes(),
+                device_name: String::from("Test Transport Token").into_bytes(),
+                version_interface: 0,
+                version_major: 1,
+                version_minor: 2,
+                version_build: 3,
+                cap_flags: 0,
+            }
+        }
+    }
+
+    impl AuthenticatorTransport for TestTransportDriver {
+        fn register(
+            &mut self,
+            _flags: crate::RegisterFlags,
+            _timeout: u64,
+            _challenge: Vec<u8>,
+            _application: crate::AppId,
+            _key_handles: Vec<crate::KeyHandle>,
+            _status: Sender<crate::StatusUpdate>,
+            callback: StateCallback<Result<crate::RegisterResult, crate::Error>>,
+        ) -> Result<(), crate::Error> {
+            if self.consent {
+                let rv = Ok((vec![0u8; 16], self.dev_info()));
+                thread::spawn(move || callback.call(rv));
+            }
+            Ok(())
+        }
+
+        fn sign(
+            &mut self,
+            _flags: crate::SignFlags,
+            _timeout: u64,
+            _challenge: Vec<u8>,
+            _app_ids: Vec<crate::AppId>,
+            _key_handles: Vec<crate::KeyHandle>,
+            _status: Sender<crate::StatusUpdate>,
+            callback: StateCallback<Result<crate::SignResult, crate::Error>>,
+        ) -> Result<(), crate::Error> {
+            if self.consent {
+                let rv = Ok((vec![0u8; 0], vec![0u8; 0], vec![0u8; 0], self.dev_info()));
+                thread::spawn(move || callback.call(rv));
+            }
+            Ok(())
+        }
+
+        fn cancel(&mut self) -> Result<(), crate::Error> {
+            self.was_cancelled
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .map_or(Err(crate::Error::InvalidState), |_| Ok(()))
+        }
+    }
+
+    fn mk_key() -> KeyHandle {
+        KeyHandle {
+            credential: vec![0],
+            transports: AuthenticatorTransports::USB,
+        }
+    }
+
+    fn mk_challenge() -> Vec<u8> {
+        vec![0x11; PARAMETER_SIZE]
+    }
+
+    fn mk_appid() -> Vec<u8> {
+        vec![0x22; PARAMETER_SIZE]
+    }
+
+    #[test]
+    fn test_no_challenge() {
+        init();
+        let (status_tx, _) = channel::<StatusUpdate>();
+
+        let mut s = AuthenticatorService::new().unwrap();
+        s.add_transport(Box::new(TestTransportDriver::new(true).unwrap()));
+
+        assert_eq!(
+            s.register(
+                RegisterFlags::empty(),
+                1_000,
+                vec![],
+                mk_appid(),
+                vec![mk_key()],
+                status_tx.clone(),
+                StateCallback::new(Box::new(move |_rv| {})),
+            )
+            .unwrap_err(),
+            crate::Error::Unknown
+        );
+
+        assert_eq!(
+            s.sign(
+                SignFlags::empty(),
+                1_000,
+                vec![],
+                vec![mk_appid()],
+                vec![mk_key()],
+                status_tx,
+                StateCallback::new(Box::new(move |_rv| {})),
+            )
+            .unwrap_err(),
+            crate::Error::Unknown
+        );
+    }
+
+    #[test]
+    fn test_no_appids() {
+        init();
+        let (status_tx, _) = channel::<StatusUpdate>();
+
+        let mut s = AuthenticatorService::new().unwrap();
+        s.add_transport(Box::new(TestTransportDriver::new(true).unwrap()));
+
+        assert_eq!(
+            s.register(
+                RegisterFlags::empty(),
+                1_000,
+                mk_challenge(),
+                vec![],
+                vec![mk_key()],
+                status_tx.clone(),
+                StateCallback::new(Box::new(move |_rv| {})),
+            )
+            .unwrap_err(),
+            crate::Error::Unknown
+        );
+
+        assert_eq!(
+            s.sign(
+                SignFlags::empty(),
+                1_000,
+                mk_challenge(),
+                vec![],
+                vec![mk_key()],
+                status_tx,
+                StateCallback::new(Box::new(move |_rv| {})),
+            )
+            .unwrap_err(),
+            crate::Error::Unknown
+        );
+    }
+
+    #[test]
+    fn test_no_keys() {
+        init();
+        // No Keys is a resident-key use case. For U2F this would time out,
+        // but the actual reactions are up to the service implementation.
+        // This test yields OKs.
+        let (status_tx, _) = channel::<StatusUpdate>();
+
+        let mut s = AuthenticatorService::new().unwrap();
+        s.add_transport(Box::new(TestTransportDriver::new(true).unwrap()));
+
+        assert_eq!(
+            s.register(
+                RegisterFlags::empty(),
+                100,
+                mk_challenge(),
+                mk_appid(),
+                vec![],
+                status_tx.clone(),
+                StateCallback::new(Box::new(move |_rv| {})),
+            ),
+            Ok(())
+        );
+
+        assert_eq!(
+            s.sign(
+                SignFlags::empty(),
+                100,
+                mk_challenge(),
+                vec![mk_appid()],
+                vec![],
+                status_tx,
+                StateCallback::new(Box::new(move |_rv| {})),
+            ),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn test_large_keys() {
+        init();
+        let (status_tx, _) = channel::<StatusUpdate>();
+
+        let large_key = KeyHandle {
+            credential: vec![0; 257],
+            transports: AuthenticatorTransports::USB,
+        };
+
+        let mut s = AuthenticatorService::new().unwrap();
+        s.add_transport(Box::new(TestTransportDriver::new(true).unwrap()));
+
+        assert_eq!(
+            s.register(
+                RegisterFlags::empty(),
+                1_000,
+                mk_challenge(),
+                mk_appid(),
+                vec![large_key.clone()],
+                status_tx.clone(),
+                StateCallback::new(Box::new(move |_rv| {})),
+            )
+            .unwrap_err(),
+            crate::Error::Unknown
+        );
+
+        assert_eq!(
+            s.sign(
+                SignFlags::empty(),
+                1_000,
+                mk_challenge(),
+                vec![mk_appid()],
+                vec![large_key],
+                status_tx,
+                StateCallback::new(Box::new(move |_rv| {})),
+            )
+            .unwrap_err(),
+            crate::Error::Unknown
+        );
+    }
+
+    #[test]
+    fn test_no_transports() {
+        init();
+        let (status_tx, _) = channel::<StatusUpdate>();
+
+        let mut s = AuthenticatorService::new().unwrap();
+        assert_eq!(
+            s.register(
+                RegisterFlags::empty(),
+                1_000,
+                mk_challenge(),
+                mk_appid(),
+                vec![mk_key()],
+                status_tx.clone(),
+                StateCallback::new(Box::new(move |_rv| {})),
+            )
+            .unwrap_err(),
+            crate::Error::NotSupported
+        );
+
+        assert_eq!(
+            s.sign(
+                SignFlags::empty(),
+                1_000,
+                mk_challenge(),
+                vec![mk_appid()],
+                vec![mk_key()],
+                status_tx,
+                StateCallback::new(Box::new(move |_rv| {})),
+            )
+            .unwrap_err(),
+            crate::Error::NotSupported
+        );
+
+        assert_eq!(s.cancel().unwrap_err(), crate::Error::NotSupported);
+    }
+
+    #[test]
+    fn test_cancellation_register() {
+        init();
+        let (status_tx, _) = channel::<StatusUpdate>();
+
+        let mut s = AuthenticatorService::new().unwrap();
+        let ttd_one = TestTransportDriver::new(true).unwrap();
+        let ttd_two = TestTransportDriver::new(false).unwrap();
+        let ttd_three = TestTransportDriver::new(false).unwrap();
+
+        let was_cancelled_one = ttd_one.was_cancelled.clone();
+        let was_cancelled_two = ttd_two.was_cancelled.clone();
+        let was_cancelled_three = ttd_three.was_cancelled.clone();
+
+        s.add_transport(Box::new(ttd_one));
+        s.add_transport(Box::new(ttd_two));
+        s.add_transport(Box::new(ttd_three));
+
+        let callback = StateCallback::new(Box::new(move |_rv| {}));
+        assert_eq!(
+            s.register(
+                RegisterFlags::empty(),
+                1_000,
+                mk_challenge(),
+                mk_appid(),
+                vec![],
+                status_tx.clone(),
+                callback.clone(),
+            ),
+            Ok(())
+        );
+        callback.wait();
+
+        assert_eq!(was_cancelled_one.load(Ordering::SeqCst), false);
+        assert_eq!(was_cancelled_two.load(Ordering::SeqCst), true);
+        assert_eq!(was_cancelled_three.load(Ordering::SeqCst), true);
+    }
+
+    #[test]
+    fn test_cancellation_sign() {
+        init();
+        let (status_tx, _) = channel::<StatusUpdate>();
+
+        let mut s = AuthenticatorService::new().unwrap();
+        let ttd_one = TestTransportDriver::new(true).unwrap();
+        let ttd_two = TestTransportDriver::new(false).unwrap();
+        let ttd_three = TestTransportDriver::new(false).unwrap();
+
+        let was_cancelled_one = ttd_one.was_cancelled.clone();
+        let was_cancelled_two = ttd_two.was_cancelled.clone();
+        let was_cancelled_three = ttd_three.was_cancelled.clone();
+
+        s.add_transport(Box::new(ttd_one));
+        s.add_transport(Box::new(ttd_two));
+        s.add_transport(Box::new(ttd_three));
+
+        let callback = StateCallback::new(Box::new(move |_rv| {}));
+        assert_eq!(
+            s.sign(
+                SignFlags::empty(),
+                1_000,
+                mk_challenge(),
+                vec![mk_appid()],
+                vec![mk_key()],
+                status_tx,
+                callback.clone(),
+            ),
+            Ok(())
+        );
+        callback.wait();
+
+        assert_eq!(was_cancelled_one.load(Ordering::SeqCst), false);
+        assert_eq!(was_cancelled_two.load(Ordering::SeqCst), true);
+        assert_eq!(was_cancelled_three.load(Ordering::SeqCst), true);
+    }
+
+    #[test]
+    fn test_cancellation_race() {
+        init();
+        let (status_tx, _) = channel::<StatusUpdate>();
+
+        let mut s = AuthenticatorService::new().unwrap();
+        // Let both of these race which one provides consent.
+        let ttd_one = TestTransportDriver::new(true).unwrap();
+        let ttd_two = TestTransportDriver::new(true).unwrap();
+
+        let was_cancelled_one = ttd_one.was_cancelled.clone();
+        let was_cancelled_two = ttd_two.was_cancelled.clone();
+
+        s.add_transport(Box::new(ttd_one));
+        s.add_transport(Box::new(ttd_two));
+
+        let callback = StateCallback::new(Box::new(move |_rv| {}));
+        assert_eq!(
+            s.register(
+                RegisterFlags::empty(),
+                1_000,
+                mk_challenge(),
+                mk_appid(),
+                vec![],
+                status_tx.clone(),
+                callback.clone(),
+            ),
+            Ok(())
+        );
+        callback.wait();
+
+        let one = was_cancelled_one.load(Ordering::SeqCst);
+        let two = was_cancelled_two.load(Ordering::SeqCst);
+        assert_eq!(
+            one ^ two,
+            true,
+            "asserting that one={} xor two={} is true",
+            one,
+            two
+        );
     }
 }

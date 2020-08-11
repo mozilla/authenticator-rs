@@ -2,6 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+use crate::virtualdevices::software_u2f::SoftwareU2FToken;
+use crate::{Error, RegisterFlags, RegisterResult, SignFlags, SignResult};
+
 pub enum TestWireProtocol {
     CTAP1,
     CTAP2,
@@ -14,24 +17,57 @@ pub struct TestToken {
     pub has_user_verification: bool,
     pub is_user_verified: bool,
     pub has_resident_key: bool,
+    pub u2f_impl: Option<SoftwareU2FToken>,
 }
 
 impl TestToken {
-    pub fn register(&self) -> Result<crate::RegisterResult, crate::Error> {
-        Ok((vec![0u8; 16], self.dev_info()))
-    }
-    pub fn sign(&self) -> Result<crate::SignResult, crate::Error> {
-        Ok((vec![0u8; 0], vec![0u8; 0], vec![0u8; 0], self.dev_info()))
-    }
-    pub fn dev_info(&self) -> crate::u2ftypes::U2FDeviceInfo {
-        crate::u2ftypes::U2FDeviceInfo {
-            vendor_name: String::from("Mozilla").into_bytes(),
-            device_name: String::from("Authenticator Webdriver Token").into_bytes(),
-            version_interface: 0,
-            version_major: 1,
-            version_minor: 2,
-            version_build: 3,
-            cap_flags: 0,
+    pub fn new(
+        id: u64,
+        protocol: TestWireProtocol,
+        is_user_consenting: bool,
+        has_user_verification: bool,
+        is_user_verified: bool,
+        has_resident_key: bool,
+    ) -> TestToken {
+        match protocol {
+            TestWireProtocol::CTAP1 => {
+                return Self {
+                    id,
+                    protocol,
+                    is_user_consenting,
+                    has_user_verification,
+                    is_user_verified,
+                    has_resident_key,
+                    u2f_impl: Some(SoftwareU2FToken::new()),
+                }
+            }
+            _ => unreachable!(),
         }
+    }
+
+    pub fn register(&self) -> Result<RegisterResult, Error> {
+        if self.u2f_impl.is_some() {
+            return self.u2f_impl.as_ref().unwrap().register(
+                RegisterFlags::empty(),
+                10_000,
+                vec![0; 32],
+                vec![0; 32],
+                vec![],
+            );
+        }
+        Err(Error::Unknown)
+    }
+
+    pub fn sign(&self) -> Result<SignResult, Error> {
+        if self.u2f_impl.is_some() {
+            return self.u2f_impl.as_ref().unwrap().sign(
+                SignFlags::empty(),
+                10_000,
+                vec![0; 32],
+                vec![vec![0; 32]],
+                vec![],
+            );
+        }
+        Err(Error::Unknown)
     }
 }

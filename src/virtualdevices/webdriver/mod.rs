@@ -13,7 +13,7 @@ use std::{io, string, thread};
 use warp::{http::StatusCode, Filter};
 
 use crate::authenticatorservice::AuthenticatorTransport;
-use crate::util::StateCallback;
+use crate::statecallback::StateCallback;
 
 mod testtoken;
 
@@ -204,14 +204,14 @@ async fn serve(tokens: Arc<Mutex<vec::Vec<testtoken::TestToken>>>, addr: SocketA
                     )
                 }
             };
-            let tt = testtoken::TestToken {
-                id: *counter,
+            let tt = testtoken::TestToken::new(
+                *counter,
                 protocol,
-                is_user_consenting: auth.is_user_consenting,
-                has_user_verification: auth.has_user_verification,
-                is_user_verified: auth.is_user_verified,
-                has_resident_key: auth.has_resident_key,
-            };
+                auth.is_user_consenting,
+                auth.has_user_verification,
+                auth.is_user_verified,
+                auth.has_resident_key,
+            );
 
             let mut all_tokens = try_or_internal_error!(creation_tokens.lock());
             all_tokens.push(tt);

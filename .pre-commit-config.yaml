@@ -14,7 +14,7 @@
     - id: rustfmt
       name: Check rustfmt
       language: system
-      entry: cargo +nightly fmt -- --check
+      entry: cargo fmt
       pass_filenames: false
       files: '.rs$'
 - repo: local

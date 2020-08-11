@@ -2,13 +2,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+use crate::authenticatorservice::AuthenticatorService;
+use crate::statecallback::StateCallback;
+use crate::{RegisterResult, SignResult};
 use libc::size_t;
 use rand::{thread_rng, Rng};
 use std::collections::HashMap;
 use std::sync::mpsc::channel;
 use std::{ptr, slice};
-
-use crate::authenticatorservice::AuthenticatorService;
 
 type U2FAppIds = Vec<crate::AppId>;
 type U2FKeyHandles = Vec<crate::KeyHandle>;
@@ -233,16 +234,10 @@ pub unsafe extern "C" fn rust_u2f_mgr_register(
     let key_handles = (*khs).clone();
 
     let (tx, _rx) = channel::<crate::StatusUpdate>();
-
     let tid = new_tid();
-    let res = (*mgr).register(
-        flags,
-        timeout,
-        challenge,
-        application,
-        key_handles,
-        tx,
-        move |rv| {
+
+    let state_callback =
+        StateCallback::<Result<RegisterResult, crate::Error>>::new(Box::new(move |rv| {
             let result = match rv {
                 Ok((registration, dev_info)) => {
                     let mut bufs = HashMap::new();
@@ -258,7 +253,16 @@ pub unsafe extern "C" fn rust_u2f_mgr_register(
             };
 
             callback(tid, Box::into_raw(Box::new(result)));
-        },
+        }));
+
+    let res = (*mgr).register(
+        flags,
+        timeout,
+        challenge,
+        application,
+        key_handles,
+        tx,
+        state_callback,
     );
 
     if res.is_ok() {
@@ -305,14 +309,8 @@ pub unsafe extern "C" fn rust_u2f_mgr_sign(
     let (tx, _rx) = channel::<crate::StatusUpdate>();
 
     let tid = new_tid();
-    let res = (*mgr).sign(
-        flags,
-        timeout,
-        challenge,
-        app_ids,
-        key_handles,
-        tx,
-        move |rv| {
+    let state_callback =
+        StateCallback::<Result<SignResult, crate::Error>>::new(Box::new(move |rv| {
             let result = match rv {
                 Ok((app_id, key_handle, signature, dev_info)) => {
                     let mut bufs = HashMap::new();
@@ -330,7 +328,16 @@ pub unsafe extern "C" fn rust_u2f_mgr_sign(
             };
 
             callback(tid, Box::into_raw(Box::new(result)));
-        },
+        }));
+
+    let res = (*mgr).sign(
+        flags,
+        timeout,
+        challenge,
+        app_ids,
+        key_handles,
+        tx,
+        state_callback,
     );
 
     if res.is_ok() {
