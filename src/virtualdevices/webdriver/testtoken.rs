@@ -10,6 +10,15 @@ pub enum TestWireProtocol {
     CTAP2,
 }
 
+pub struct TestTokenCredential {
+    pub credential: Vec<u8>,
+    pub privkey: Vec<u8>,
+    pub user_handle: Vec<u8>,
+    pub sign_count: u64,
+    pub is_resident_credential: bool,
+    pub rp_id: String,
+}
+
 pub struct TestToken {
     pub id: u64,
     pub protocol: TestWireProtocol,
@@ -18,6 +27,7 @@ pub struct TestToken {
     pub is_user_verified: bool,
     pub has_resident_key: bool,
     pub u2f_impl: Option<SoftwareU2FToken>,
+    pub credentials: Vec<TestTokenCredential>,
 }
 
 impl TestToken {
@@ -39,10 +49,31 @@ impl TestToken {
                     is_user_verified,
                     has_resident_key,
                     u2f_impl: Some(SoftwareU2FToken::new()),
+                    credentials: Vec::new(),
                 }
             }
             _ => unreachable!(),
         }
+    }
+
+    pub fn insert_credential(
+        &mut self,
+        credential: &[u8],
+        privkey: &[u8],
+        rp_id: String,
+        is_resident_credential: bool,
+        user_handle: &[u8],
+        sign_count: u64,
+    ) {
+        let c = TestTokenCredential {
+            credential: credential.to_vec(),
+            privkey: privkey.to_vec(),
+            rp_id,
+            is_resident_credential,
+            user_handle: user_handle.to_vec(),
+            sign_count,
+        };
+        self.credentials.push(c);
     }
 
     pub fn register(&self) -> Result<RegisterResult, Error> {

@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::{string, vec};
@@ -20,10 +20,10 @@ fn default_as_true() -> bool {
     false
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 struct AddVirtualAuthenticator {
     protocol: string::String,
-    // transport: string::String,
+    transport: string::String,
     #[serde(rename = "hasResidentKey")]
     #[serde(default = "default_as_false")]
     has_resident_key: bool,
@@ -38,7 +38,7 @@ struct AddVirtualAuthenticator {
     is_user_verified: bool,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 struct AddCredential {
     #[serde(rename = "credentialId")]
     credential_id: String,
@@ -61,7 +61,7 @@ macro_rules! try_or_status_code {
             Ok(v) => v,
             Err(e) => {
                 return warp::reply::with_status(
-                    format!("{} {}: {}", stringify!($text), line!(), e),
+                    format!("{} line {}, err: {}", $text, line!(), e),
                     $statuscode,
                 );
             }
@@ -100,17 +100,14 @@ fn validate_rp_id(rp_id: &String) -> Result<(), crate::Error> {
     Err(crate::Error::Unknown)
 }
 
-#[tokio::main]
-pub async fn serve(tokens: Arc<Mutex<vec::Vec<testtoken::TestToken>>>, addr: SocketAddr) {
-    let authenticator_counter = Arc::new(Mutex::new(0));
-
-    let creation_tokens = tokens.clone();
-    let creation = warp::path!("webauthn" / "authenticator")
+fn authenticator_add(
+    authenticator_counter: Arc<Mutex<u64>>,
+    tokens: Arc<Mutex<vec::Vec<testtoken::TestToken>>>,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+    warp::path!("webauthn" / "authenticator")
         .and(warp::post())
         .and(warp::body::json())
         .map(move |auth: AddVirtualAuthenticator| {
-            let mut counter = try_or_internal_error!(authenticator_counter.lock());
-            *counter += 1;
             let protocol = match auth.protocol.as_str() {
                 "ctap1/u2f" => testtoken::TestWireProtocol::CTAP1,
                 "ctap2" => testtoken::TestWireProtocol::CTAP2,
@@ -121,6 +118,10 @@ pub async fn serve(tokens: Arc<Mutex<vec::Vec<testtoken::TestToken>>>, addr: Soc
                     )
                 }
             };
+
+            let mut counter = try_or_internal_error!(authenticator_counter.lock());
+            *counter += 1;
+
             let tt = testtoken::TestToken::new(
                 *counter,
                 protocol,
@@ -130,17 +131,20 @@ pub async fn serve(tokens: Arc<Mutex<vec::Vec<testtoken::TestToken>>>, addr: Soc
                 auth.has_resident_key,
             );
 
-            let mut all_tokens = try_or_internal_error!(creation_tokens.lock());
+            let mut all_tokens = try_or_internal_error!(tokens.lock());
             all_tokens.push(tt);
 
             warp::reply::with_status(format!("{}", &counter), StatusCode::OK)
-        });
+        })
+}
 
-    let deletion_tokens = tokens.clone();
-    let deletion = warp::path!("webauthn" / "authenticator" / u64)
+fn authenticator_delete(
+    tokens: Arc<Mutex<vec::Vec<testtoken::TestToken>>>,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+    warp::path!("webauthn" / "authenticator" / u64)
         .and(warp::delete())
         .map(move |id: u64| {
-            let mut all_tokens = try_or_internal_error!(deletion_tokens.lock());
+            let mut all_tokens = try_or_internal_error!(tokens.lock());
             match all_tokens.binary_search_by_key(&id, |probe| probe.id) {
                 Ok(idx) => all_tokens.remove(idx),
                 Err(_) => {
@@ -152,14 +156,15 @@ pub async fn serve(tokens: Arc<Mutex<vec::Vec<testtoken::TestToken>>>, addr: Soc
             };
 
             warp::reply::with_status(format!("deleted authenticator id={}", &id), StatusCode::OK)
-        });
+        })
+}
 
-    let add_credential_tokens = tokens.clone();
-    let add_credential = warp::path!("webauthn" / "authenticator" / u64 / "credential")
+fn authenticator_credential_add(
+    tokens: Arc<Mutex<vec::Vec<testtoken::TestToken>>>,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+    warp::path!("webauthn" / "authenticator" / u64 / "credential")
         .and(warp::body::json())
         .map(move |id: u64, auth: AddCredential| {
-            let mut all_tokens = try_or_internal_error!(add_credential_tokens.lock());
-
             let credential = try_or_invalid_argument!(base64::decode_config(
                 &auth.credential_id,
                 base64::URL_SAFE
@@ -170,10 +175,25 @@ pub async fn serve(tokens: Arc<Mutex<vec::Vec<testtoken::TestToken>>>, addr: Soc
                 base64::URL_SAFE
             ));
 
+            let userhandle = try_or_invalid_argument!(base64::decode_config(
+                &auth.user_handle,
+                base64::URL_SAFE
+            ));
+
             try_or_invalid_argument!(validate_rp_id(&auth.rp_id));
 
+            let mut all_tokens = try_or_internal_error!(tokens.lock());
             if let Ok(idx) = all_tokens.binary_search_by_key(&id, |probe| probe.id) {
-                let tt = &all_tokens[idx];
+                let tt = &mut all_tokens[idx];
+
+                tt.insert_credential(
+                    &credential,
+                    &privkey,
+                    auth.rp_id,
+                    auth.is_resident_credential,
+                    &userhandle,
+                    auth.sign_count,
+                );
 
                 return warp::reply::with_status(
                     format!("added credential to authenticator id={}", &id),
@@ -182,15 +202,26 @@ pub async fn serve(tokens: Arc<Mutex<vec::Vec<testtoken::TestToken>>>, addr: Soc
             }
 
             warp::reply::with_status(format!("invalid argument"), StatusCode::BAD_REQUEST)
-        });
+        })
+}
 
-    let routes = creation.or(deletion).or(add_credential);
+#[tokio::main]
+pub async fn serve(tokens: Arc<Mutex<vec::Vec<testtoken::TestToken>>>, addr: SocketAddr) {
+    let authenticator_counter = Arc::new(Mutex::new(0));
+
+    let auth_creation = authenticator_add(authenticator_counter, tokens.clone());
+    let auth_deletion = authenticator_delete(tokens.clone());
+    let add_credential = authenticator_credential_add(tokens.clone());
+
+    let routes = auth_creation.or(auth_deletion).or(add_credential);
+
     warp::serve(routes).run(addr).await;
 }
 
 #[cfg(test)]
 mod tests {
-    use super::validate_rp_id;
+    use super::{testtoken::*, *};
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn test_validate_rp_id() {
@@ -223,5 +254,210 @@ mod tests {
             Err(crate::Error::Unknown)
         );
         assert_eq!(validate_rp_id(&String::from("example.com")), Ok(()));
+    }
+
+    fn mk_token_list(ids: &[u64]) -> Arc<Mutex<Vec<TestToken>>> {
+        let mut list = Vec::new();
+        for id in ids {
+            list.push(TestToken::new(
+                *id,
+                TestWireProtocol::CTAP1,
+                true,
+                true,
+                true,
+                true,
+            ));
+        }
+        Arc::new(Mutex::new(list))
+    }
+
+    #[tokio::test]
+    async fn test_authenticator_add() {
+        let filter = authenticator_add(Arc::new(Mutex::new(0)), mk_token_list(&[]));
+
+        {
+            let res = warp::test::request()
+                .method("POST")
+                .path("/webauthn/authenticator")
+                .reply(&filter)
+                .await;
+            assert_eq!(res.status(), 400);
+        }
+
+        let valid_add = AddVirtualAuthenticator {
+            protocol: "ctap1/u2f".to_string(),
+            transport: "usb".to_string(),
+            has_resident_key: false,
+            has_user_verification: false,
+            is_user_consenting: false,
+            is_user_verified: false,
+        };
+
+        {
+            let mut invalid = valid_add.clone();
+            invalid.protocol = "unknown".to_string();
+            let res = warp::test::request()
+                .method("POST")
+                .path("/webauthn/authenticator")
+                .json(&invalid)
+                .reply(&filter)
+                .await;
+            assert_eq!(res.status(), 400);
+            assert_eq!(res.body(), "unknown protocol: unknown");
+        }
+
+        {
+            let mut unknown = valid_add.clone();
+            unknown.transport = "unknown".to_string();
+            let res = warp::test::request()
+                .method("POST")
+                .path("/webauthn/authenticator")
+                .json(&unknown)
+                .reply(&filter)
+                .await;
+            assert_eq!(res.status(), 200);
+            assert_eq!(res.body(), "1");
+        }
+
+        {
+            let res = warp::test::request()
+                .method("POST")
+                .path("/webauthn/authenticator")
+                .json(&valid_add)
+                .reply(&filter)
+                .await;
+            assert_eq!(res.status(), 200);
+            assert_eq!(res.body(), "2");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_authenticator_delete() {
+        let filter = authenticator_delete(mk_token_list(&[32]));
+
+        {
+            let res = warp::test::request()
+                .method("DELETE")
+                .path("/webauthn/authenticator/3")
+                .reply(&filter)
+                .await;
+            assert_eq!(res.status(), 400);
+            assert_eq!(res.body(), "invalid argument");
+        }
+
+        {
+            let res = warp::test::request()
+                .method("DELETE")
+                .path("/webauthn/authenticator/32")
+                .reply(&filter)
+                .await;
+            assert_eq!(res.status(), 200);
+            assert_eq!(res.body(), "deleted authenticator id=32");
+        }
+
+        {
+            let res = warp::test::request()
+                .method("DELETE")
+                .path("/webauthn/authenticator/42")
+                .reply(&filter)
+                .await;
+            assert_eq!(res.status(), 400);
+            assert_eq!(res.body(), "invalid argument");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_authenticator_credential_add() {
+        let list = mk_token_list(&[1]);
+        let filter = authenticator_credential_add(list.clone());
+
+        let valid_add_credential = AddCredential {
+            credential_id: base64::encode_config(b"hello internet~", base64::URL_SAFE),
+            is_resident_credential: true,
+            rp_id: "valid.rpid".to_string(),
+            private_key: base64::encode_config(b"hello internet~", base64::URL_SAFE),
+            user_handle: base64::encode_config(b"hello internet~", base64::URL_SAFE),
+            sign_count: 0,
+        };
+
+        {
+            let res = warp::test::request()
+                .method("POST")
+                .path("/webauthn/authenticator/1/credential")
+                .reply(&filter)
+                .await;
+            assert_eq!(res.status(), 400);
+        }
+
+        {
+            let mut invalid = valid_add_credential.clone();
+            invalid.credential_id = "!@#$ invalid base64".to_string();
+            let res = warp::test::request()
+                .method("POST")
+                .path("/webauthn/authenticator/1/credential")
+                .json(&invalid)
+                .reply(&filter)
+                .await;
+            assert_eq!(res.status(), 400);
+            assert_eq!(res.body().slice(0..16), "invalid argument");
+        }
+
+        {
+            let mut invalid = valid_add_credential.clone();
+            invalid.rp_id = "example".to_string();
+            let res = warp::test::request()
+                .method("POST")
+                .path("/webauthn/authenticator/1/credential")
+                .json(&invalid)
+                .reply(&filter)
+                .await;
+            assert_eq!(res.status(), 400);
+            assert_eq!(res.body().slice(0..16), "invalid argument");
+        }
+
+        {
+            let mut invalid = valid_add_credential.clone();
+            invalid.rp_id = "https://example.com".to_string();
+            let res = warp::test::request()
+                .method("POST")
+                .path("/webauthn/authenticator/1/credential")
+                .json(&invalid)
+                .reply(&filter)
+                .await;
+            assert_eq!(res.status(), 400);
+            assert_eq!(res.body().slice(0..16), "invalid argument");
+        }
+
+        {
+            let mut no_user_handle = valid_add_credential.clone();
+            no_user_handle.user_handle = "".to_string();
+            let res = warp::test::request()
+                .method("POST")
+                .path("/webauthn/authenticator/1/credential")
+                .json(&no_user_handle)
+                .reply(&filter)
+                .await;
+            assert_eq!(res.status(), 200);
+            assert_eq!(res.body(), "added credential to authenticator id=1");
+            let locked_list = list.lock().unwrap();
+            assert_eq!(1, locked_list[0].credentials.len());
+            let c = &locked_list[0].credentials[0];
+            assert!(c.user_handle.is_empty());
+        }
+
+        {
+            let res = warp::test::request()
+                .method("POST")
+                .path("/webauthn/authenticator/1/credential")
+                .json(&valid_add_credential)
+                .reply(&filter)
+                .await;
+            assert_eq!(res.status(), 200);
+            assert_eq!(res.body(), "added credential to authenticator id=1");
+            let locked_list = list.lock().unwrap();
+            assert_eq!(2, locked_list[0].credentials.len());
+            let c = &locked_list[0].credentials[1];
+            assert!(!c.user_handle.is_empty());
+        }
     }
 }
