@@ -63,13 +63,17 @@ fn main() {
     }
 
     #[cfg(target_os = "macos")]
-    if matches.opt_present("touchid") {
-        manager.add_macos_touchid_virtual_device();
+    {
+        if matches.opt_present("touchid") {
+            manager.add_macos_touchid_virtual_device();
+        }
     }
 
     #[cfg(feature = "webdriver")]
-    if matches.opt_present("webdriver") {
-        manager.add_webdriver_virtual_bus();
+    {
+        if matches.opt_present("webdriver") {
+            manager.add_webdriver_virtual_bus();
+        }
     }
 
     println!("Asking a security key to register now...");
