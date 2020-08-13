@@ -39,4 +39,4 @@ script:
     cargo install cargo-fuzz
     cargo +nightly fuzz build
   fi
-- cargo test
+- cargo test --all-features --all-targets

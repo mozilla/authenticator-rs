@@ -22,7 +22,7 @@
     - id: tests
       name: Run tests
       language: system
-      entry: cargo test
+      entry: cargo test --all-features --all-targets
       pass_filenames: false
       files: '.rs$'
 - repo: local
