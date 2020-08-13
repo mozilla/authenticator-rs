@@ -62,13 +62,53 @@ parser_add.add_argument("--transport", default="usb", help="transport type(s)")
 
 
 def device_delete(args):
-    rsp = requests.delete(f"{args.url}/{args.delete}")
+    rsp = requests.delete(f"{args.url}/{args.id}")
     console.print(rsp.text)
 
 
 parser_delete = subparsers.add_parser("delete", help="Delete a device")
 parser_delete.set_defaults(func=device_delete)
 parser_delete.add_argument("id", type=int, help="device ID to delete")
+
+
+def credential_add(args):
+    data = {
+        "credentialId": args.credentialId,
+        "isResidentCredential": args.isResidentCredential in ["true", "yes"],
+        "rpId": args.rpId,
+        "privateKey": args.privateKey,
+        "signCount": args.signCount,
+    }
+    if args.userHandle:
+        data["userHandle"] = (args.userHandle,)
+
+    console.print(f"Adding new credential to device {args.id}: ", data)
+    rsp = requests.post(f"{args.url}/{args.id}/credential", json=data)
+    console.print(rsp.text)
+
+
+parser_credential_add = subparsers.add_parser("addcred", help="Add a credential")
+parser_credential_add.set_defaults(func=credential_add)
+parser_credential_add.add_argument(
+    "--id", required=True, type=int, help="device ID to use"
+)
+parser_credential_add.add_argument(
+    "--credentialId", required=True, help="base64url-encoded credential ID"
+)
+parser_credential_add.add_argument(
+    "--isResidentCredential",
+    choices=["yes", "no", "true", "false"],
+    default="no",
+    help="indicate a resident key",
+)
+parser_credential_add.add_argument("--rpId", required=True, help="RP id (hostname)")
+parser_credential_add.add_argument(
+    "--privateKey", required=True, help="base64url-encoded private key per RFC 5958"
+)
+parser_credential_add.add_argument("--userHandle", help="base64url-encoded user handle")
+parser_credential_add.add_argument(
+    "--signCount", default=0, type=int, help="initial signature counter"
+)
 
 
 def main():

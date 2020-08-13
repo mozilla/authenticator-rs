@@ -116,6 +116,14 @@ pub enum Error {
     NotAllowed = 5,
 }
 
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl std::error::Error for Error {}
+
 #[derive(Debug, Clone)]
 pub enum StatusUpdate {
     DeviceAvailable { dev_info: u2ftypes::U2FDeviceInfo },
