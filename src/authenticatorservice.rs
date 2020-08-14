@@ -83,6 +83,17 @@ impl AuthenticatorService {
         }
     }
 
+    #[cfg(feature = "webdriver")]
+    pub fn add_webdriver_virtual_bus(&mut self) {
+        match crate::virtualdevices::webdriver::VirtualManager::new() {
+            Ok(token) => {
+                println!("WebDriver ready, listening at {}", &token.url());
+                self.add_transport(Box::new(token));
+            }
+            Err(e) => error!("Could not add WebDriver virtual bus: {}", e),
+        }
+    }
+
     pub fn register(
         &mut self,
         flags: crate::RegisterFlags,

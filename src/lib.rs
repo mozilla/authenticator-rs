@@ -74,6 +74,7 @@ mod capi;
 pub use crate::capi::*;
 
 pub mod statecallback;
+mod virtualdevices;
 
 // Keep this in sync with the constants in u2fhid-capi.h.
 bitflags! {
