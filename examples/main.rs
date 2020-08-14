@@ -40,6 +40,8 @@ fn main() {
 
     let mut opts = Options::new();
     opts.optflag("x", "no-u2f-usb-hid", "do not enable u2f-usb-hid platforms");
+    #[cfg(feature = "webdriver")]
+    opts.optflag("w", "webdriver", "enable WebDriver virtual bus");
 
     opts.optflag("h", "help", "print this help menu");
     let matches = match opts.parse(&args[1..]) {
@@ -56,6 +58,13 @@ fn main() {
 
     if !matches.opt_present("no-u2f-usb-hid") {
         manager.add_u2f_usb_hid_platform_transports();
+    }
+
+    #[cfg(feature = "webdriver")]
+    {
+        if matches.opt_present("webdriver") {
+            manager.add_webdriver_virtual_bus();
+        }
     }
 
     println!("Asking a security key to register now...");

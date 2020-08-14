@@ -1,5 +1,5 @@
 - repo: git://github.com/pre-commit/pre-commit-hooks
-  sha: HEAD
+  rev: HEAD
   hooks:
     - id: flake8
     - id: check-ast
@@ -14,7 +14,7 @@
     - id: rustfmt
       name: Check rustfmt
       language: system
-      entry: cargo +nightly fmt -- --check
+      entry: cargo fmt -- --check
       pass_filenames: false
       files: '.rs$'
 - repo: local
@@ -22,7 +22,7 @@
     - id: tests
       name: Run tests
       language: system
-      entry: cargo test
+      entry: cargo test --all-targets --all-features
       pass_filenames: false
       files: '.rs$'
 - repo: local
@@ -33,3 +33,10 @@
       entry: cargo clippy --all-targets -- -A renamed_and_removed_lints -A clippy::new-ret-no-self -D warnings
       pass_filenames: false
       files: '.rs$'
+- repo: local
+  hooks:
+    - id: black
+      name: Check black
+      language: system
+      entry: black
+      files: '.py$'
