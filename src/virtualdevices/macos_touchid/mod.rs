@@ -2,10 +2,5 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#[cfg(target_os = "macos")]
-pub mod macos_touchid;
-
-#[cfg(feature = "webdriver")]
-pub mod webdriver;
-
-pub mod software_u2f;
+mod touchid_token;
+pub use touchid_token::TouchIDToken;

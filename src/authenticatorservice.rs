@@ -70,6 +70,9 @@ impl AuthenticatorService {
     /// Add any detected platform transports
     pub fn add_detected_transports(&mut self) {
         self.add_u2f_usb_hid_platform_transports();
+
+        #[cfg(target_os = "macos")]
+        self.add_macos_touchid_virtual_device();
     }
 
     fn add_transport(&mut self, boxed_token: Box<dyn AuthenticatorTransport + Send>) {
@@ -80,6 +83,14 @@ impl AuthenticatorService {
         match crate::U2FManager::new() {
             Ok(token) => self.add_transport(Box::new(token)),
             Err(e) => error!("Could not add U2F HID transport: {}", e),
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn add_macos_touchid_virtual_device(&mut self) {
+        match crate::virtualdevices::macos_touchid::TouchIDToken::new() {
+            Ok(token) => self.add_transport(Box::new(token)),
+            Err(e) => error!("Could not add MacOS TouchID virtual device: {}", e),
         }
     }
 

@@ -40,6 +40,8 @@ fn main() {
 
     let mut opts = Options::new();
     opts.optflag("x", "no-u2f-usb-hid", "do not enable u2f-usb-hid platforms");
+    #[cfg(target_os = "macos")]
+    opts.optflag("t", "touchid", "enable MacOS touchID device");
     #[cfg(feature = "webdriver")]
     opts.optflag("w", "webdriver", "enable WebDriver virtual bus");
 
@@ -58,6 +60,13 @@ fn main() {
 
     if !matches.opt_present("no-u2f-usb-hid") {
         manager.add_u2f_usb_hid_platform_transports();
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        if matches.opt_present("touchid") {
+            manager.add_macos_touchid_virtual_device();
+        }
     }
 
     #[cfg(feature = "webdriver")]
