@@ -65,3 +65,14 @@ pub fn from_unix_result<T: Signed>(rv: T) -> io::Result<T> {
 pub fn io_err(msg: &str) -> io::Error {
     io::Error::new(io::ErrorKind::Other, msg)
 }
+
+pub fn to_hex(data: &[u8], joiner: &str) -> String {
+    let parts: Vec<String> = data.iter().map(|byte| format!("{:02x}", byte)).collect();
+    parts.join(joiner)
+}
+
+pub fn trace_hex(label: &str, data: &[u8]) {
+    if log_enabled!(log::Level::Trace) {
+        trace!("{}: {}", label, to_hex(data, ""));
+    }
+}

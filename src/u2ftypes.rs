@@ -5,18 +5,7 @@
 use std::{cmp, fmt, io, str};
 
 use crate::consts::*;
-use crate::util::io_err;
-
-pub fn to_hex(data: &[u8], joiner: &str) -> String {
-    let parts: Vec<String> = data.iter().map(|byte| format!("{:02x}", byte)).collect();
-    parts.join(joiner)
-}
-
-pub fn trace_hex(data: &[u8]) {
-    if log_enabled!(log::Level::Trace) {
-        trace!("USB send: {}", to_hex(data, ""));
-    }
-}
+use crate::util::{io_err, to_hex, trace_hex};
 
 // Trait for representing U2F HID Devices. Requires getters/setters for the
 // channel ID, created during device initialization.
@@ -97,7 +86,7 @@ impl U2FHIDInit {
 
         let count = cmp::min(data.len(), dev.out_init_data_size());
         frame[8..8 + count].copy_from_slice(&data[..count]);
-        trace_hex(&frame);
+        trace_hex("USB send", &frame);
 
         if dev.write(&frame)? != frame.len() {
             return Err(io_err("device write failed"));
@@ -150,7 +139,7 @@ impl U2FHIDCont {
 
         let count = cmp::min(data.len(), dev.out_cont_data_size());
         frame[6..6 + count].copy_from_slice(&data[..count]);
-        trace_hex(&frame);
+        trace_hex("USB send", &frame);
 
         if dev.write(&frame)? != frame.len() {
             return Err(io_err("device write failed"));
