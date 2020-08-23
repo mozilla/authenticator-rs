@@ -52,6 +52,13 @@ pub mod platform;
 #[path = "stub/mod.rs"]
 pub mod platform;
 
+#[cfg(feature = "nfc")]
+extern crate pcsc;
+#[cfg(feature = "nfc")]
+mod nfc;
+#[cfg(feature = "nfc")]
+pub use crate::nfc::NFCManager;
+
 extern crate libc;
 #[macro_use]
 extern crate log;

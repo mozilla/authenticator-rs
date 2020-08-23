@@ -16,7 +16,9 @@ use std::thread;
 use std::time::Duration;
 
 fn is_valid_transport(transports: crate::AuthenticatorTransports) -> bool {
-    transports.is_empty() || transports.contains(crate::AuthenticatorTransports::USB)
+    transports.is_empty()
+        || transports
+            .intersects(crate::AuthenticatorTransports::USB | crate::AuthenticatorTransports::NFC)
 }
 
 fn find_valid_key_handles<'a, F>(

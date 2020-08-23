@@ -42,6 +42,8 @@ fn main() {
     opts.optflag("x", "no-u2f-usb-hid", "do not enable u2f-usb-hid platforms");
     #[cfg(feature = "webdriver")]
     opts.optflag("w", "webdriver", "enable WebDriver virtual bus");
+    #[cfg(feature = "nfc")]
+    opts.optflag("n", "no-nfc", "do not enable u2f-nfc platform");
 
     opts.optflag("h", "help", "print this help menu").optopt(
         "t",
@@ -71,6 +73,13 @@ fn main() {
     {
         if matches.opt_present("webdriver") {
             manager.add_webdriver_virtual_bus();
+        }
+    }
+
+    #[cfg(feature = "nfc")]
+    {
+        if !matches.opt_present("no-nfc") {
+            manager.add_u2f_nfc_transports();
         }
     }
 

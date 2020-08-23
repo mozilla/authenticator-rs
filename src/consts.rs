@@ -78,3 +78,12 @@ pub const SW_NO_ERROR: [u8; 2] = [0x90, 0x00];
 pub const SW_CONDITIONS_NOT_SATISFIED: [u8; 2] = [0x69, 0x85];
 pub const SW_WRONG_DATA: [u8; 2] = [0x6A, 0x80];
 pub const SW_WRONG_LENGTH: [u8; 2] = [0x67, 0x00];
+
+// U2F-over-NFC constants
+// TODO: naming, some are also ISO 7816-4 ??
+// The're mostly APDU-specific?
+pub const U2F_AID: [u8; 8] = [0xA0, 0x00, 0x00, 0x06, 0x47, 0x2F, 0x00, 0x01];
+pub const U2F_SELECT_FILE: u8 = 0xA4;
+pub const U2F_SELECT_DIRECT: u8 = 0x04;
+pub const U2F_GET_RESPONSE: u8 = 0xC0;
+pub const U2F_MORE_DATA: u8 = 0x61;
