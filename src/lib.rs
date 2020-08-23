@@ -61,6 +61,7 @@ extern crate runloop;
 #[macro_use]
 extern crate bitflags;
 
+mod apdu;
 pub mod authenticatorservice;
 mod consts;
 mod statemachine;

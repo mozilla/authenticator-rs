@@ -2,12 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+use crate::apdu::{u2f_is_keyhandle_valid, u2f_register, u2f_sign, APDUDevice};
 use crate::consts::PARAMETER_SIZE;
 use crate::errors;
 use crate::platform::device::Device;
 use crate::platform::transaction::Transaction;
 use crate::statecallback::StateCallback;
-use crate::u2fprotocol::{u2f_init_device, u2f_is_keyhandle_valid, u2f_register, u2f_sign};
 use crate::u2ftypes::U2FDevice;
 
 use std::sync::mpsc::Sender;
@@ -90,7 +90,7 @@ impl StateMachine {
             };
 
             // Try initializing it.
-            if !dev.is_u2f() || !u2f_init_device(dev) {
+            if !dev.is_u2f() || dev.init_apdu().is_err() {
                 return;
             }
 
@@ -182,7 +182,7 @@ impl StateMachine {
             };
 
             // Try initializing it.
-            if !dev.is_u2f() || !u2f_init_device(dev) {
+            if !dev.is_u2f() || dev.init_apdu().is_err() {
                 return;
             }
 

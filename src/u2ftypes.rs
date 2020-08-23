@@ -202,32 +202,6 @@ impl U2FHIDInitResp {
     }
 }
 
-// https://en.wikipedia.org/wiki/Smart_card_application_protocol_data_unit
-// https://fidoalliance.org/specs/fido-u2f-v1.
-// 0-nfc-bt-amendment-20150514/fido-u2f-raw-message-formats.html#u2f-message-framing
-pub struct U2FAPDUHeader {}
-
-impl U2FAPDUHeader {
-    pub fn serialize(ins: u8, p1: u8, data: &[u8]) -> io::Result<Vec<u8>> {
-        if data.len() > 0xffff {
-            return Err(io_err("payload length > 2^16"));
-        }
-
-        // Size of header + data + 2 zero bytes for maximum return size.
-        let mut bytes = vec![0u8; U2FAPDUHEADER_SIZE + data.len() + 2];
-        // cla is always 0 for our requirements
-        bytes[1] = ins;
-        bytes[2] = p1;
-        // p2 is always 0, at least, for our requirements.
-        // lc[0] should always be 0.
-        bytes[5] = (data.len() >> 8) as u8;
-        bytes[6] = data.len() as u8;
-        bytes[7..7 + data.len()].copy_from_slice(data);
-
-        Ok(bytes)
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct U2FDeviceInfo {
     pub vendor_name: Vec<u8>,
