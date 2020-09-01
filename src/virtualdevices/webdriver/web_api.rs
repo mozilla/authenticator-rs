@@ -4,14 +4,11 @@
 
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
+use std::string;
 use std::sync::{Arc, Mutex};
-use std::{string, vec};
-use warp::{
-    http::{uri, StatusCode},
-    Filter,
-};
+use warp::Filter;
 
-use crate::virtualdevices::webdriver::testtoken;
+use crate::virtualdevices::webdriver::{testtoken, virtualmanager::VirtualManagerState};
 
 fn default_as_false() -> bool {
     false
@@ -20,8 +17,8 @@ fn default_as_true() -> bool {
     false
 }
 
-#[derive(Serialize, Deserialize, Clone)]
-struct AddVirtualAuthenticator {
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
+pub struct AuthenticatorConfiguration {
     protocol: string::String,
     transport: string::String,
     #[serde(rename = "hasResidentKey")]
@@ -38,8 +35,8 @@ struct AddVirtualAuthenticator {
     is_user_verified: bool,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
-struct AddCredential {
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
+pub struct CredentialParameters {
     #[serde(rename = "credentialId")]
     credential_id: String,
     #[serde(rename = "isResidentCredential")]
@@ -55,176 +52,475 @@ struct AddCredential {
     sign_count: u64,
 }
 
-macro_rules! try_or_status_code {
-    ($val:expr, $text:expr, $statuscode:expr) => {
-        match $val {
-            Ok(v) => v,
-            Err(e) => {
-                return warp::reply::with_status(
-                    format!("{} line {}, err: {}", $text, line!(), e),
-                    $statuscode,
-                );
-            }
-        }
-    };
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
+pub struct UserVerificationParameters {
+    #[serde(rename = "isUserVerified")]
+    is_user_verified: bool,
 }
 
-macro_rules! try_or_internal_error {
-    ($val:expr) => {
-        try_or_status_code!($val, "internal error", StatusCode::INTERNAL_SERVER_ERROR);
-    };
-}
+impl CredentialParameters {
+    fn new_from_test_token_credential(tc: &testtoken::TestTokenCredential) -> CredentialParameters {
+        let credential_id = base64::encode_config(&tc.credential, base64::URL_SAFE);
 
-macro_rules! try_or_invalid_argument {
-    ($val:expr) => {
-        try_or_status_code!($val, "invalid argument", StatusCode::BAD_REQUEST);
-    };
-}
+        let private_key = base64::encode_config(&tc.privkey, base64::URL_SAFE);
 
-fn validate_rp_id(rp_id: &String) -> Result<(), crate::Error> {
-    if let Ok(uri) = rp_id.parse::<uri::Uri>().map_err(|_| crate::Error::Unknown) {
-        if uri.scheme().is_none()
-            && uri.path_and_query().is_none()
-            && uri.port().is_none()
-            && uri.host().is_some()
-        {
-            if uri.authority().unwrap() == uri.host().unwrap() {
-                // Don't try too hard to ensure it's a valid domain, just
-                // ensure there's a label delim in there somewhere
-                if uri.host().unwrap().find(".").is_some() {
-                    return Ok(());
-                }
-            }
+        let user_handle = base64::encode_config(&tc.user_handle, base64::URL_SAFE);
+
+        CredentialParameters {
+            credential_id,
+            is_resident_credential: tc.is_resident_credential,
+            rp_id: tc.rp_id.clone(),
+            private_key,
+            user_handle,
+            sign_count: tc.sign_count,
         }
     }
-    Err(crate::Error::Unknown)
+}
+
+fn with_state(
+    state: Arc<Mutex<VirtualManagerState>>,
+) -> impl Filter<Extract = (Arc<Mutex<VirtualManagerState>>,), Error = std::convert::Infallible> + Clone
+{
+    warp::any().map(move || state.clone())
 }
 
 fn authenticator_add(
-    authenticator_counter: Arc<Mutex<u64>>,
-    tokens: Arc<Mutex<vec::Vec<testtoken::TestToken>>>,
+    state: Arc<Mutex<VirtualManagerState>>,
 ) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
     warp::path!("webauthn" / "authenticator")
         .and(warp::post())
         .and(warp::body::json())
-        .map(move |auth: AddVirtualAuthenticator| {
-            let protocol = match auth.protocol.as_str() {
-                "ctap1/u2f" => testtoken::TestWireProtocol::CTAP1,
-                "ctap2" => testtoken::TestWireProtocol::CTAP2,
-                _ => {
-                    return warp::reply::with_status(
-                        format!("unknown protocol: {}", auth.protocol),
-                        StatusCode::BAD_REQUEST,
-                    )
-                }
-            };
-
-            let mut counter = try_or_internal_error!(authenticator_counter.lock());
-            *counter += 1;
-
-            let tt = testtoken::TestToken::new(
-                *counter,
-                protocol,
-                auth.is_user_consenting,
-                auth.has_user_verification,
-                auth.is_user_verified,
-                auth.has_resident_key,
-            );
-
-            let mut all_tokens = try_or_internal_error!(tokens.lock());
-            all_tokens.push(tt);
-
-            warp::reply::with_status(format!("{}", &counter), StatusCode::OK)
-        })
+        .and(with_state(state))
+        .and_then(handlers::authenticator_add)
 }
 
 fn authenticator_delete(
-    tokens: Arc<Mutex<vec::Vec<testtoken::TestToken>>>,
+    state: Arc<Mutex<VirtualManagerState>>,
 ) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
     warp::path!("webauthn" / "authenticator" / u64)
         .and(warp::delete())
-        .map(move |id: u64| {
-            let mut all_tokens = try_or_internal_error!(tokens.lock());
-            match all_tokens.binary_search_by_key(&id, |probe| probe.id) {
-                Ok(idx) => all_tokens.remove(idx),
-                Err(_) => {
-                    return warp::reply::with_status(
-                        format!("invalid argument"),
-                        StatusCode::BAD_REQUEST,
-                    );
-                }
-            };
+        .and(with_state(state))
+        .and_then(handlers::authenticator_delete)
+}
 
-            warp::reply::with_status(format!("deleted authenticator id={}", &id), StatusCode::OK)
-        })
+fn authenticator_set_uv(
+    state: Arc<Mutex<VirtualManagerState>>,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+    warp::path!("webauthn" / "authenticator" / u64 / "uv")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(with_state(state))
+        .and_then(handlers::authenticator_set_uv)
+}
+
+// This is not part of the specification, but it's useful for debugging
+fn authenticator_get(
+    state: Arc<Mutex<VirtualManagerState>>,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+    warp::path!("webauthn" / "authenticator" / u64)
+        .and(warp::get())
+        .and(with_state(state))
+        .and_then(handlers::authenticator_get)
 }
 
 fn authenticator_credential_add(
-    tokens: Arc<Mutex<vec::Vec<testtoken::TestToken>>>,
+    state: Arc<Mutex<VirtualManagerState>>,
 ) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
     warp::path!("webauthn" / "authenticator" / u64 / "credential")
+        .and(warp::post())
         .and(warp::body::json())
-        .map(move |id: u64, auth: AddCredential| {
-            let credential = try_or_invalid_argument!(base64::decode_config(
-                &auth.credential_id,
-                base64::URL_SAFE
+        .and(with_state(state))
+        .and_then(handlers::authenticator_credential_add)
+}
+
+fn authenticator_credential_delete(
+    state: Arc<Mutex<VirtualManagerState>>,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+    warp::path!("webauthn" / "authenticator" / u64 / "credentials" / String)
+        .and(warp::delete())
+        .and(with_state(state))
+        .and_then(handlers::authenticator_credential_delete)
+}
+
+fn authenticator_credentials_get(
+    state: Arc<Mutex<VirtualManagerState>>,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+    warp::path!("webauthn" / "authenticator" / u64 / "credentials")
+        .and(warp::get())
+        .and(with_state(state))
+        .and_then(handlers::authenticator_credentials_get)
+}
+
+fn authenticator_credentials_clear(
+    state: Arc<Mutex<VirtualManagerState>>,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+    warp::path!("webauthn" / "authenticator" / u64 / "credentials")
+        .and(warp::delete())
+        .and(with_state(state))
+        .and_then(handlers::authenticator_credentials_clear)
+}
+
+mod handlers {
+    use super::{CredentialParameters, UserVerificationParameters};
+    use crate::virtualdevices::webdriver::{
+        testtoken, virtualmanager::VirtualManagerState, web_api::AuthenticatorConfiguration,
+    };
+    use serde::Serialize;
+    use std::convert::Infallible;
+    use std::ops::DerefMut;
+    use std::sync::{Arc, Mutex};
+    use std::vec;
+    use warp::http::{uri, StatusCode};
+
+    #[derive(Serialize)]
+    struct JsonSuccess {}
+
+    impl JsonSuccess {
+        pub fn blank() -> JsonSuccess {
+            JsonSuccess {}
+        }
+    }
+
+    #[derive(Serialize)]
+    struct JsonError {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        line: Option<u32>,
+        error: String,
+        details: String,
+    }
+
+    impl JsonError {
+        pub fn new(error: &str, line: u32, details: &str) -> JsonError {
+            JsonError {
+                details: details.to_string(),
+                error: error.to_string(),
+                line: Some(line),
+            }
+        }
+        pub fn from_status_code(code: StatusCode) -> JsonError {
+            JsonError {
+                details: code.canonical_reason().unwrap().to_string(),
+                line: None,
+                error: "".to_string(),
+            }
+        }
+        pub fn from_error(error: &str) -> JsonError {
+            JsonError {
+                details: "".to_string(),
+                error: error.to_string(),
+                line: None,
+            }
+        }
+    }
+
+    macro_rules! reply_error {
+        ($status:expr) => {
+            warp::reply::with_status(
+                warp::reply::json(&JsonError::from_status_code($status)),
+                $status,
+            )
+        };
+    }
+
+    macro_rules! try_json {
+        ($val:expr, $status:expr) => {
+            match $val {
+                Ok(v) => v,
+                Err(e) => {
+                    return Ok(warp::reply::with_status(
+                        warp::reply::json(&JsonError::new(
+                            $status.canonical_reason().unwrap(),
+                            line!(),
+                            &e.to_string(),
+                        )),
+                        $status,
+                    ));
+                }
+            }
+        };
+    }
+
+    pub fn validate_rp_id(rp_id: &String) -> Result<(), crate::Error> {
+        if let Ok(uri) = rp_id.parse::<uri::Uri>().map_err(|_| crate::Error::Unknown) {
+            if uri.scheme().is_none()
+                && uri.path_and_query().is_none()
+                && uri.port().is_none()
+                && uri.host().is_some()
+            {
+                if uri.authority().unwrap() == uri.host().unwrap() {
+                    // Don't try too hard to ensure it's a valid domain, just
+                    // ensure there's a label delim in there somewhere
+                    if uri.host().unwrap().find(".").is_some() {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+        Err(crate::Error::Unknown)
+    }
+
+    pub async fn authenticator_add(
+        auth: AuthenticatorConfiguration,
+        state: Arc<Mutex<VirtualManagerState>>,
+    ) -> Result<impl warp::Reply, Infallible> {
+        let protocol = match auth.protocol.as_str() {
+            "ctap1/u2f" => testtoken::TestWireProtocol::CTAP1,
+            "ctap2" => testtoken::TestWireProtocol::CTAP2,
+            _ => {
+                return Ok(warp::reply::with_status(
+                    warp::reply::json(&JsonError::from_error(
+                        format!("unknown protocol: {}", auth.protocol).as_str(),
+                    )),
+                    StatusCode::BAD_REQUEST,
+                ))
+            }
+        };
+
+        let mut state_lock = try_json!(state.lock(), StatusCode::INTERNAL_SERVER_ERROR);
+        let mut state_obj = state_lock.deref_mut();
+        state_obj.authenticator_counter += 1;
+
+        let tt = testtoken::TestToken::new(
+            state_obj.authenticator_counter,
+            protocol,
+            auth.transport,
+            auth.is_user_consenting,
+            auth.has_user_verification,
+            auth.is_user_verified,
+            auth.has_resident_key,
+        );
+
+        match state_obj
+            .tokens
+            .binary_search_by_key(&state_obj.authenticator_counter, |probe| probe.id)
+        {
+            Ok(_) => panic!("unexpected repeat of authenticator_id"),
+            Err(idx) => state_obj.tokens.insert(idx, tt),
+        }
+
+        #[derive(Serialize)]
+        struct AddResult {
+            #[serde(rename = "authenticatorId")]
+            authenticator_id: u64,
+        }
+
+        Ok(warp::reply::with_status(
+            warp::reply::json(&AddResult {
+                authenticator_id: state_obj.authenticator_counter,
+            }),
+            StatusCode::CREATED,
+        ))
+    }
+
+    pub async fn authenticator_delete(
+        id: u64,
+        state: Arc<Mutex<VirtualManagerState>>,
+    ) -> Result<impl warp::Reply, Infallible> {
+        let mut state_obj = try_json!(state.lock(), StatusCode::INTERNAL_SERVER_ERROR);
+        match state_obj.tokens.binary_search_by_key(&id, |probe| probe.id) {
+            Ok(idx) => state_obj.tokens.remove(idx),
+            Err(_) => {
+                return Ok(reply_error!(StatusCode::NOT_FOUND));
+            }
+        };
+
+        Ok(warp::reply::with_status(
+            warp::reply::json(&JsonSuccess::blank()),
+            StatusCode::OK,
+        ))
+    }
+
+    pub async fn authenticator_get(
+        id: u64,
+        state: Arc<Mutex<VirtualManagerState>>,
+    ) -> Result<impl warp::Reply, Infallible> {
+        let mut state_obj = try_json!(state.lock(), StatusCode::INTERNAL_SERVER_ERROR);
+        if let Ok(idx) = state_obj.tokens.binary_search_by_key(&id, |probe| probe.id) {
+            let tt = &mut state_obj.tokens[idx];
+
+            let data = AuthenticatorConfiguration {
+                protocol: tt.protocol.to_webdriver_string(),
+                transport: tt.transport.clone(),
+                has_resident_key: tt.has_resident_key,
+                has_user_verification: tt.has_user_verification,
+                is_user_consenting: tt.is_user_consenting,
+                is_user_verified: tt.is_user_verified,
+            };
+
+            return Ok(warp::reply::with_status(
+                warp::reply::json(&data),
+                StatusCode::OK,
             ));
+        }
 
-            let privkey = try_or_invalid_argument!(base64::decode_config(
-                &auth.private_key,
-                base64::URL_SAFE
+        Ok(reply_error!(StatusCode::NOT_FOUND))
+    }
+
+    pub async fn authenticator_set_uv(
+        id: u64,
+        uv: UserVerificationParameters,
+        state: Arc<Mutex<VirtualManagerState>>,
+    ) -> Result<impl warp::Reply, Infallible> {
+        let mut state_obj = try_json!(state.lock(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        if let Ok(idx) = state_obj.tokens.binary_search_by_key(&id, |probe| probe.id) {
+            let tt = &mut state_obj.tokens[idx];
+            tt.is_user_verified = uv.is_user_verified;
+            return Ok(warp::reply::with_status(
+                warp::reply::json(&JsonSuccess::blank()),
+                StatusCode::OK,
             ));
+        }
 
-            let userhandle = try_or_invalid_argument!(base64::decode_config(
-                &auth.user_handle,
-                base64::URL_SAFE
+        Ok(reply_error!(StatusCode::NOT_FOUND))
+    }
+
+    pub async fn authenticator_credential_add(
+        id: u64,
+        auth: CredentialParameters,
+        state: Arc<Mutex<VirtualManagerState>>,
+    ) -> Result<impl warp::Reply, Infallible> {
+        let credential = try_json!(
+            base64::decode_config(&auth.credential_id, base64::URL_SAFE),
+            StatusCode::BAD_REQUEST
+        );
+
+        let privkey = try_json!(
+            base64::decode_config(&auth.private_key, base64::URL_SAFE),
+            StatusCode::BAD_REQUEST
+        );
+
+        let userhandle = try_json!(
+            base64::decode_config(&auth.user_handle, base64::URL_SAFE),
+            StatusCode::BAD_REQUEST
+        );
+
+        try_json!(validate_rp_id(&auth.rp_id), StatusCode::BAD_REQUEST);
+
+        let mut state_obj = try_json!(state.lock(), StatusCode::INTERNAL_SERVER_ERROR);
+        if let Ok(idx) = state_obj.tokens.binary_search_by_key(&id, |probe| probe.id) {
+            let tt = &mut state_obj.tokens[idx];
+
+            tt.insert_credential(
+                &credential,
+                &privkey,
+                auth.rp_id,
+                auth.is_resident_credential,
+                &userhandle,
+                auth.sign_count,
+            );
+
+            return Ok(warp::reply::with_status(
+                warp::reply::json(&JsonSuccess::blank()),
+                StatusCode::CREATED,
             ));
+        }
 
-            try_or_invalid_argument!(validate_rp_id(&auth.rp_id));
+        Ok(reply_error!(StatusCode::NOT_FOUND))
+    }
 
-            let mut all_tokens = try_or_internal_error!(tokens.lock());
-            if let Ok(idx) = all_tokens.binary_search_by_key(&id, |probe| probe.id) {
-                let tt = &mut all_tokens[idx];
+    pub async fn authenticator_credential_delete(
+        id: u64,
+        credential_id: String,
+        state: Arc<Mutex<VirtualManagerState>>,
+    ) -> Result<impl warp::Reply, Infallible> {
+        let credential = try_json!(
+            base64::decode_config(&credential_id, base64::URL_SAFE),
+            StatusCode::BAD_REQUEST
+        );
 
-                tt.insert_credential(
-                    &credential,
-                    &privkey,
-                    auth.rp_id,
-                    auth.is_resident_credential,
-                    &userhandle,
-                    auth.sign_count,
-                );
+        let mut state_obj = try_json!(state.lock(), StatusCode::INTERNAL_SERVER_ERROR);
 
-                return warp::reply::with_status(
-                    format!("added credential to authenticator id={}", &id),
+        debug!("Asking to delete  {}", &credential_id);
+
+        if let Ok(idx) = state_obj.tokens.binary_search_by_key(&id, |probe| probe.id) {
+            let tt = &mut state_obj.tokens[idx];
+            debug!("Asking to delete from token {}", tt.id);
+            if tt.delete_credential(&credential) {
+                return Ok(warp::reply::with_status(
+                    warp::reply::json(&JsonSuccess::blank()),
                     StatusCode::OK,
-                );
+                ));
+            }
+        }
+
+        Ok(reply_error!(StatusCode::NOT_FOUND))
+    }
+
+    pub async fn authenticator_credentials_get(
+        id: u64,
+        state: Arc<Mutex<VirtualManagerState>>,
+    ) -> Result<impl warp::Reply, Infallible> {
+        let mut state_obj = try_json!(state.lock(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        if let Ok(idx) = state_obj.tokens.binary_search_by_key(&id, |probe| probe.id) {
+            let tt = &mut state_obj.tokens[idx];
+            let mut creds: vec::Vec<CredentialParameters> = vec![];
+            for ttc in &tt.credentials {
+                creds.push(CredentialParameters::new_from_test_token_credential(ttc));
             }
 
-            warp::reply::with_status(format!("invalid argument"), StatusCode::BAD_REQUEST)
-        })
+            return Ok(warp::reply::with_status(
+                warp::reply::json(&creds),
+                StatusCode::OK,
+            ));
+        }
+
+        Ok(reply_error!(StatusCode::NOT_FOUND))
+    }
+
+    pub async fn authenticator_credentials_clear(
+        id: u64,
+        state: Arc<Mutex<VirtualManagerState>>,
+    ) -> Result<impl warp::Reply, Infallible> {
+        let mut state_obj = try_json!(state.lock(), StatusCode::INTERNAL_SERVER_ERROR);
+        if let Ok(idx) = state_obj.tokens.binary_search_by_key(&id, |probe| probe.id) {
+            let tt = &mut state_obj.tokens[idx];
+
+            tt.credentials.clear();
+
+            return Ok(warp::reply::with_status(
+                warp::reply::json(&JsonSuccess::blank()),
+                StatusCode::OK,
+            ));
+        }
+
+        Ok(reply_error!(StatusCode::NOT_FOUND))
+    }
 }
 
 #[tokio::main]
-pub async fn serve(tokens: Arc<Mutex<vec::Vec<testtoken::TestToken>>>, addr: SocketAddr) {
-    let authenticator_counter = Arc::new(Mutex::new(0));
-
-    let auth_creation = authenticator_add(authenticator_counter, tokens.clone());
-    let auth_deletion = authenticator_delete(tokens.clone());
-    let add_credential = authenticator_credential_add(tokens.clone());
-
-    let routes = auth_creation.or(auth_deletion).or(add_credential);
+pub async fn serve(state: Arc<Mutex<VirtualManagerState>>, addr: SocketAddr) {
+    let routes = authenticator_add(state.clone())
+        .or(authenticator_delete(state.clone()))
+        .or(authenticator_get(state.clone()))
+        .or(authenticator_set_uv(state.clone()))
+        .or(authenticator_credential_add(state.clone()))
+        .or(authenticator_credential_delete(state.clone()))
+        .or(authenticator_credentials_get(state.clone()))
+        .or(authenticator_credentials_clear(state.clone()));
 
     warp::serve(routes).run(addr).await;
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{testtoken::*, *};
+    use super::handlers::validate_rp_id;
+    use super::testtoken::*;
+    use super::*;
+    use crate::virtualdevices::webdriver::virtualmanager::VirtualManagerState;
+    use bytes::Buf;
+    use serde_json;
     use std::sync::{Arc, Mutex};
+    use warp::http::StatusCode;
+
+    fn init() {
+        let _ = env_logger::builder().is_test(true).try_init();
+    }
 
     #[test]
     fn test_validate_rp_id() {
+        init();
         assert_eq!(
             validate_rp_id(&String::from("http://example.com")),
             Err(crate::Error::Unknown)
@@ -256,24 +552,62 @@ mod tests {
         assert_eq!(validate_rp_id(&String::from("example.com")), Ok(()));
     }
 
-    fn mk_token_list(ids: &[u64]) -> Arc<Mutex<Vec<TestToken>>> {
-        let mut list = Vec::new();
-        for id in ids {
-            list.push(TestToken::new(
-                *id,
-                TestWireProtocol::CTAP1,
-                true,
-                true,
-                true,
-                true,
-            ));
+    fn mk_state_with_token_list(ids: &[u64]) -> Arc<Mutex<VirtualManagerState>> {
+        let state = VirtualManagerState::new();
+
+        {
+            let mut state_obj = state.lock().unwrap();
+            for id in ids {
+                state_obj.tokens.push(TestToken::new(
+                    *id,
+                    TestWireProtocol::CTAP1,
+                    "internal".to_string(),
+                    true,
+                    true,
+                    true,
+                    true,
+                ));
+            }
+
+            state_obj.tokens.sort_by_key(|probe| probe.id)
         }
-        Arc::new(Mutex::new(list))
+
+        state
+    }
+
+    fn assert_success_rsp_blank(body: &bytes::Bytes) {
+        assert_eq!(String::from_utf8_lossy(body.bytes()), r#"{}"#)
+    }
+
+    fn assert_creds_equals_test_token_params(
+        a: &Vec<CredentialParameters>,
+        b: &Vec<TestTokenCredential>,
+    ) {
+        assert_eq!(a.len(), b.len());
+
+        for (i, j) in a.iter().zip(b.iter()) {
+            assert_eq!(
+                i.credential_id,
+                base64::encode_config(&j.credential, base64::URL_SAFE)
+            );
+            assert_eq!(
+                i.user_handle,
+                base64::encode_config(&j.user_handle, base64::URL_SAFE)
+            );
+            assert_eq!(
+                i.private_key,
+                base64::encode_config(&j.privkey, base64::URL_SAFE)
+            );
+            assert_eq!(i.rp_id, j.rp_id);
+            assert_eq!(i.sign_count, j.sign_count);
+            assert_eq!(i.is_resident_credential, j.is_resident_credential);
+        }
     }
 
     #[tokio::test]
     async fn test_authenticator_add() {
-        let filter = authenticator_add(Arc::new(Mutex::new(0)), mk_token_list(&[]));
+        init();
+        let filter = authenticator_add(mk_state_with_token_list(&[]));
 
         {
             let res = warp::test::request()
@@ -281,10 +615,10 @@ mod tests {
                 .path("/webauthn/authenticator")
                 .reply(&filter)
                 .await;
-            assert_eq!(res.status(), 400);
+            assert!(res.status().is_client_error());
         }
 
-        let valid_add = AddVirtualAuthenticator {
+        let valid_add = AuthenticatorConfiguration {
             protocol: "ctap1/u2f".to_string(),
             transport: "usb".to_string(),
             has_resident_key: false,
@@ -302,8 +636,9 @@ mod tests {
                 .json(&invalid)
                 .reply(&filter)
                 .await;
-            assert_eq!(res.status(), 400);
-            assert_eq!(res.body(), "unknown protocol: unknown");
+            assert!(res.status().is_client_error());
+            assert!(String::from_utf8_lossy(res.body().bytes())
+                .contains(&String::from("unknown protocol: unknown")));
         }
 
         {
@@ -315,8 +650,11 @@ mod tests {
                 .json(&unknown)
                 .reply(&filter)
                 .await;
-            assert_eq!(res.status(), 200);
-            assert_eq!(res.body(), "1");
+            assert!(res.status().is_success());
+            assert_eq!(
+                String::from_utf8_lossy(res.body().bytes()),
+                r#"{"authenticatorId":1}"#
+            )
         }
 
         {
@@ -326,14 +664,18 @@ mod tests {
                 .json(&valid_add)
                 .reply(&filter)
                 .await;
-            assert_eq!(res.status(), 200);
-            assert_eq!(res.body(), "2");
+            assert!(res.status().is_success());
+            assert_eq!(
+                String::from_utf8_lossy(res.body().bytes()),
+                r#"{"authenticatorId":2}"#
+            )
         }
     }
 
     #[tokio::test]
     async fn test_authenticator_delete() {
-        let filter = authenticator_delete(mk_token_list(&[32]));
+        init();
+        let filter = authenticator_delete(mk_state_with_token_list(&[32]));
 
         {
             let res = warp::test::request()
@@ -341,8 +683,7 @@ mod tests {
                 .path("/webauthn/authenticator/3")
                 .reply(&filter)
                 .await;
-            assert_eq!(res.status(), 400);
-            assert_eq!(res.body(), "invalid argument");
+            assert!(res.status().is_client_error());
         }
 
         {
@@ -351,8 +692,8 @@ mod tests {
                 .path("/webauthn/authenticator/32")
                 .reply(&filter)
                 .await;
-            assert_eq!(res.status(), 200);
-            assert_eq!(res.body(), "deleted authenticator id=32");
+            assert!(res.status().is_success());
+            assert_success_rsp_blank(res.body());
         }
 
         {
@@ -361,18 +702,96 @@ mod tests {
                 .path("/webauthn/authenticator/42")
                 .reply(&filter)
                 .await;
-            assert_eq!(res.status(), 400);
-            assert_eq!(res.body(), "invalid argument");
+            assert!(res.status().is_client_error());
         }
     }
 
     #[tokio::test]
-    async fn test_authenticator_credential_add() {
-        let list = mk_token_list(&[1]);
-        let filter = authenticator_credential_add(list.clone());
+    async fn test_authenticator_change_uv() {
+        init();
+        let state = mk_state_with_token_list(&[1]);
+        let filter = authenticator_set_uv(state.clone());
 
-        let valid_add_credential = AddCredential {
-            credential_id: base64::encode_config(b"hello internet~", base64::URL_SAFE),
+        {
+            let state_obj = state.lock().unwrap();
+            assert_eq!(true, state_obj.tokens[0].is_user_verified);
+        }
+
+        {
+            // Empty POST is bad
+            let res = warp::test::request()
+                .method("POST")
+                .path("/webauthn/authenticator/1/uv")
+                .reply(&filter)
+                .await;
+            assert!(res.status().is_client_error());
+        }
+
+        {
+            // Unexpected POST structure is bad
+            #[derive(Serialize)]
+            struct Unexpected {
+                id: u64,
+            }
+            let unexpected = Unexpected { id: 4 };
+
+            let res = warp::test::request()
+                .method("POST")
+                .path("/webauthn/authenticator/1/uv")
+                .json(&unexpected)
+                .reply(&filter)
+                .await;
+            assert!(res.status().is_client_error());
+        }
+
+        {
+            let param_false = UserVerificationParameters {
+                is_user_verified: false,
+            };
+
+            let res = warp::test::request()
+                .method("POST")
+                .path("/webauthn/authenticator/1/uv")
+                .json(&param_false)
+                .reply(&filter)
+                .await;
+            assert_eq!(res.status(), 200);
+            assert_success_rsp_blank(res.body());
+
+            let state_obj = state.lock().unwrap();
+            assert_eq!(false, state_obj.tokens[0].is_user_verified);
+        }
+
+        {
+            let param_false = UserVerificationParameters {
+                is_user_verified: true,
+            };
+
+            let res = warp::test::request()
+                .method("POST")
+                .path("/webauthn/authenticator/1/uv")
+                .json(&param_false)
+                .reply(&filter)
+                .await;
+            assert_eq!(res.status(), 200);
+            assert_success_rsp_blank(res.body());
+
+            let state_obj = state.lock().unwrap();
+            assert_eq!(true, state_obj.tokens[0].is_user_verified);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_authenticator_credentials() {
+        init();
+        let state = mk_state_with_token_list(&[1]);
+        let filter = authenticator_credential_add(state.clone())
+            .or(authenticator_credential_delete(state.clone()))
+            .or(authenticator_credentials_get(state.clone()))
+            .or(authenticator_credentials_clear(state.clone()));
+
+        let valid_add_credential = CredentialParameters {
+            credential_id: r"c3VwZXIgcmVhZGVy".to_string(),
             is_resident_credential: true,
             rp_id: "valid.rpid".to_string(),
             private_key: base64::encode_config(b"hello internet~", base64::URL_SAFE),
@@ -386,7 +805,7 @@ mod tests {
                 .path("/webauthn/authenticator/1/credential")
                 .reply(&filter)
                 .await;
-            assert_eq!(res.status(), 400);
+            assert!(res.status().is_client_error());
         }
 
         {
@@ -398,8 +817,7 @@ mod tests {
                 .json(&invalid)
                 .reply(&filter)
                 .await;
-            assert_eq!(res.status(), 400);
-            assert_eq!(res.body().slice(0..16), "invalid argument");
+            assert!(res.status().is_client_error());
         }
 
         {
@@ -411,8 +829,7 @@ mod tests {
                 .json(&invalid)
                 .reply(&filter)
                 .await;
-            assert_eq!(res.status(), 400);
-            assert_eq!(res.body().slice(0..16), "invalid argument");
+            assert!(res.status().is_client_error());
         }
 
         {
@@ -424,24 +841,28 @@ mod tests {
                 .json(&invalid)
                 .reply(&filter)
                 .await;
-            assert_eq!(res.status(), 400);
-            assert_eq!(res.body().slice(0..16), "invalid argument");
+            assert!(res.status().is_client_error());
+
+            let state_obj = state.lock().unwrap();
+            assert_eq!(0, state_obj.tokens[0].credentials.len());
         }
 
         {
             let mut no_user_handle = valid_add_credential.clone();
             no_user_handle.user_handle = "".to_string();
+            no_user_handle.credential_id = "YQo=".to_string();
             let res = warp::test::request()
                 .method("POST")
                 .path("/webauthn/authenticator/1/credential")
                 .json(&no_user_handle)
                 .reply(&filter)
                 .await;
-            assert_eq!(res.status(), 200);
-            assert_eq!(res.body(), "added credential to authenticator id=1");
-            let locked_list = list.lock().unwrap();
-            assert_eq!(1, locked_list[0].credentials.len());
-            let c = &locked_list[0].credentials[0];
+            assert!(res.status().is_success());
+            assert_success_rsp_blank(res.body());
+
+            let state_obj = state.lock().unwrap();
+            assert_eq!(1, state_obj.tokens[0].credentials.len());
+            let c = &state_obj.tokens[0].credentials[0];
             assert!(c.user_handle.is_empty());
         }
 
@@ -452,12 +873,77 @@ mod tests {
                 .json(&valid_add_credential)
                 .reply(&filter)
                 .await;
-            assert_eq!(res.status(), 200);
-            assert_eq!(res.body(), "added credential to authenticator id=1");
-            let locked_list = list.lock().unwrap();
-            assert_eq!(2, locked_list[0].credentials.len());
-            let c = &locked_list[0].credentials[1];
+            assert_eq!(res.status(), StatusCode::CREATED);
+            assert_success_rsp_blank(res.body());
+
+            let state_obj = state.lock().unwrap();
+            assert_eq!(2, state_obj.tokens[0].credentials.len());
+            let c = &state_obj.tokens[0].credentials[1];
             assert!(!c.user_handle.is_empty());
+        }
+
+        {
+            // Duplicate, should still be two credentials
+            let res = warp::test::request()
+                .method("POST")
+                .path("/webauthn/authenticator/1/credential")
+                .json(&valid_add_credential)
+                .reply(&filter)
+                .await;
+            assert_eq!(res.status(), StatusCode::CREATED);
+            assert_success_rsp_blank(res.body());
+
+            let state_obj = state.lock().unwrap();
+            assert_eq!(2, state_obj.tokens[0].credentials.len());
+        }
+
+        {
+            let res = warp::test::request()
+                .method("GET")
+                .path("/webauthn/authenticator/1/credentials")
+                .reply(&filter)
+                .await;
+            assert_eq!(res.status(), 200);
+            let (_, body) = res.into_parts();
+            let cred = serde_json::de::from_slice::<Vec<CredentialParameters>>(&body).unwrap();
+
+            let state_obj = state.lock().unwrap();
+            assert_creds_equals_test_token_params(&cred, &state_obj.tokens[0].credentials);
+        }
+
+        {
+            let res = warp::test::request()
+                .method("DELETE")
+                .path("/webauthn/authenticator/1/credentials/YmxhbmsK")
+                .reply(&filter)
+                .await;
+            assert_eq!(res.status(), 404);
+        }
+
+        {
+            let res = warp::test::request()
+                .method("DELETE")
+                .path("/webauthn/authenticator/1/credentials/c3VwZXIgcmVhZGVy")
+                .reply(&filter)
+                .await;
+            assert_eq!(res.status(), 200);
+            assert_success_rsp_blank(res.body());
+
+            let state_obj = state.lock().unwrap();
+            assert_eq!(1, state_obj.tokens[0].credentials.len());
+        }
+
+        {
+            let res = warp::test::request()
+                .method("DELETE")
+                .path("/webauthn/authenticator/1/credentials")
+                .reply(&filter)
+                .await;
+            assert!(res.status().is_success());
+            assert_success_rsp_blank(res.body());
+
+            let state_obj = state.lock().unwrap();
+            assert_eq!(0, state_obj.tokens[0].credentials.len());
         }
     }
 }

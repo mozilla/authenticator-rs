@@ -12,29 +12,42 @@ use std::{io, string, thread};
 
 use crate::authenticatorservice::AuthenticatorTransport;
 use crate::statecallback::StateCallback;
-use crate::virtualdevices::webdriver::testtoken;
-use crate::virtualdevices::webdriver::web_api;
+use crate::virtualdevices::webdriver::{testtoken, web_api};
+
+pub struct VirtualManagerState {
+    pub authenticator_counter: u64,
+    pub tokens: vec::Vec<testtoken::TestToken>,
+}
+
+impl VirtualManagerState {
+    pub fn new() -> Arc<Mutex<VirtualManagerState>> {
+        Arc::new(Mutex::new(VirtualManagerState {
+            authenticator_counter: 0,
+            tokens: vec![],
+        }))
+    }
+}
 
 pub struct VirtualManager {
     addr: SocketAddr,
-    tokens: Arc<Mutex<vec::Vec<testtoken::TestToken>>>,
+    state: Arc<Mutex<VirtualManagerState>>,
     rloop: Option<RunLoop>,
 }
 
 impl VirtualManager {
     pub fn new() -> io::Result<Self> {
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8080);
-        let tokens = Arc::new(Mutex::new(vec::Vec::<testtoken::TestToken>::new()));
-        let tokclone = tokens.clone();
+        let state = VirtualManagerState::new();
+        let stateclone = state.clone();
 
         let builder = thread::Builder::new().name("WebDriver Command Server".into());
         builder.spawn(move || {
-            web_api::serve(tokclone, addr.clone());
+            web_api::serve(stateclone, addr.clone());
         })?;
 
         Ok(Self {
             addr,
-            tokens,
+            state,
             rloop: None,
         })
     }
@@ -60,14 +73,14 @@ impl AuthenticatorTransport for VirtualManager {
             return Err(crate::Error::Unknown);
         }
 
-        let tokens = self.tokens.clone();
+        let state = self.state.clone();
         let rloop = try_or!(
             RunLoop::new_with_timeout(
                 move |alive| {
                     while alive() {
-                        let all_tokens = tokens.lock().unwrap();
+                        let state_obj = state.lock().unwrap();
 
-                        for token in all_tokens.deref() {
+                        for token in state_obj.tokens.deref() {
                             if token.is_user_consenting {
                                 let register_result = token.register();
                                 thread::spawn(move || {
@@ -102,14 +115,14 @@ impl AuthenticatorTransport for VirtualManager {
             return Err(crate::Error::Unknown);
         }
 
-        let tokens = self.tokens.clone();
+        let state = self.state.clone();
         let rloop = try_or!(
             RunLoop::new_with_timeout(
                 move |alive| {
                     while alive() {
-                        let all_tokens = tokens.lock().unwrap();
+                        let state_obj = state.lock().unwrap();
 
-                        for token in all_tokens.deref() {
+                        for token in state_obj.tokens.deref() {
                             if token.is_user_consenting {
                                 let sign_result = token.sign();
                                 thread::spawn(move || {

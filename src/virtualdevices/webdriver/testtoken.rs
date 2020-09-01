@@ -10,6 +10,15 @@ pub enum TestWireProtocol {
     CTAP2,
 }
 
+impl TestWireProtocol {
+    pub fn to_webdriver_string(&self) -> String {
+        match self {
+            TestWireProtocol::CTAP1 => "ctap1/u2f".to_string(),
+            TestWireProtocol::CTAP2 => "ctap2".to_string(),
+        }
+    }
+}
+
 pub struct TestTokenCredential {
     pub credential: Vec<u8>,
     pub privkey: Vec<u8>,
@@ -22,6 +31,7 @@ pub struct TestTokenCredential {
 pub struct TestToken {
     pub id: u64,
     pub protocol: TestWireProtocol,
+    pub transport: String,
     pub is_user_consenting: bool,
     pub has_user_verification: bool,
     pub is_user_verified: bool,
@@ -34,6 +44,7 @@ impl TestToken {
     pub fn new(
         id: u64,
         protocol: TestWireProtocol,
+        transport: String,
         is_user_consenting: bool,
         has_user_verification: bool,
         is_user_verified: bool,
@@ -44,6 +55,7 @@ impl TestToken {
                 return Self {
                     id,
                     protocol,
+                    transport,
                     is_user_consenting,
                     has_user_verification,
                     is_user_verified,
@@ -73,7 +85,28 @@ impl TestToken {
             user_handle: user_handle.to_vec(),
             sign_count,
         };
-        self.credentials.push(c);
+
+        match self
+            .credentials
+            .binary_search_by_key(&credential, |probe| &probe.credential)
+        {
+            Ok(_) => return,
+            Err(idx) => self.credentials.insert(idx, c),
+        }
+    }
+
+    pub fn delete_credential(&mut self, credential: &[u8]) -> bool {
+        debug!("Asking to delete credential",);
+        if let Ok(idx) = self
+            .credentials
+            .binary_search_by_key(&credential, |probe| &probe.credential)
+        {
+            debug!("Asking to delete credential from idx {}", idx);
+            self.credentials.remove(idx);
+            return true;
+        }
+
+        false
     }
 
     pub fn register(&self) -> Result<RegisterResult, Error> {
