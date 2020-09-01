@@ -254,3 +254,40 @@ impl fmt::Display for U2FDeviceInfo {
         )
     }
 }
+
+pub struct U2FRegistrationResponse {
+    public_key: Vec<u8>,
+    key_handle: Vec<u8>,
+    attestation: Vec<u8>,
+    signature: Vec<u8>,
+}
+
+impl U2FRegistrationResponse {
+    pub fn from_vec(data: &[u8]) -> Result<Self> {
+        if data[0] != 0x05 {
+            return Err(Box::new());
+        }
+
+        let key_handle_len = data[66] as usize;
+        let mut public_key = data.to_owned();
+        let mut key_handle = public_key.split_off(67);
+        let attestation_and_signature = key_handle.split_off(key_handle_len);
+
+        Ok(U2FRegistrationResponse{
+            public_key,
+            key_handle,
+            attestation: vec![0; 1024],
+            signature: vec![0; 32],
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::U2FRegistrationResponse;
+
+    #[test]
+    fn test_reg_response() {
+        assert!(U2FRegistrationResponse::from_vec(vec![0; 128].as_slice()).is_err());
+    }
+}
