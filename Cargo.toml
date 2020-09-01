@@ -16,6 +16,7 @@ maintenance = { status = "actively-developed" }
 [features]
 binding-recompile = ["bindgen"]
 webdriver = ["base64", "bytes", "warp", "tokio", "serde", "serde_json"]
+use-ring = ["ring"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libudev = "^0.2"
@@ -51,6 +52,7 @@ serde = { version = "1.0", optional = true, features = ["derive"] }
 serde_json = { version = "1.0", optional = true }
 bytes = { version = "0.5", optional = true, features = ["serde"] }
 base64 = { version = "^0.10", optional = true }
+ring = { version = "^0.16", optional = true }
 
 [dev-dependencies]
 sha2 = "^0.8.2"

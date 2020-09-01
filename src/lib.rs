@@ -74,6 +74,7 @@ mod capi;
 pub use crate::capi::*;
 
 pub mod errors;
+pub mod crypto;
 pub mod statecallback;
 mod virtualdevices;
 
