@@ -5,6 +5,7 @@
 use std::sync::{mpsc::Sender, Arc, Mutex};
 
 use crate::consts::PARAMETER_SIZE;
+use crate::errors::*;
 use crate::statecallback::StateCallback;
 
 pub trait AuthenticatorTransport {
@@ -18,8 +19,8 @@ pub trait AuthenticatorTransport {
         application: crate::AppId,
         key_handles: Vec<crate::KeyHandle>,
         status: Sender<crate::StatusUpdate>,
-        callback: StateCallback<Result<crate::RegisterResult, crate::Error>>,
-    ) -> Result<(), crate::Error>;
+        callback: StateCallback<crate::Result<crate::RegisterResult>>,
+    ) -> crate::Result<()>;
 
     /// The implementation of this method must return quickly and should
     /// report its status via the status and callback methods
@@ -31,10 +32,10 @@ pub trait AuthenticatorTransport {
         app_ids: Vec<crate::AppId>,
         key_handles: Vec<crate::KeyHandle>,
         status: Sender<crate::StatusUpdate>,
-        callback: StateCallback<Result<crate::SignResult, crate::Error>>,
-    ) -> Result<(), crate::Error>;
+        callback: StateCallback<crate::Result<crate::SignResult>>,
+    ) -> crate::Result<()>;
 
-    fn cancel(&mut self) -> Result<(), crate::Error>;
+    fn cancel(&mut self) -> crate::Result<()>;
 }
 
 pub struct AuthenticatorService {
@@ -61,7 +62,7 @@ fn clone_and_configure_cancellation_callback<T>(
 }
 
 impl AuthenticatorService {
-    pub fn new() -> Result<Self, crate::Error> {
+    pub fn new() -> crate::Result<Self> {
         Ok(Self {
             transports: Vec::new(),
         })
@@ -91,21 +92,21 @@ impl AuthenticatorService {
         application: crate::AppId,
         key_handles: Vec<crate::KeyHandle>,
         status: Sender<crate::StatusUpdate>,
-        callback: StateCallback<Result<crate::RegisterResult, crate::Error>>,
-    ) -> Result<(), crate::Error> {
+        callback: StateCallback<crate::Result<crate::RegisterResult>>,
+    ) -> crate::Result<()> {
         if challenge.len() != PARAMETER_SIZE || application.len() != PARAMETER_SIZE {
-            return Err(crate::Error::Unknown);
+            return Err(AuthenticatorError::InvalidRelyingPartyInput);
         }
 
         for key_handle in &key_handles {
             if key_handle.credential.len() > 256 {
-                return Err(crate::Error::Unknown);
+                return Err(AuthenticatorError::InvalidRelyingPartyInput);
             }
         }
 
         let iterable_transports = self.transports.clone();
         if iterable_transports.is_empty() {
-            return Err(crate::Error::NotSupported);
+            return Err(AuthenticatorError::NoConfiguredTransports);
         }
 
         debug!(
@@ -145,31 +146,31 @@ impl AuthenticatorService {
         app_ids: Vec<crate::AppId>,
         key_handles: Vec<crate::KeyHandle>,
         status: Sender<crate::StatusUpdate>,
-        callback: StateCallback<Result<crate::SignResult, crate::Error>>,
-    ) -> Result<(), crate::Error> {
+        callback: StateCallback<crate::Result<crate::SignResult>>,
+    ) -> crate::Result<()> {
         if challenge.len() != PARAMETER_SIZE {
-            return Err(crate::Error::Unknown);
+            return Err(AuthenticatorError::InvalidRelyingPartyInput);
         }
 
         if app_ids.is_empty() {
-            return Err(crate::Error::Unknown);
+            return Err(AuthenticatorError::InvalidRelyingPartyInput);
         }
 
         for app_id in &app_ids {
             if app_id.len() != PARAMETER_SIZE {
-                return Err(crate::Error::Unknown);
+                return Err(AuthenticatorError::InvalidRelyingPartyInput);
             }
         }
 
         for key_handle in &key_handles {
             if key_handle.credential.len() > 256 {
-                return Err(crate::Error::Unknown);
+                return Err(AuthenticatorError::InvalidRelyingPartyInput);
             }
         }
 
         let iterable_transports = self.transports.clone();
         if iterable_transports.is_empty() {
-            return Err(crate::Error::NotSupported);
+            return Err(AuthenticatorError::NoConfiguredTransports);
         }
 
         for (idx, transport_mutex) in iterable_transports.iter().enumerate() {
@@ -190,9 +191,9 @@ impl AuthenticatorService {
         Ok(())
     }
 
-    pub fn cancel(&mut self) -> Result<(), crate::Error> {
+    pub fn cancel(&mut self) -> crate::Result<()> {
         if self.transports.is_empty() {
-            return Err(crate::Error::NotSupported);
+            return Err(AuthenticatorError::NoConfiguredTransports);
         }
 
         for transport_mutex in &mut self.transports {
@@ -259,8 +260,8 @@ mod tests {
             _application: crate::AppId,
             _key_handles: Vec<crate::KeyHandle>,
             _status: Sender<crate::StatusUpdate>,
-            callback: StateCallback<Result<crate::RegisterResult, crate::Error>>,
-        ) -> Result<(), crate::Error> {
+            callback: StateCallback<crate::Result<crate::RegisterResult>>,
+        ) -> crate::Result<()> {
             if self.consent {
                 let rv = Ok((vec![0u8; 16], self.dev_info()));
                 thread::spawn(move || callback.call(rv));
@@ -276,8 +277,8 @@ mod tests {
             _app_ids: Vec<crate::AppId>,
             _key_handles: Vec<crate::KeyHandle>,
             _status: Sender<crate::StatusUpdate>,
-            callback: StateCallback<Result<crate::SignResult, crate::Error>>,
-        ) -> Result<(), crate::Error> {
+            callback: StateCallback<crate::Result<crate::SignResult>>,
+        ) -> crate::Result<()> {
             if self.consent {
                 let rv = Ok((vec![0u8; 0], vec![0u8; 0], vec![0u8; 0], self.dev_info()));
                 thread::spawn(move || callback.call(rv));
@@ -285,10 +286,15 @@ mod tests {
             Ok(())
         }
 
-        fn cancel(&mut self) -> Result<(), crate::Error> {
+        fn cancel(&mut self) -> crate::Result<()> {
             self.was_cancelled
                 .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-                .map_or(Err(crate::Error::InvalidState), |_| Ok(()))
+                .map_or(
+                    Err(crate::errors::AuthenticatorError::U2FToken(
+                        crate::errors::U2FTokenError::InvalidState,
+                    )),
+                    |_| Ok(()),
+                )
         }
     }
 
@@ -315,7 +321,7 @@ mod tests {
         let mut s = AuthenticatorService::new().unwrap();
         s.add_transport(Box::new(TestTransportDriver::new(true).unwrap()));
 
-        assert_eq!(
+        assert_matches!(
             s.register(
                 RegisterFlags::empty(),
                 1_000,
@@ -326,10 +332,10 @@ mod tests {
                 StateCallback::new(Box::new(move |_rv| {})),
             )
             .unwrap_err(),
-            crate::Error::Unknown
+            crate::errors::AuthenticatorError::InvalidRelyingPartyInput
         );
 
-        assert_eq!(
+        assert_matches!(
             s.sign(
                 SignFlags::empty(),
                 1_000,
@@ -340,7 +346,7 @@ mod tests {
                 StateCallback::new(Box::new(move |_rv| {})),
             )
             .unwrap_err(),
-            crate::Error::Unknown
+            crate::errors::AuthenticatorError::InvalidRelyingPartyInput
         );
     }
 
@@ -352,7 +358,7 @@ mod tests {
         let mut s = AuthenticatorService::new().unwrap();
         s.add_transport(Box::new(TestTransportDriver::new(true).unwrap()));
 
-        assert_eq!(
+        assert_matches!(
             s.register(
                 RegisterFlags::empty(),
                 1_000,
@@ -363,10 +369,10 @@ mod tests {
                 StateCallback::new(Box::new(move |_rv| {})),
             )
             .unwrap_err(),
-            crate::Error::Unknown
+            crate::errors::AuthenticatorError::InvalidRelyingPartyInput
         );
 
-        assert_eq!(
+        assert_matches!(
             s.sign(
                 SignFlags::empty(),
                 1_000,
@@ -377,7 +383,7 @@ mod tests {
                 StateCallback::new(Box::new(move |_rv| {})),
             )
             .unwrap_err(),
-            crate::Error::Unknown
+            crate::errors::AuthenticatorError::InvalidRelyingPartyInput
         );
     }
 
@@ -392,7 +398,7 @@ mod tests {
         let mut s = AuthenticatorService::new().unwrap();
         s.add_transport(Box::new(TestTransportDriver::new(true).unwrap()));
 
-        assert_eq!(
+        assert_matches!(
             s.register(
                 RegisterFlags::empty(),
                 100,
@@ -405,7 +411,7 @@ mod tests {
             Ok(())
         );
 
-        assert_eq!(
+        assert_matches!(
             s.sign(
                 SignFlags::empty(),
                 100,
@@ -432,7 +438,7 @@ mod tests {
         let mut s = AuthenticatorService::new().unwrap();
         s.add_transport(Box::new(TestTransportDriver::new(true).unwrap()));
 
-        assert_eq!(
+        assert_matches!(
             s.register(
                 RegisterFlags::empty(),
                 1_000,
@@ -443,10 +449,10 @@ mod tests {
                 StateCallback::new(Box::new(move |_rv| {})),
             )
             .unwrap_err(),
-            crate::Error::Unknown
+            crate::errors::AuthenticatorError::InvalidRelyingPartyInput
         );
 
-        assert_eq!(
+        assert_matches!(
             s.sign(
                 SignFlags::empty(),
                 1_000,
@@ -457,7 +463,7 @@ mod tests {
                 StateCallback::new(Box::new(move |_rv| {})),
             )
             .unwrap_err(),
-            crate::Error::Unknown
+            crate::errors::AuthenticatorError::InvalidRelyingPartyInput
         );
     }
 
@@ -467,7 +473,7 @@ mod tests {
         let (status_tx, _) = channel::<StatusUpdate>();
 
         let mut s = AuthenticatorService::new().unwrap();
-        assert_eq!(
+        assert_matches!(
             s.register(
                 RegisterFlags::empty(),
                 1_000,
@@ -478,10 +484,10 @@ mod tests {
                 StateCallback::new(Box::new(move |_rv| {})),
             )
             .unwrap_err(),
-            crate::Error::NotSupported
+            crate::errors::AuthenticatorError::NoConfiguredTransports
         );
 
-        assert_eq!(
+        assert_matches!(
             s.sign(
                 SignFlags::empty(),
                 1_000,
@@ -492,10 +498,13 @@ mod tests {
                 StateCallback::new(Box::new(move |_rv| {})),
             )
             .unwrap_err(),
-            crate::Error::NotSupported
+            crate::errors::AuthenticatorError::NoConfiguredTransports
         );
 
-        assert_eq!(s.cancel().unwrap_err(), crate::Error::NotSupported);
+        assert_matches!(
+            s.cancel().unwrap_err(),
+            crate::errors::AuthenticatorError::NoConfiguredTransports
+        );
     }
 
     #[test]
@@ -517,8 +526,8 @@ mod tests {
         s.add_transport(Box::new(ttd_three));
 
         let callback = StateCallback::new(Box::new(move |_rv| {}));
-        assert_eq!(
-            s.register(
+        assert!(s
+            .register(
                 RegisterFlags::empty(),
                 1_000,
                 mk_challenge(),
@@ -526,9 +535,8 @@ mod tests {
                 vec![],
                 status_tx.clone(),
                 callback.clone(),
-            ),
-            Ok(())
-        );
+            )
+            .is_ok());
         callback.wait();
 
         assert_eq!(was_cancelled_one.load(Ordering::SeqCst), false);
@@ -555,8 +563,8 @@ mod tests {
         s.add_transport(Box::new(ttd_three));
 
         let callback = StateCallback::new(Box::new(move |_rv| {}));
-        assert_eq!(
-            s.sign(
+        assert!(s
+            .sign(
                 SignFlags::empty(),
                 1_000,
                 mk_challenge(),
@@ -564,9 +572,8 @@ mod tests {
                 vec![mk_key()],
                 status_tx,
                 callback.clone(),
-            ),
-            Ok(())
-        );
+            )
+            .is_ok());
         callback.wait();
 
         assert_eq!(was_cancelled_one.load(Ordering::SeqCst), false);
@@ -591,8 +598,8 @@ mod tests {
         s.add_transport(Box::new(ttd_two));
 
         let callback = StateCallback::new(Box::new(move |_rv| {}));
-        assert_eq!(
-            s.register(
+        assert!(s
+            .register(
                 RegisterFlags::empty(),
                 1_000,
                 mk_challenge(),
@@ -600,9 +607,8 @@ mod tests {
                 vec![],
                 status_tx.clone(),
                 callback.clone(),
-            ),
-            Ok(())
-        );
+            )
+            .is_ok());
         callback.wait();
 
         let one = was_cancelled_one.load(Ordering::SeqCst);

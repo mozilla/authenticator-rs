@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use crate::authenticatorservice::AuthenticatorService;
+use crate::errors;
 use crate::statecallback::StateCallback;
 use crate::{RegisterResult, SignResult};
 use libc::size_t;
@@ -18,7 +19,7 @@ type U2FCallback = extern "C" fn(u64, *mut U2FResult);
 
 pub enum U2FResult {
     Success(HashMap<u8, Vec<u8>>),
-    Error(crate::Error),
+    Error(errors::AuthenticatorError),
 }
 
 const RESBUF_ID_REGISTRATION: u8 = 0;
@@ -136,11 +137,11 @@ pub unsafe extern "C" fn rust_u2f_khs_free(khs: *mut U2FKeyHandles) {
 #[no_mangle]
 pub unsafe extern "C" fn rust_u2f_result_error(res: *const U2FResult) -> u8 {
     if res.is_null() {
-        return crate::Error::Unknown as u8;
+        return errors::U2FTokenError::Unknown as u8;
     }
 
     if let U2FResult::Error(ref err) = *res {
-        return *err as u8;
+        return err.as_u2f_errorcode();
     }
 
     0 /* No error, the request succeeded. */
@@ -246,24 +247,23 @@ pub unsafe extern "C" fn rust_u2f_mgr_register(
 
     let tid = new_tid();
 
-    let state_callback =
-        StateCallback::<Result<RegisterResult, crate::Error>>::new(Box::new(move |rv| {
-            let result = match rv {
-                Ok((registration, dev_info)) => {
-                    let mut bufs = HashMap::new();
-                    bufs.insert(RESBUF_ID_REGISTRATION, registration);
-                    bufs.insert(RESBUF_ID_VENDOR_NAME, dev_info.vendor_name);
-                    bufs.insert(RESBUF_ID_DEVICE_NAME, dev_info.device_name);
-                    bufs.insert(RESBUF_ID_FIRMWARE_MAJOR, vec![dev_info.version_major]);
-                    bufs.insert(RESBUF_ID_FIRMWARE_MINOR, vec![dev_info.version_minor]);
-                    bufs.insert(RESBUF_ID_FIRMWARE_BUILD, vec![dev_info.version_build]);
-                    U2FResult::Success(bufs)
-                }
-                Err(e) => U2FResult::Error(e),
-            };
+    let state_callback = StateCallback::<crate::Result<RegisterResult>>::new(Box::new(move |rv| {
+        let result = match rv {
+            Ok((registration, dev_info)) => {
+                let mut bufs = HashMap::new();
+                bufs.insert(RESBUF_ID_REGISTRATION, registration);
+                bufs.insert(RESBUF_ID_VENDOR_NAME, dev_info.vendor_name);
+                bufs.insert(RESBUF_ID_DEVICE_NAME, dev_info.device_name);
+                bufs.insert(RESBUF_ID_FIRMWARE_MAJOR, vec![dev_info.version_major]);
+                bufs.insert(RESBUF_ID_FIRMWARE_MINOR, vec![dev_info.version_minor]);
+                bufs.insert(RESBUF_ID_FIRMWARE_BUILD, vec![dev_info.version_build]);
+                U2FResult::Success(bufs)
+            }
+            Err(e) => U2FResult::Error(e),
+        };
 
-            callback(tid, Box::into_raw(Box::new(result)));
-        }));
+        callback(tid, Box::into_raw(Box::new(result)));
+    }));
 
     let res = (*mgr).register(
         flags,
@@ -327,26 +327,25 @@ pub unsafe extern "C" fn rust_u2f_mgr_sign(
     });
 
     let tid = new_tid();
-    let state_callback =
-        StateCallback::<Result<SignResult, crate::Error>>::new(Box::new(move |rv| {
-            let result = match rv {
-                Ok((app_id, key_handle, signature, dev_info)) => {
-                    let mut bufs = HashMap::new();
-                    bufs.insert(RESBUF_ID_KEYHANDLE, key_handle);
-                    bufs.insert(RESBUF_ID_SIGNATURE, signature);
-                    bufs.insert(RESBUF_ID_APPID, app_id);
-                    bufs.insert(RESBUF_ID_VENDOR_NAME, dev_info.vendor_name);
-                    bufs.insert(RESBUF_ID_DEVICE_NAME, dev_info.device_name);
-                    bufs.insert(RESBUF_ID_FIRMWARE_MAJOR, vec![dev_info.version_major]);
-                    bufs.insert(RESBUF_ID_FIRMWARE_MINOR, vec![dev_info.version_minor]);
-                    bufs.insert(RESBUF_ID_FIRMWARE_BUILD, vec![dev_info.version_build]);
-                    U2FResult::Success(bufs)
-                }
-                Err(e) => U2FResult::Error(e),
-            };
+    let state_callback = StateCallback::<crate::Result<SignResult>>::new(Box::new(move |rv| {
+        let result = match rv {
+            Ok((app_id, key_handle, signature, dev_info)) => {
+                let mut bufs = HashMap::new();
+                bufs.insert(RESBUF_ID_KEYHANDLE, key_handle);
+                bufs.insert(RESBUF_ID_SIGNATURE, signature);
+                bufs.insert(RESBUF_ID_APPID, app_id);
+                bufs.insert(RESBUF_ID_VENDOR_NAME, dev_info.vendor_name);
+                bufs.insert(RESBUF_ID_DEVICE_NAME, dev_info.device_name);
+                bufs.insert(RESBUF_ID_FIRMWARE_MAJOR, vec![dev_info.version_major]);
+                bufs.insert(RESBUF_ID_FIRMWARE_MINOR, vec![dev_info.version_minor]);
+                bufs.insert(RESBUF_ID_FIRMWARE_BUILD, vec![dev_info.version_build]);
+                U2FResult::Success(bufs)
+            }
+            Err(e) => U2FResult::Error(e),
+        };
 
-            callback(tid, Box::into_raw(Box::new(result)));
-        }));
+        callback(tid, Box::into_raw(Box::new(result)));
+    }));
 
     let res = (*mgr).sign(
         flags,

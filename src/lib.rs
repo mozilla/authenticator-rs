@@ -73,6 +73,7 @@ pub use crate::manager::U2FManager;
 mod capi;
 pub use crate::capi::*;
 
+pub mod errors;
 pub mod statecallback;
 
 // Keep this in sync with the constants in u2fhid-capi.h.
@@ -106,22 +107,7 @@ pub type AppId = Vec<u8>;
 pub type RegisterResult = (Vec<u8>, u2ftypes::U2FDeviceInfo);
 pub type SignResult = (AppId, Vec<u8>, Vec<u8>, u2ftypes::U2FDeviceInfo);
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Error {
-    Unknown = 1,
-    NotSupported = 2,
-    InvalidState = 3,
-    ConstraintError = 4,
-    NotAllowed = 5,
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-impl std::error::Error for Error {}
+pub type Result<T> = std::result::Result<T, errors::AuthenticatorError>;
 
 #[derive(Debug, Clone)]
 pub enum StatusUpdate {
@@ -129,6 +115,10 @@ pub enum StatusUpdate {
     DeviceUnavailable { dev_info: u2ftypes::U2FDeviceInfo },
     Success { dev_info: u2ftypes::U2FDeviceInfo },
 }
+
+#[cfg(test)]
+#[macro_use]
+extern crate assert_matches;
 
 #[cfg(fuzzing)]
 pub use consts::*;
