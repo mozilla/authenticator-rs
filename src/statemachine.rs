@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use crate::consts::PARAMETER_SIZE;
+use crate::errors;
 use crate::platform::device::Device;
 use crate::platform::transaction::Transaction;
 use crate::statecallback::StateCallback;
@@ -74,7 +75,7 @@ impl StateMachine {
         application: crate::AppId,
         key_handles: Vec<crate::KeyHandle>,
         status: Sender<crate::StatusUpdate>,
-        callback: StateCallback<Result<crate::RegisterResult, crate::Error>>,
+        callback: StateCallback<crate::Result<crate::RegisterResult>>,
     ) {
         // Abort any prior register/sign calls.
         self.cancel();
@@ -125,7 +126,9 @@ impl StateMachine {
                 if excluded {
                     let blank = vec![0u8; PARAMETER_SIZE];
                     if u2f_register(dev, &blank, &blank).is_ok() {
-                        callback.call(Err(crate::Error::InvalidState));
+                        callback.call(Err(errors::AuthenticatorError::U2FToken(
+                            errors::U2FTokenError::InvalidState,
+                        )));
                         break;
                     }
                 } else if let Ok(bytes) = u2f_register(dev, &challenge, &application) {
@@ -163,7 +166,7 @@ impl StateMachine {
         app_ids: Vec<crate::AppId>,
         key_handles: Vec<crate::KeyHandle>,
         status: Sender<crate::StatusUpdate>,
-        callback: StateCallback<Result<crate::SignResult, crate::Error>>,
+        callback: StateCallback<crate::Result<crate::SignResult>>,
     ) {
         // Abort any prior register/sign calls.
         self.cancel();
@@ -229,7 +232,9 @@ impl StateMachine {
                 if valid_handles.is_empty() {
                     let blank = vec![0u8; PARAMETER_SIZE];
                     if u2f_register(dev, &blank, &blank).is_ok() {
-                        callback.call(Err(crate::Error::InvalidState));
+                        callback.call(Err(errors::AuthenticatorError::U2FToken(
+                            errors::U2FTokenError::InvalidState,
+                        )));
                         break;
                     }
                 } else {

@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use crate::authenticatorservice::AuthenticatorTransport;
 use crate::consts::PARAMETER_SIZE;
+use crate::errors::*;
 use crate::statecallback::StateCallback;
 use crate::statemachine::StateMachine;
 use runloop::RunLoop;
@@ -20,7 +21,7 @@ enum QueueAction {
         application: crate::AppId,
         key_handles: Vec<crate::KeyHandle>,
         status: Sender<crate::StatusUpdate>,
-        callback: StateCallback<Result<crate::RegisterResult, crate::Error>>,
+        callback: StateCallback<crate::Result<crate::RegisterResult>>,
     },
     Sign {
         flags: crate::SignFlags,
@@ -29,7 +30,7 @@ enum QueueAction {
         app_ids: Vec<crate::AppId>,
         key_handles: Vec<crate::KeyHandle>,
         status: Sender<crate::StatusUpdate>,
-        callback: StateCallback<Result<crate::SignResult, crate::Error>>,
+        callback: StateCallback<crate::Result<crate::SignResult>>,
     },
     Cancel,
 }
@@ -118,15 +119,15 @@ impl AuthenticatorTransport for U2FManager {
         application: crate::AppId,
         key_handles: Vec<crate::KeyHandle>,
         status: Sender<crate::StatusUpdate>,
-        callback: StateCallback<Result<crate::RegisterResult, crate::Error>>,
-    ) -> Result<(), crate::Error> {
+        callback: StateCallback<crate::Result<crate::RegisterResult>>,
+    ) -> crate::Result<()> {
         if challenge.len() != PARAMETER_SIZE || application.len() != PARAMETER_SIZE {
-            return Err(crate::Error::Unknown);
+            return Err(AuthenticatorError::InvalidRelyingPartyInput);
         }
 
         for key_handle in &key_handles {
             if key_handle.credential.len() > 256 {
-                return Err(crate::Error::Unknown);
+                return Err(AuthenticatorError::InvalidRelyingPartyInput);
             }
         }
 
@@ -139,7 +140,9 @@ impl AuthenticatorTransport for U2FManager {
             status,
             callback,
         };
-        self.tx.send(action).map_err(|_| crate::Error::Unknown)
+        self.tx
+            .send(action)
+            .map_err(|e| AuthenticatorError::from(e))
     }
 
     fn sign(
@@ -150,25 +153,25 @@ impl AuthenticatorTransport for U2FManager {
         app_ids: Vec<crate::AppId>,
         key_handles: Vec<crate::KeyHandle>,
         status: Sender<crate::StatusUpdate>,
-        callback: StateCallback<Result<crate::SignResult, crate::Error>>,
-    ) -> Result<(), crate::Error> {
+        callback: StateCallback<crate::Result<crate::SignResult>>,
+    ) -> crate::Result<()> {
         if challenge.len() != PARAMETER_SIZE {
-            return Err(crate::Error::Unknown);
+            return Err(AuthenticatorError::InvalidRelyingPartyInput);
         }
 
         if app_ids.is_empty() {
-            return Err(crate::Error::Unknown);
+            return Err(AuthenticatorError::InvalidRelyingPartyInput);
         }
 
         for app_id in &app_ids {
             if app_id.len() != PARAMETER_SIZE {
-                return Err(crate::Error::Unknown);
+                return Err(AuthenticatorError::InvalidRelyingPartyInput);
             }
         }
 
         for key_handle in &key_handles {
             if key_handle.credential.len() > 256 {
-                return Err(crate::Error::Unknown);
+                return Err(AuthenticatorError::InvalidRelyingPartyInput);
             }
         }
 
@@ -181,13 +184,15 @@ impl AuthenticatorTransport for U2FManager {
             status,
             callback,
         };
-        self.tx.send(action).map_err(|_| crate::Error::Unknown)
+        self.tx
+            .send(action)
+            .map_err(|e| AuthenticatorError::from(e))
     }
 
-    fn cancel(&mut self) -> Result<(), crate::Error> {
+    fn cancel(&mut self) -> crate::Result<()> {
         self.tx
             .send(QueueAction::Cancel)
-            .map_err(|_| crate::Error::Unknown)
+            .map_err(|e| AuthenticatorError::from(e))
     }
 }
 
