@@ -45,7 +45,7 @@ impl fmt::Display for AuthenticatorError {
                 "no transports were configured in the authenticator service"
             ),
             AuthenticatorError::Platform => write!(f, "unknown platform error"),
-            AuthenticatorError::InternalError(ref err) => write!(f, "internal error: {:?}", err),
+            AuthenticatorError::InternalError(ref err) => write!(f, "internal error: {}", err),
             AuthenticatorError::U2FToken(ref err) => {
                 write!(f, "A u2f token error occurred {:?}", err)
             }
@@ -76,7 +76,6 @@ pub enum U2FTokenError {
 }
 
 impl U2FTokenError {
-    #[allow(dead_code)]
     fn as_str(&self) -> &str {
         match *self {
             U2FTokenError::Unknown => "unknown",
@@ -90,7 +89,7 @@ impl U2FTokenError {
 
 impl std::fmt::Display for U2FTokenError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{}", self.as_str())
     }
 }
 

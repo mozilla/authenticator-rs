@@ -184,15 +184,11 @@ impl AuthenticatorTransport for U2FManager {
             status,
             callback,
         };
-        self.tx
-            .send(action)
-            .map_err(|e| AuthenticatorError::from(e))
+        Ok(self.tx.send(action)?)
     }
 
     fn cancel(&mut self) -> crate::Result<()> {
-        self.tx
-            .send(QueueAction::Cancel)
-            .map_err(|e| AuthenticatorError::from(e))
+        Ok(self.tx.send(QueueAction::Cancel)?)
     }
 }
 
