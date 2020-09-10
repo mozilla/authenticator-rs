@@ -9,6 +9,7 @@ use libc::size_t;
 use rand::{thread_rng, Rng};
 use std::collections::HashMap;
 use std::sync::mpsc::channel;
+use std::thread;
 use std::{ptr, slice};
 
 type U2FAppIds = Vec<crate::AppId>;
@@ -233,7 +234,16 @@ pub unsafe extern "C" fn rust_u2f_mgr_register(
     let application = from_raw(application_ptr, application_len);
     let key_handles = (*khs).clone();
 
-    let (tx, _rx) = channel::<crate::StatusUpdate>();
+    let (status_tx, status_rx) = channel::<crate::StatusUpdate>();
+    thread::spawn(move || loop {
+        // Issue https://github.com/mozilla/authenticator-rs/issues/132 will
+        // plumb the status channel through to the actual C API signatures
+        match status_rx.recv() {
+            Ok(_) => {}
+            Err(_recv_error) => return,
+        }
+    });
+
     let tid = new_tid();
 
     let state_callback =
@@ -261,7 +271,7 @@ pub unsafe extern "C" fn rust_u2f_mgr_register(
         challenge,
         application,
         key_handles,
-        tx,
+        status_tx,
         state_callback,
     );
 
@@ -306,7 +316,15 @@ pub unsafe extern "C" fn rust_u2f_mgr_sign(
     let app_ids = (*app_ids).clone();
     let key_handles = (*khs).clone();
 
-    let (tx, _rx) = channel::<crate::StatusUpdate>();
+    let (status_tx, status_rx) = channel::<crate::StatusUpdate>();
+    thread::spawn(move || loop {
+        // Issue https://github.com/mozilla/authenticator-rs/issues/132 will
+        // plumb the status channel through to the actual C API signatures
+        match status_rx.recv() {
+            Ok(_) => {}
+            Err(_recv_error) => return,
+        }
+    });
 
     let tid = new_tid();
     let state_callback =
@@ -336,7 +354,7 @@ pub unsafe extern "C" fn rust_u2f_mgr_sign(
         challenge,
         app_ids,
         key_handles,
-        tx,
+        status_tx,
         state_callback,
     );
 
