@@ -39,8 +39,8 @@ impl SoftwareU2FToken {
 
     pub fn dev_info(&self) -> crate::u2ftypes::U2FDeviceInfo {
         crate::u2ftypes::U2FDeviceInfo {
-            vendor_name: String::from("Mozilla").into_bytes(),
-            device_name: String::from("Authenticator Webdriver Token").into_bytes(),
+            vendor_name: b"Mozilla".to_vec(),
+            device_name: b"Authenticator Webdriver Token".to_vec(),
             version_interface: 0,
             version_major: 1,
             version_minor: 2,
