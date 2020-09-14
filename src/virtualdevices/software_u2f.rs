@@ -20,7 +20,7 @@ impl SoftwareU2FToken {
         _challenge: Vec<u8>,
         _application: crate::AppId,
         _key_handles: Vec<crate::KeyHandle>,
-    ) -> Result<crate::RegisterResult, crate::Error> {
+    ) -> crate::Result<crate::RegisterResult> {
         Ok((vec![0u8; 16], self.dev_info()))
     }
 
@@ -33,7 +33,7 @@ impl SoftwareU2FToken {
         _challenge: Vec<u8>,
         _app_ids: Vec<crate::AppId>,
         _key_handles: Vec<crate::KeyHandle>,
-    ) -> Result<crate::SignResult, crate::Error> {
+    ) -> crate::Result<crate::SignResult> {
         Ok((vec![0u8; 0], vec![0u8; 0], vec![0u8; 0], self.dev_info()))
     }
 

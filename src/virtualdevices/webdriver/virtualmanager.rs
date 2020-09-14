@@ -11,6 +11,7 @@ use std::vec;
 use std::{io, string, thread};
 
 use crate::authenticatorservice::AuthenticatorTransport;
+use crate::errors;
 use crate::statecallback::StateCallback;
 use crate::virtualdevices::webdriver::{testtoken, web_api};
 
@@ -66,11 +67,13 @@ impl AuthenticatorTransport for VirtualManager {
         _application: crate::AppId,
         _key_handles: Vec<crate::KeyHandle>,
         _status: Sender<crate::StatusUpdate>,
-        callback: StateCallback<Result<crate::RegisterResult, crate::Error>>,
-    ) -> Result<(), crate::Error> {
+        callback: StateCallback<crate::Result<crate::RegisterResult>>,
+    ) -> crate::Result<()> {
         if self.rloop.is_some() {
             error!("WebDriver state error, prior operation never cancelled.");
-            return Err(crate::Error::Unknown);
+            return Err(errors::AuthenticatorError::U2FToken(
+                errors::U2FTokenError::Unknown,
+            ));
         }
 
         let state = self.state.clone();
@@ -93,7 +96,7 @@ impl AuthenticatorTransport for VirtualManager {
                 },
                 timeout
             ),
-            |_| Err(crate::Error::Unknown)
+            |_| Err(errors::AuthenticatorError::Platform)
         );
 
         self.rloop = Some(rloop);
@@ -108,11 +111,13 @@ impl AuthenticatorTransport for VirtualManager {
         _app_ids: Vec<crate::AppId>,
         _key_handles: Vec<crate::KeyHandle>,
         _status: Sender<crate::StatusUpdate>,
-        callback: StateCallback<Result<crate::SignResult, crate::Error>>,
-    ) -> Result<(), crate::Error> {
+        callback: StateCallback<crate::Result<crate::SignResult>>,
+    ) -> crate::Result<()> {
         if self.rloop.is_some() {
             error!("WebDriver state error, prior operation never cancelled.");
-            return Err(crate::Error::Unknown);
+            return Err(errors::AuthenticatorError::U2FToken(
+                errors::U2FTokenError::Unknown,
+            ));
         }
 
         let state = self.state.clone();
@@ -135,14 +140,14 @@ impl AuthenticatorTransport for VirtualManager {
                 },
                 timeout
             ),
-            |_| Err(crate::Error::Unknown)
+            |_| Err(errors::AuthenticatorError::Platform)
         );
 
         self.rloop = Some(rloop);
         Ok(())
     }
 
-    fn cancel(&mut self) -> Result<(), crate::Error> {
+    fn cancel(&mut self) -> crate::Result<()> {
         if let Some(r) = self.rloop.take() {
             debug!("WebDriver operation cancelled.");
             r.cancel();
