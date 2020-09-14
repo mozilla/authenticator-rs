@@ -2,8 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+use crate::errors;
 use crate::virtualdevices::software_u2f::SoftwareU2FToken;
-use crate::{Error, RegisterFlags, RegisterResult, SignFlags, SignResult};
+use crate::{RegisterFlags, RegisterResult, SignFlags, SignResult};
 
 pub enum TestWireProtocol {
     CTAP1,
@@ -109,7 +110,7 @@ impl TestToken {
         false
     }
 
-    pub fn register(&self) -> Result<RegisterResult, Error> {
+    pub fn register(&self) -> crate::Result<RegisterResult> {
         if self.u2f_impl.is_some() {
             return self.u2f_impl.as_ref().unwrap().register(
                 RegisterFlags::empty(),
@@ -119,10 +120,12 @@ impl TestToken {
                 vec![],
             );
         }
-        Err(Error::Unknown)
+        Err(errors::AuthenticatorError::U2FToken(
+            errors::U2FTokenError::Unknown,
+        ))
     }
 
-    pub fn sign(&self) -> Result<SignResult, Error> {
+    pub fn sign(&self) -> crate::Result<SignResult> {
         if self.u2f_impl.is_some() {
             return self.u2f_impl.as_ref().unwrap().sign(
                 SignFlags::empty(),
@@ -132,6 +135,8 @@ impl TestToken {
                 vec![],
             );
         }
-        Err(Error::Unknown)
+        Err(errors::AuthenticatorError::U2FToken(
+            errors::U2FTokenError::Unknown,
+        ))
     }
 }

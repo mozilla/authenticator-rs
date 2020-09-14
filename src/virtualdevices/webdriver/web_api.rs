@@ -240,8 +240,10 @@ mod handlers {
         };
     }
 
-    pub fn validate_rp_id(rp_id: &String) -> Result<(), crate::Error> {
-        if let Ok(uri) = rp_id.parse::<uri::Uri>().map_err(|_| crate::Error::Unknown) {
+    pub fn validate_rp_id(rp_id: &String) -> crate::Result<()> {
+        if let Ok(uri) = rp_id.parse::<uri::Uri>().map_err(|_| {
+            crate::errors::AuthenticatorError::U2FToken(crate::errors::U2FTokenError::Unknown)
+        }) {
             if uri.scheme().is_none()
                 && uri.path_and_query().is_none()
                 && uri.port().is_none()
@@ -256,7 +258,9 @@ mod handlers {
                 }
             }
         }
-        Err(crate::Error::Unknown)
+        Err(crate::errors::AuthenticatorError::U2FToken(
+            crate::errors::U2FTokenError::Unknown,
+        ))
     }
 
     pub async fn authenticator_add(
