@@ -544,7 +544,7 @@ mod tests {
                 mk_challenge(),
                 mk_appid(),
                 vec![],
-                status_tx.clone(),
+                status_tx,
                 callback.clone(),
             )
             .is_ok());
@@ -616,7 +616,7 @@ mod tests {
                 mk_challenge(),
                 mk_appid(),
                 vec![],
-                status_tx.clone(),
+                status_tx,
                 callback.clone(),
             )
             .is_ok());
