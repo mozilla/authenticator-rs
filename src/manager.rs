@@ -140,7 +140,7 @@ impl AuthenticatorTransport for U2FManager {
             status,
             callback,
         };
-        self.tx.send(action).map_err(AuthenticatorError::from)
+        Ok(self.tx.send(action)?)
     }
 
     fn sign(
