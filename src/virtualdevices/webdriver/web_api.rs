@@ -240,7 +240,7 @@ mod handlers {
         };
     }
 
-    pub fn validate_rp_id(rp_id: &String) -> crate::Result<()> {
+    pub fn validate_rp_id(rp_id: &str) -> crate::Result<()> {
         if let Ok(uri) = rp_id.parse::<uri::Uri>().map_err(|_| {
             crate::errors::AuthenticatorError::U2FToken(crate::errors::U2FTokenError::Unknown)
         }) {
@@ -252,7 +252,7 @@ mod handlers {
                 if uri.authority().unwrap() == uri.host().unwrap() {
                     // Don't try too hard to ensure it's a valid domain, just
                     // ensure there's a label delim in there somewhere
-                    if uri.host().unwrap().find(".").is_some() {
+                    if uri.host().unwrap().find('.').is_some() {
                         return Ok(());
                     }
                 }
@@ -525,35 +525,50 @@ mod tests {
     #[test]
     fn test_validate_rp_id() {
         init();
-        assert_eq!(
+
+        assert_matches!(
             validate_rp_id(&String::from("http://example.com")),
-            Err(crate::Error::Unknown)
+            Err(crate::errors::AuthenticatorError::U2FToken(
+                crate::errors::U2FTokenError::Unknown,
+            ))
         );
-        assert_eq!(
+        assert_matches!(
             validate_rp_id(&String::from("https://example.com")),
-            Err(crate::Error::Unknown)
+            Err(crate::errors::AuthenticatorError::U2FToken(
+                crate::errors::U2FTokenError::Unknown,
+            ))
         );
-        assert_eq!(
+        assert_matches!(
             validate_rp_id(&String::from("example.com:443")),
-            Err(crate::Error::Unknown)
+            Err(crate::errors::AuthenticatorError::U2FToken(
+                crate::errors::U2FTokenError::Unknown,
+            ))
         );
-        assert_eq!(
+        assert_matches!(
             validate_rp_id(&String::from("example.com/path")),
-            Err(crate::Error::Unknown)
+            Err(crate::errors::AuthenticatorError::U2FToken(
+                crate::errors::U2FTokenError::Unknown,
+            ))
         );
-        assert_eq!(
+        assert_matches!(
             validate_rp_id(&String::from("example.com:443/path")),
-            Err(crate::Error::Unknown)
+            Err(crate::errors::AuthenticatorError::U2FToken(
+                crate::errors::U2FTokenError::Unknown,
+            ))
         );
-        assert_eq!(
+        assert_matches!(
             validate_rp_id(&String::from("user:pass@example.com")),
-            Err(crate::Error::Unknown)
+            Err(crate::errors::AuthenticatorError::U2FToken(
+                crate::errors::U2FTokenError::Unknown,
+            ))
         );
-        assert_eq!(
+        assert_matches!(
             validate_rp_id(&String::from("com")),
-            Err(crate::Error::Unknown)
+            Err(crate::errors::AuthenticatorError::U2FToken(
+                crate::errors::U2FTokenError::Unknown,
+            ))
         );
-        assert_eq!(validate_rp_id(&String::from("example.com")), Ok(()));
+        assert_matches!(validate_rp_id(&String::from("example.com")), Ok(()));
     }
 
     fn mk_state_with_token_list(ids: &[u64]) -> Arc<Mutex<VirtualManagerState>> {
