@@ -52,19 +52,17 @@ impl TestToken {
         has_resident_key: bool,
     ) -> TestToken {
         match protocol {
-            TestWireProtocol::CTAP1 => {
-                return Self {
-                    id,
-                    protocol,
-                    transport,
-                    is_user_consenting,
-                    has_user_verification,
-                    is_user_verified,
-                    has_resident_key,
-                    u2f_impl: Some(SoftwareU2FToken::new()),
-                    credentials: Vec::new(),
-                }
-            }
+            TestWireProtocol::CTAP1 => Self {
+                id,
+                protocol,
+                transport,
+                is_user_consenting,
+                has_user_verification,
+                is_user_verified,
+                has_resident_key,
+                u2f_impl: Some(SoftwareU2FToken::new()),
+                credentials: Vec::new(),
+            },
             _ => unreachable!(),
         }
     }
@@ -91,7 +89,7 @@ impl TestToken {
             .credentials
             .binary_search_by_key(&credential, |probe| &probe.credential)
         {
-            Ok(_) => return,
+            Ok(_) => {}
             Err(idx) => self.credentials.insert(idx, c),
         }
     }
