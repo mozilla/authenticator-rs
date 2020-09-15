@@ -136,7 +136,7 @@ impl AuthenticatorService {
             );
 
             transport_mutex.lock().unwrap().register(
-                flags.clone(),
+                flags,
                 timeout,
                 challenge.clone(),
                 application.clone(),
@@ -189,7 +189,7 @@ impl AuthenticatorService {
             transports_to_cancel.remove(idx);
 
             transport_mutex.lock().unwrap().sign(
-                flags.clone(),
+                flags,
                 timeout,
                 challenge.clone(),
                 app_ids.clone(),

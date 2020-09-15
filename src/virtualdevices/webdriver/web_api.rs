@@ -512,7 +512,6 @@ mod tests {
     use super::*;
     use crate::virtualdevices::webdriver::virtualmanager::VirtualManagerState;
     use bytes::Buf;
-    use serde_json;
     use std::sync::{Arc, Mutex};
     use warp::http::StatusCode;
 
