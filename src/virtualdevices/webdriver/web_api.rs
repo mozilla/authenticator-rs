@@ -596,8 +596,8 @@ mod tests {
     }
 
     fn assert_creds_equals_test_token_params(
-        a: &Vec<CredentialParameters>,
-        b: &Vec<TestTokenCredential>,
+        a: &[CredentialParameters],
+        b: &[TestTokenCredential],
     ) {
         assert_eq!(a.len(), b.len());
 

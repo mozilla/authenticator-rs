@@ -136,13 +136,13 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::redundant_clone)]
     fn test_statecallback_observer_unclonable() {
         let mut sc = StateCallback::<()>::new(Box::new(move |_| {}));
         sc.add_uncloneable_observer(Box::new(move || {}));
 
         assert!(sc.observer.lock().unwrap().is_some());
         // This is deliberate, to force an extra clone
-        #[allow(clippy::redundant_clone)]
         assert!(sc.clone().observer.lock().unwrap().is_none());
     }
 
