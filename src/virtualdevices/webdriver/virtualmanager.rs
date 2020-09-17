@@ -43,7 +43,7 @@ impl VirtualManager {
 
         let builder = thread::Builder::new().name("WebDriver Command Server".into());
         builder.spawn(move || {
-            web_api::serve(stateclone, addr.clone());
+            web_api::serve(stateclone, addr);
         })?;
 
         Ok(Self {

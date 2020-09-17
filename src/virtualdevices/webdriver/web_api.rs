@@ -248,14 +248,12 @@ mod handlers {
                 && uri.path_and_query().is_none()
                 && uri.port().is_none()
                 && uri.host().is_some()
+                && uri.authority().unwrap() == uri.host().unwrap()
+                // Don't try too hard to ensure it's a valid domain, just
+                // ensure there's a label delim in there somewhere
+                && uri.host().unwrap().find('.').is_some()
             {
-                if uri.authority().unwrap() == uri.host().unwrap() {
-                    // Don't try too hard to ensure it's a valid domain, just
-                    // ensure there's a label delim in there somewhere
-                    if uri.host().unwrap().find('.').is_some() {
-                        return Ok(());
-                    }
-                }
+                return Ok(());
             }
         }
         Err(crate::errors::AuthenticatorError::U2FToken(
@@ -514,7 +512,6 @@ mod tests {
     use super::*;
     use crate::virtualdevices::webdriver::virtualmanager::VirtualManagerState;
     use bytes::Buf;
-    use serde_json;
     use std::sync::{Arc, Mutex};
     use warp::http::StatusCode;
 
@@ -599,8 +596,8 @@ mod tests {
     }
 
     fn assert_creds_equals_test_token_params(
-        a: &Vec<CredentialParameters>,
-        b: &Vec<TestTokenCredential>,
+        a: &[CredentialParameters],
+        b: &[TestTokenCredential],
     ) {
         assert_eq!(a.len(), b.len());
 

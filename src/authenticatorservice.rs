@@ -136,7 +136,7 @@ impl AuthenticatorService {
             );
 
             transport_mutex.lock().unwrap().register(
-                flags.clone(),
+                flags,
                 timeout,
                 challenge.clone(),
                 application.clone(),
@@ -189,7 +189,7 @@ impl AuthenticatorService {
             transports_to_cancel.remove(idx);
 
             transport_mutex.lock().unwrap().sign(
-                flags.clone(),
+                flags,
                 timeout,
                 challenge.clone(),
                 app_ids.clone(),
@@ -544,7 +544,7 @@ mod tests {
                 mk_challenge(),
                 mk_appid(),
                 vec![],
-                status_tx.clone(),
+                status_tx,
                 callback.clone(),
             )
             .is_ok());
@@ -616,7 +616,7 @@ mod tests {
                 mk_challenge(),
                 mk_appid(),
                 vec![],
-                status_tx.clone(),
+                status_tx,
                 callback.clone(),
             )
             .is_ok());
