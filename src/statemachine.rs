@@ -8,7 +8,7 @@ use crate::errors;
 use crate::platform::device::Device;
 use crate::platform::transaction::Transaction;
 use crate::statecallback::StateCallback;
-use crate::u2ftypes::U2FDevice;
+use crate::u2ftypes::U2FInfoQueryable;
 
 use std::sync::mpsc::Sender;
 use std::sync::Mutex;

@@ -110,7 +110,7 @@ where
 mod tests {
     use rand::{thread_rng, RngCore};
 
-    use super::{init_device, sendrecv, U2FDevice};
+    use super::{init_device, sendrecv, U2FDevice, U2FInfoQueryable};
     use crate::apdu::APDUDevice;
     use crate::consts::{CID_BROADCAST, SW_NO_ERROR, U2FHID_INIT, U2FHID_MSG, U2FHID_PING};
 
@@ -119,7 +119,7 @@ mod tests {
         use std::io::{Read, Write};
 
         use crate::consts::CID_BROADCAST;
-        use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
+        use crate::u2ftypes::{U2FDevice, U2FDeviceInfo, U2FInfoQueryable};
 
         const IN_HID_RPT_SIZE: usize = 64;
         const OUT_HID_RPT_SIZE: usize = 64;
@@ -212,12 +212,15 @@ mod tests {
             fn get_property(&self, prop_name: &str) -> io::Result<String> {
                 Ok(format!("{} not implemented", prop_name))
             }
-            fn get_device_info(&self) -> U2FDeviceInfo {
-                self.dev_info.clone().unwrap()
-            }
 
             fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {
                 self.dev_info = Some(dev_info);
+            }
+        }
+
+        impl U2FInfoQueryable for TestDevice {
+            fn get_device_info(&self) -> U2FDeviceInfo {
+                self.dev_info.clone().unwrap()
             }
         }
     }

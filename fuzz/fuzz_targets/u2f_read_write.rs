@@ -9,7 +9,7 @@ extern crate authenticator;
 
 use std::{cmp, io};
 
-use authenticator::{sendrecv, U2FDevice, U2FDeviceInfo};
+use authenticator::{sendrecv, U2FDevice, U2FDeviceInfo, U2FInfoQueryable};
 use authenticator::{CID_BROADCAST, MAX_HID_RPT_SIZE};
 
 struct TestDevice {
@@ -71,14 +71,16 @@ impl U2FDevice for TestDevice {
         Err(io::Error::new(io::ErrorKind::Other, "Not implemented"))
     }
 
+    fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {
+        self.dev_info = Some(dev_info);
+    }
+}
+
+impl U2FInfoQueryable for TestDevice {
     fn get_device_info(&self) -> U2FDeviceInfo {
         // unwrap is okay, as dev_info must have already been set, else
         // a programmer error
         self.dev_info.clone().unwrap()
-    }
-
-    fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {
-        self.dev_info = Some(dev_info);
     }
 }
 

@@ -41,8 +41,11 @@ pub trait U2FDevice {
     }
 
     fn get_property(&self, prop_name: &str) -> io::Result<String>;
-    fn get_device_info(&self) -> U2FDeviceInfo;
     fn set_device_info(&mut self, dev_info: U2FDeviceInfo);
+}
+
+pub trait U2FInfoQueryable {
+    fn get_device_info(&self) -> U2FDeviceInfo;
 }
 
 // Init structure for U2F Communications. Tells the receiver what channel

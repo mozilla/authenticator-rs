@@ -11,7 +11,7 @@ use std::os::unix::prelude::*;
 
 use crate::consts::CID_BROADCAST;
 use crate::platform::{hidraw, monitor};
-use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
+use crate::u2ftypes::{U2FDevice, U2FDeviceInfo, U2FInfoQueryable};
 use crate::util::from_unix_result;
 
 #[derive(Debug)]
@@ -100,13 +100,15 @@ impl U2FDevice for Device {
         monitor::get_property_linux(&self.path, prop_name)
     }
 
+    fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {
+        self.dev_info = Some(dev_info);
+    }
+}
+
+impl U2FInfoQueryable for Device {
     fn get_device_info(&self) -> U2FDeviceInfo {
         // unwrap is okay, as dev_info must have already been set, else
         // a programmer error
         self.dev_info.clone().unwrap()
-    }
-
-    fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {
-        self.dev_info = Some(dev_info);
     }
 }
