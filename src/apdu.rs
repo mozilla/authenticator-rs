@@ -17,7 +17,7 @@ pub trait APDUDevice {
 // Device Commands
 ////////////////////////////////////////////////////////////////////////
 
-pub fn u2f_register<T>(dev: &mut T, challenge: &[u8], application: &[u8]) -> io::Result<Vec<u8>>
+pub fn apdu_register<T>(dev: &mut T, challenge: &[u8], application: &[u8]) -> io::Result<Vec<u8>>
 where
     T: APDUDevice,
 {
@@ -34,10 +34,10 @@ where
 
     let flags = U2F_REQUEST_USER_PRESENCE;
     let (resp, status) = dev.send_apdu(U2F_REGISTER, flags, &register_data)?;
-    status_word_to_result(status, resp)
+    apdu_status_to_result(status, resp)
 }
 
-pub fn u2f_sign<T>(
+pub fn apdu_sign<T>(
     dev: &mut T,
     challenge: &[u8],
     application: &[u8],
@@ -68,10 +68,10 @@ where
 
     let flags = U2F_REQUEST_USER_PRESENCE;
     let (resp, status) = dev.send_apdu(U2F_AUTHENTICATE, flags, &sign_data)?;
-    status_word_to_result(status, resp)
+    apdu_status_to_result(status, resp)
 }
 
-pub fn u2f_is_keyhandle_valid<T>(
+pub fn apdu_is_keyhandle_valid<T>(
     dev: &mut T,
     challenge: &[u8],
     application: &[u8],
@@ -105,21 +105,21 @@ where
     Ok(status == SW_CONDITIONS_NOT_SATISFIED)
 }
 
-pub fn is_v2_device<T>(dev: &mut T) -> io::Result<bool>
+pub fn apdu_is_v2_device<T>(dev: &mut T) -> io::Result<bool>
 where
     T: APDUDevice,
 {
     let (data, status) = dev.send_apdu(U2F_VERSION, 0x00, &[])?;
     let actual = CString::new(data)?;
     let expected = CString::new("U2F_V2")?;
-    status_word_to_result(status, actual == expected)
+    apdu_status_to_result(status, actual == expected)
 }
 
 ////////////////////////////////////////////////////////////////////////
 // Error Handling
 ////////////////////////////////////////////////////////////////////////
 
-pub fn status_word_to_result<T>(status: [u8; 2], val: T) -> io::Result<T> {
+pub fn apdu_status_to_result<T>(status: [u8; 2], val: T) -> io::Result<T> {
     use self::io::ErrorKind::{InvalidData, InvalidInput};
 
     match status {

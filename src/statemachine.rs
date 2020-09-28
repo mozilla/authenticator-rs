@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use crate::apdu::{u2f_is_keyhandle_valid, u2f_register, u2f_sign, APDUDevice};
+use crate::apdu::{apdu_is_keyhandle_valid, apdu_register, apdu_sign, APDUDevice};
 use crate::consts::PARAMETER_SIZE;
 use crate::errors;
 use crate::platform::device::Device;
@@ -117,20 +117,25 @@ impl StateMachine {
             // consent, to be consistent with CTAP2 device behavior.
             let excluded = key_handles.iter().any(|key_handle| {
                 is_valid_transport(key_handle.transports)
-                    && u2f_is_keyhandle_valid(dev, &challenge, &application, &key_handle.credential)
-                        .unwrap_or(false) /* no match on failure */
+                    && apdu_is_keyhandle_valid(
+                        dev,
+                        &challenge,
+                        &application,
+                        &key_handle.credential,
+                    )
+                    .unwrap_or(false) /* no match on failure */
             });
 
             while alive() {
                 if excluded {
                     let blank = vec![0u8; PARAMETER_SIZE];
-                    if u2f_register(dev, &blank, &blank).is_ok() {
+                    if apdu_register(dev, &blank, &blank).is_ok() {
                         callback.call(Err(errors::AuthenticatorError::U2FToken(
                             errors::U2FTokenError::InvalidState,
                         )));
                         break;
                     }
-                } else if let Ok(bytes) = u2f_register(dev, &challenge, &application) {
+                } else if let Ok(bytes) = apdu_register(dev, &challenge, &application) {
                     let dev_info = dev.get_device_info();
                     send_status(
                         &status_mutex,
@@ -201,7 +206,7 @@ impl StateMachine {
             // valid key handle for an appId, we'll use that appId below.
             let (app_id, valid_handles) =
                 find_valid_key_handles(&app_ids, &key_handles, |app_id, key_handle| {
-                    u2f_is_keyhandle_valid(dev, &challenge, app_id, &key_handle.credential)
+                    apdu_is_keyhandle_valid(dev, &challenge, app_id, &key_handle.credential)
                         .unwrap_or(false) /* no match on failure */
                 });
 
@@ -230,7 +235,7 @@ impl StateMachine {
                 // then just make it blink with bogus data.
                 if valid_handles.is_empty() {
                     let blank = vec![0u8; PARAMETER_SIZE];
-                    if u2f_register(dev, &blank, &blank).is_ok() {
+                    if apdu_register(dev, &blank, &blank).is_ok() {
                         callback.call(Err(errors::AuthenticatorError::U2FToken(
                             errors::U2FTokenError::InvalidState,
                         )));
@@ -239,7 +244,8 @@ impl StateMachine {
                 } else {
                     // Otherwise, try to sign.
                     for key_handle in &valid_handles {
-                        if let Ok(bytes) = u2f_sign(dev, &challenge, app_id, &key_handle.credential)
+                        if let Ok(bytes) =
+                            apdu_sign(dev, &challenge, app_id, &key_handle.credential)
                         {
                             let dev_info = dev.get_device_info();
                             send_status(

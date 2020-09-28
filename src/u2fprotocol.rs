@@ -24,7 +24,7 @@ where
 
         // Initialize the device and check its version.
         init_device(self, &nonce)
-            .and(is_v2_device(self))
+            .and(apdu_is_v2_device(self))
             .map(|_| ())
     }
 
