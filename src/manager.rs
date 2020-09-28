@@ -60,7 +60,7 @@ impl U2FManager {
                         callback,
                     }) => {
                         // This must not block, otherwise we can't cancel.
-                        sm.register(
+                        sm._register(
                             flags,
                             timeout,
                             challenge,
@@ -80,7 +80,7 @@ impl U2FManager {
                         callback,
                     }) => {
                         // This must not block, otherwise we can't cancel.
-                        sm.sign(
+                        sm._sign(
                             flags,
                             timeout,
                             challenge,
