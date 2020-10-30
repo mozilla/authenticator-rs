@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+use crate::crypto::RingCryptoProvider;
 use crate::errors;
 use crate::virtualdevices::software_u2f::SoftwareU2FToken;
 use crate::{RegisterFlags, RegisterResult, SignFlags, SignResult};
@@ -60,7 +61,7 @@ impl TestToken {
                 has_user_verification,
                 is_user_verified,
                 has_resident_key,
-                u2f_impl: Some(SoftwareU2FToken::new()),
+                u2f_impl: Some(SoftwareU2FToken::new(Box::new(RingCryptoProvider::new()))),
                 credentials: Vec::new(),
             },
             _ => unreachable!(),

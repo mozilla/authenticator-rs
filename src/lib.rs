@@ -61,6 +61,8 @@ extern crate runloop;
 #[macro_use]
 extern crate bitflags;
 
+extern crate byteorder;
+extern crate chrono;
 extern crate ring;
 
 pub mod authenticatorservice;
