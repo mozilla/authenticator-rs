@@ -5,4 +5,7 @@
 #[cfg(feature = "webdriver")]
 pub mod webdriver;
 
+#[cfg(feature = "dbus")]
+pub mod dbus;
+
 pub mod software_u2f;

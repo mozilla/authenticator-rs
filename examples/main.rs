@@ -42,6 +42,8 @@ fn main() {
     opts.optflag("x", "no-u2f-usb-hid", "do not enable u2f-usb-hid platforms");
     #[cfg(feature = "webdriver")]
     opts.optflag("w", "webdriver", "enable WebDriver virtual bus");
+    #[cfg(feature = "dbus")]
+    opts.optflag("d", "dbus", "enable access to remote token through D-Bus");
 
     opts.optflag("h", "help", "print this help menu").optopt(
         "t",
@@ -71,6 +73,13 @@ fn main() {
     {
         if matches.opt_present("webdriver") {
             manager.add_webdriver_virtual_bus();
+        }
+    }
+
+    #[cfg(feature = "dbus")]
+    {
+        if matches.opt_present("dbus") {
+            manager.add_dbus();
         }
     }
 

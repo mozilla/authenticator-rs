@@ -71,6 +71,8 @@ impl AuthenticatorService {
     /// Add any detected platform transports
     pub fn add_detected_transports(&mut self) {
         self.add_u2f_usb_hid_platform_transports();
+        #[cfg(feature = "dbus")]
+        self.add_dbus();
     }
 
     fn add_transport(&mut self, boxed_token: Box<dyn AuthenticatorTransport + Send>) {
@@ -92,6 +94,14 @@ impl AuthenticatorService {
                 self.add_transport(Box::new(token));
             }
             Err(e) => error!("Could not add WebDriver virtual bus: {}", e),
+        }
+    }
+
+    #[cfg(feature = "dbus")]
+    pub fn add_dbus(&mut self) {
+        match crate::virtualdevices::dbus::VirtualManager::new() {
+            Ok(token) => self.add_transport(Box::new(token)),
+            Err(e) => error!("Could not add D-Bus transport: {}", e),
         }
     }
 
