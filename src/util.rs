@@ -4,7 +4,11 @@
 
 extern crate libc;
 
+use sha2::Digest;
 use std::io;
+use std::ops::Deref;
+
+use crate::AppId;
 
 macro_rules! try_or {
     ($val:expr, $or:expr) => {
@@ -64,4 +68,26 @@ pub fn from_unix_result<T: Signed>(rv: T) -> io::Result<T> {
 
 pub fn io_err(msg: &str) -> io::Error {
     io::Error::new(io::ErrorKind::Other, msg)
+}
+
+impl AppId {
+    pub fn to_u2f(&self) -> Vec<u8> {
+        let mut sha256 = sha2::Sha256::default();
+        sha256.input(&self.0);
+        sha256.result().to_vec()
+    }
+}
+
+impl Deref for AppId {
+    type Target = Vec<u8>;
+
+    fn deref(&self) -> &Vec<u8> {
+        &self.0
+    }
+}
+
+impl From<Vec<u8>> for AppId {
+    fn from(v: Vec<u8>) -> Self {
+        Self(v)
+    }
 }

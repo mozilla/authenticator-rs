@@ -105,7 +105,7 @@ impl AuthenticatorService {
         status: Sender<crate::StatusUpdate>,
         callback: StateCallback<crate::Result<crate::RegisterResult>>,
     ) -> crate::Result<()> {
-        if challenge.len() != PARAMETER_SIZE || application.len() != PARAMETER_SIZE {
+        if challenge.len() != PARAMETER_SIZE {
             return Err(AuthenticatorError::InvalidRelyingPartyInput);
         }
 
@@ -165,12 +165,6 @@ impl AuthenticatorService {
 
         if app_ids.is_empty() {
             return Err(AuthenticatorError::InvalidRelyingPartyInput);
-        }
-
-        for app_id in &app_ids {
-            if app_id.len() != PARAMETER_SIZE {
-                return Err(AuthenticatorError::InvalidRelyingPartyInput);
-            }
         }
 
         for key_handle in &key_handles {

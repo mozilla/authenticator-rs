@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use authenticator::{
-    authenticatorservice::AuthenticatorService, statecallback::StateCallback,
+    authenticatorservice::AuthenticatorService, statecallback::StateCallback, AppId,
     AuthenticatorTransports, KeyHandle, RegisterFlags, SignFlags, StatusUpdate,
 };
 use getopts::Options;
@@ -96,9 +96,8 @@ fn main() {
     challenge.input(challenge_str.as_bytes());
     let chall_bytes = challenge.result().to_vec();
 
-    let mut application = Sha256::default();
-    application.input(b"http://demo.yubico.com");
-    let app_bytes = application.result().to_vec();
+    let app_bytes = b"http://demo.yubico.com".to_vec();
+    let app_id: AppId = app_bytes.into();
 
     let flags = RegisterFlags::empty();
 
@@ -131,7 +130,7 @@ fn main() {
             flags,
             timeout_ms,
             chall_bytes.clone(),
-            app_bytes.clone(),
+            app_id.clone(),
             vec![],
             status_tx.clone(),
             callback,
@@ -163,7 +162,7 @@ fn main() {
         flags,
         timeout_ms,
         chall_bytes,
-        vec![app_bytes],
+        vec![app_id.clone()],
         vec![key_handle],
         status_tx,
         callback,
