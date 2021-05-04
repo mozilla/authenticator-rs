@@ -169,7 +169,7 @@ pub struct U2FHIDInitResp {
     pub version_major: u8,
     pub version_minor: u8,
     pub version_build: u8,
-    pub cap_flags: u8,
+    pub cap_flags: Capability,
 }
 
 impl U2FHIDInitResp {
@@ -195,7 +195,7 @@ impl U2FHIDInitResp {
             version_major: data[INIT_NONCE_SIZE + 5],
             version_minor: data[INIT_NONCE_SIZE + 6],
             version_build: data[INIT_NONCE_SIZE + 7],
-            cap_flags: data[INIT_NONCE_SIZE + 8],
+            cap_flags: Capability::from_bits_truncate(data[INIT_NONCE_SIZE + 8]),
         };
 
         Ok(rsp)
@@ -236,7 +236,7 @@ pub struct U2FDeviceInfo {
     pub version_major: u8,
     pub version_minor: u8,
     pub version_build: u8,
-    pub cap_flags: u8,
+    pub cap_flags: Capability,
 }
 
 impl fmt::Display for U2FDeviceInfo {
@@ -250,7 +250,7 @@ impl fmt::Display for U2FDeviceInfo {
             &self.version_major,
             &self.version_minor,
             &self.version_build,
-            to_hex(&[self.cap_flags], ":"),
+            to_hex(&[self.cap_flags.bits()], ":"),
         )
     }
 }

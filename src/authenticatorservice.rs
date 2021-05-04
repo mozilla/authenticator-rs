@@ -222,6 +222,7 @@ impl AuthenticatorService {
 #[cfg(test)]
 mod tests {
     use super::{AuthenticatorService, AuthenticatorTransport};
+    use crate::consts::Capability;
     use crate::consts::PARAMETER_SIZE;
     use crate::statecallback::StateCallback;
     use crate::{AuthenticatorTransports, KeyHandle, RegisterFlags, SignFlags, StatusUpdate};
@@ -257,7 +258,7 @@ mod tests {
                 version_major: 1,
                 version_minor: 2,
                 version_build: 3,
-                cap_flags: 0,
+                cap_flags: Capability::empty(),
             }
         }
     }

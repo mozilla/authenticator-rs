@@ -235,7 +235,7 @@ mod tests {
     use rand::{thread_rng, RngCore};
 
     use super::{init_device, send_apdu, sendrecv, U2FDevice};
-    use crate::consts::{CID_BROADCAST, SW_NO_ERROR, U2FHID_INIT, U2FHID_MSG, U2FHID_PING};
+    use crate::consts::{Capability, CID_BROADCAST, SW_NO_ERROR, U2FHID_INIT, U2FHID_MSG, U2FHID_PING};
 
     mod platform {
         use std::io;
@@ -376,7 +376,7 @@ mod tests {
         assert_eq!(dev_info.version_major, 0x04);
         assert_eq!(dev_info.version_minor, 0x01);
         assert_eq!(dev_info.version_build, 0x08);
-        assert_eq!(dev_info.cap_flags, 0x01);
+        assert_eq!(dev_info.cap_flags, Capability::WINK); // 0x01
     }
 
     #[test]

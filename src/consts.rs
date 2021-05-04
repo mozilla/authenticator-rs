@@ -57,8 +57,25 @@ pub const U2F_CHECK_IS_REGISTERED: u8 = 0x07; // Check if the key handle is regi
 
 // U2FHID_INIT command defines
 pub const INIT_NONCE_SIZE: usize = 8; // Size of channel initialization challenge
-pub const CAPFLAG_WINK: u8 = 0x01; // Device supports WINK command
-pub const CAPFLAG_LOCK: u8 = 0x02; // Device supports LOCK command
+
+bitflags! {
+    pub struct Capability: u8 {
+        const WINK = 0x01;
+        const LOCK = 0x02;
+        const CBOR = 0x04;
+        const NMSG = 0x08;
+    }
+}
+
+impl Capability {
+    pub fn has_fido1(self) -> bool {
+        !self.contains(Capability::NMSG)
+    }
+
+    pub fn has_fido2(self) -> bool {
+        self.contains(Capability::CBOR)
+    }
+}
 
 // Low-level error codes. Return as negatives.
 
