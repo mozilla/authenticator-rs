@@ -5,7 +5,7 @@
 extern crate log;
 
 use crate::consts::{CID_BROADCAST, MAX_HID_RPT_SIZE};
-use crate::platform::iokit::*;
+use crate::transport::platform::iokit::*;
 use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
 use core_foundation::base::*;
 use core_foundation::string::*;

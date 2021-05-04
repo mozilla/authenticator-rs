@@ -3,7 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use crate::errors;
-use crate::platform::monitor::{FidoDev, Monitor};
+use crate::transport::platform::fd::Fd;
+use crate::transport::platform::monitor::Monitor;
 use crate::statecallback::StateCallback;
 use runloop::RunLoop;
 
@@ -19,7 +20,7 @@ impl Transaction {
         new_device_cb: F,
     ) -> crate::Result<Self>
     where
-        F: Fn(FidoDev, &dyn Fn() -> bool) + Sync + Send + 'static,
+        F: Fn(Fd, &dyn Fn() -> bool) + Sync + Send + 'static,
         T: 'static,
     {
         let thread = RunLoop::new_with_timeout(

@@ -11,7 +11,7 @@ use std::os::raw::c_uchar;
 
 use crate::hidproto::has_fido_usage;
 use crate::hidproto::ReportDescriptor;
-use crate::platform::fd::Fd;
+use crate::transport::platform::fd::Fd;
 use crate::util::io_err;
 
 /* sys/ioccom.h */

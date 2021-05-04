@@ -5,52 +5,14 @@
 #[macro_use]
 mod util;
 
-#[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "netbsd"))]
-pub mod hidproto;
-
 #[cfg(any(target_os = "linux"))]
 extern crate libudev;
-
-#[cfg(any(target_os = "linux"))]
-#[path = "linux/mod.rs"]
-pub mod platform;
 
 #[cfg(any(target_os = "freebsd"))]
 extern crate devd_rs;
 
-#[cfg(any(target_os = "freebsd"))]
-#[path = "freebsd/mod.rs"]
-pub mod platform;
-
-#[cfg(any(target_os = "netbsd"))]
-#[path = "netbsd/mod.rs"]
-pub mod platform;
-
-#[cfg(any(target_os = "openbsd"))]
-#[path = "openbsd/mod.rs"]
-pub mod platform;
-
 #[cfg(any(target_os = "macos"))]
 extern crate core_foundation;
-
-#[cfg(any(target_os = "macos"))]
-#[path = "macos/mod.rs"]
-pub mod platform;
-
-#[cfg(any(target_os = "windows"))]
-#[path = "windows/mod.rs"]
-pub mod platform;
-
-#[cfg(not(any(
-    target_os = "linux",
-    target_os = "freebsd",
-    target_os = "openbsd",
-    target_os = "netbsd",
-    target_os = "macos",
-    target_os = "windows"
-)))]
-#[path = "stub/mod.rs"]
-pub mod platform;
 
 extern crate libc;
 #[macro_use]
@@ -76,6 +38,7 @@ pub use crate::capi::*;
 pub mod errors;
 pub mod statecallback;
 mod virtualdevices;
+mod transport;
 
 // Keep this in sync with the constants in u2fhid-capi.h.
 bitflags! {

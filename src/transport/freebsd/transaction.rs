@@ -3,9 +3,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use crate::errors;
-use crate::platform::monitor::Monitor;
+use crate::transport::platformmonitor::Monitor;
 use crate::statecallback::StateCallback;
 use runloop::RunLoop;
+use std::ffi::OsString;
 
 pub struct Transaction {
     // Handle to the thread loop.
@@ -19,7 +20,7 @@ impl Transaction {
         new_device_cb: F,
     ) -> crate::Result<Self>
     where
-        F: Fn(String, &dyn Fn() -> bool) + Sync + Send + 'static,
+        F: Fn(OsString, &dyn Fn() -> bool) + Sync + Send + 'static,
         T: 'static,
     {
         let thread = RunLoop::new_with_timeout(

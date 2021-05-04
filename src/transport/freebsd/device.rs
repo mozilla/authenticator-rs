@@ -9,8 +9,8 @@ use std::io;
 use std::io::{Read, Write};
 use std::os::unix::prelude::*;
 
-use crate::consts::CID_BROADCAST;
-use crate::platform::{hidraw, monitor};
+use crate::consts::{CID_BROADCAST, MAX_HID_RPT_SIZE};
+use crate::transport::platform::uhid;
 use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
 use crate::util::from_unix_result;
 
@@ -18,8 +18,6 @@ use crate::util::from_unix_result;
 pub struct Device {
     path: OsString,
     fd: libc::c_int,
-    in_rpt_size: usize,
-    out_rpt_size: usize,
     cid: [u8; 4],
     dev_info: Option<U2FDeviceInfo>,
 }
@@ -29,19 +27,16 @@ impl Device {
         let cstr = CString::new(path.as_bytes())?;
         let fd = unsafe { libc::open(cstr.as_ptr(), libc::O_RDWR) };
         let fd = from_unix_result(fd)?;
-        let (in_rpt_size, out_rpt_size) = hidraw::read_hid_rpt_sizes_or_defaults(fd);
         Ok(Self {
             path,
             fd,
-            in_rpt_size,
-            out_rpt_size,
             cid: CID_BROADCAST,
             dev_info: None,
         })
     }
 
     pub fn is_u2f(&self) -> bool {
-        hidraw::is_u2f_device(self.fd)
+        uhid::is_u2f_device(self.fd)
     }
 }
 
@@ -68,9 +63,14 @@ impl Read for Device {
 
 impl Write for Device {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let bufp = buf.as_ptr() as *const libc::c_void;
-        let rv = unsafe { libc::write(self.fd, bufp, buf.len()) };
-        from_unix_result(rv as usize)
+        let report_id = buf[0] as i64;
+        // Skip report number when not using numbered reports.
+        let start = if report_id == 0x0 { 1 } else { 0 };
+        let data = &buf[start..];
+
+        let data_ptr = data.as_ptr() as *const libc::c_void;
+        let rv = unsafe { libc::write(self.fd, data_ptr, data.len()) };
+        from_unix_result(rv as usize + 1)
     }
 
     // USB HID writes don't buffer, so this will be a nop.
@@ -80,7 +80,7 @@ impl Write for Device {
 }
 
 impl U2FDevice for Device {
-    fn get_cid(&self) -> &[u8; 4] {
+    fn get_cid<'a>(&'a self) -> &'a [u8; 4] {
         &self.cid
     }
 
@@ -89,15 +89,15 @@ impl U2FDevice for Device {
     }
 
     fn in_rpt_size(&self) -> usize {
-        self.in_rpt_size
+        MAX_HID_RPT_SIZE
     }
 
     fn out_rpt_size(&self) -> usize {
-        self.out_rpt_size
+        MAX_HID_RPT_SIZE
     }
 
-    fn get_property(&self, prop_name: &str) -> io::Result<String> {
-        monitor::get_property_linux(&self.path, prop_name)
+    fn get_property(&self, _prop_name: &str) -> io::Result<String> {
+        Err(io::Error::new(io::ErrorKind::Other, "Not implemented"))
     }
 
     fn get_device_info(&self) -> U2FDeviceInfo {
