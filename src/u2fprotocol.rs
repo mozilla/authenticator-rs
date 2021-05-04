@@ -127,8 +127,10 @@ where
     T: U2FDevice + Read + Write,
 {
     assert_eq!(nonce.len(), INIT_NONCE_SIZE);
-    let raw = sendrecv(dev, U2FHID_INIT, nonce)?;
+    // Send Init to broadcast address to create a new channel
+    let raw = sendrecv(dev, HIDCmd::Init, nonce)?;
     let rsp = U2FHIDInitResp::read(&raw, nonce)?;
+    // Get the new Channel ID
     dev.set_cid(rsp.cid);
 
     let vendor = dev
@@ -181,12 +183,12 @@ fn status_word_to_result<T>(status: [u8; 2], val: T) -> io::Result<T> {
 // Device Communication Functions
 ////////////////////////////////////////////////////////////////////////
 
-pub fn sendrecv<T>(dev: &mut T, cmd: u8, send: &[u8]) -> io::Result<Vec<u8>>
+pub fn sendrecv<T>(dev: &mut T, cmd: HIDCmd, send: &[u8]) -> io::Result<Vec<u8>>
 where
     T: U2FDevice + Read + Write,
 {
     // Send initialization packet.
-    let mut count = U2FHIDInit::write(dev, cmd, send)?;
+    let mut count = U2FHIDInit::write(dev, cmd.into(), send)?;
 
     // Send continuation packets.
     let mut sequence = 0u8;
@@ -214,8 +216,8 @@ fn send_apdu<T>(dev: &mut T, cmd: u8, p1: u8, send: &[u8]) -> io::Result<(Vec<u8
 where
     T: U2FDevice + Read + Write,
 {
-    let apdu = U2FAPDUHeader::serialize(cmd, p1, send)?;
-    let mut data = sendrecv(dev, U2FHID_MSG, &apdu)?;
+    let apdu = U2FAPDUHeader::serialize(cmd.into(), p1, send)?;
+    let mut data = sendrecv(dev, HIDCmd::Msg, &apdu)?;
 
     if data.len() < 2 {
         return Err(io_err("unexpected response"));
@@ -232,10 +234,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use rand::{thread_rng, RngCore};
-
     use super::{init_device, send_apdu, sendrecv, U2FDevice};
-    use crate::consts::{Capability, CID_BROADCAST, SW_NO_ERROR, U2FHID_INIT, U2FHID_MSG, U2FHID_PING};
+    use crate::consts::{Capability, HIDCmd, CID_BROADCAST, SW_NO_ERROR};
+    use rand::{thread_rng, RngCore};
 
     mod platform {
         use std::io;
@@ -356,13 +357,13 @@ mod tests {
 
         // init packet
         let mut msg = CID_BROADCAST.to_vec();
-        msg.extend(vec![U2FHID_INIT, 0x00, 0x08]); // cmd + bcnt
+        msg.extend(vec![HIDCmd::Init.into(), 0x00, 0x08]); // cmd + bcnt
         msg.extend_from_slice(&nonce);
         device.add_write(&msg, 0);
 
         // init_resp packet
         let mut msg = CID_BROADCAST.to_vec();
-        msg.extend(vec![U2FHID_INIT, 0x00, 0x11]); // cmd + bcnt
+        msg.extend(vec![HIDCmd::Init.into(), 0x00, 0x11]); // cmd + bcnt
         msg.extend_from_slice(&nonce);
         msg.extend_from_slice(&cid); // new channel id
         msg.extend(vec![0x02, 0x04, 0x01, 0x08, 0x01]); // versions + flags
@@ -387,8 +388,8 @@ mod tests {
 
         // init packet
         let mut msg = cid.to_vec();
-        msg.extend(vec![U2FHID_PING, 0x00, 0xe4]); // cmd + length = 228
-                                                   // write msg, append [1u8; 57], 171 bytes remain
+        msg.extend(vec![HIDCmd::Ping.into(), 0x00, 0xe4]); // cmd + length = 228
+                                                           // write msg, append [1u8; 57], 171 bytes remain
         device.add_write(&msg, 1);
         device.add_read(&msg, 1);
 
@@ -415,7 +416,7 @@ mod tests {
         device.add_read(&msg, 0);
 
         let data = [1u8; 228];
-        let d = sendrecv(&mut device, U2FHID_PING, &data).unwrap();
+        let d = sendrecv(&mut device, HIDCmd::Ping, &data).unwrap();
         assert_eq!(d.len(), 228);
         assert_eq!(d, &data[..]);
     }
@@ -429,21 +430,29 @@ mod tests {
 
         let mut msg = cid.to_vec();
         // sendrecv header
-        msg.extend(vec![U2FHID_MSG, 0x00, 0x0e]); // len = 14
-                                                  // apdu header
-        msg.extend(vec![0x00, U2FHID_PING, 0xaa, 0x00, 0x00, 0x00, 0x05]);
+        msg.extend(vec![HIDCmd::Msg.into(), 0x00, 0x0e]); // len = 14
+                                                          // apdu header
+        msg.extend(vec![
+            0x00,
+            HIDCmd::Ping.into(),
+            0xaa,
+            0x00,
+            0x00,
+            0x00,
+            0x05,
+        ]);
         // apdu data
         msg.extend_from_slice(&data);
         device.add_write(&msg, 0);
 
         // Send data back
         let mut msg = cid.to_vec();
-        msg.extend(vec![U2FHID_MSG, 0x00, 0x07]);
+        msg.extend(vec![HIDCmd::Msg.into(), 0x00, 0x07]);
         msg.extend_from_slice(&data);
         msg.extend_from_slice(&SW_NO_ERROR);
         device.add_read(&msg, 0);
 
-        let (result, status) = send_apdu(&mut device, U2FHID_PING, 0xaa, &data).unwrap();
+        let (result, status) = send_apdu(&mut device, HIDCmd::Ping.into(), 0xaa, &data).unwrap();
         assert_eq!(result, &data);
         assert_eq!(status, SW_NO_ERROR);
     }
