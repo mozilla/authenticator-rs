@@ -3,9 +3,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use crate::errors;
+use crate::statecallback::StateCallback;
 use crate::transport::platform::fd::Fd;
 use crate::transport::platform::monitor::Monitor;
-use crate::statecallback::StateCallback;
 use runloop::RunLoop;
 
 pub struct Transaction {

@@ -23,13 +23,13 @@ pub trait Signed {
 
 impl Signed for i32 {
     fn is_negative(&self) -> bool {
-        *self < (0 as i32)
+        *self < 0
     }
 }
 
 impl Signed for usize {
     fn is_negative(&self) -> bool {
-        (*self as isize) < (0 as isize)
+        (*self as isize) < 0
     }
 }
 

@@ -216,7 +216,7 @@ fn send_apdu<T>(dev: &mut T, cmd: u8, p1: u8, send: &[u8]) -> io::Result<(Vec<u8
 where
     T: U2FDevice + Read + Write,
 {
-    let apdu = U2FAPDUHeader::serialize(cmd.into(), p1, send)?;
+    let apdu = U2FAPDUHeader::serialize(cmd, p1, send)?;
     let mut data = sendrecv(dev, HIDCmd::Msg, &apdu)?;
 
     if data.len() < 2 {

@@ -3,8 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use crate::errors;
-use crate::transport::platformmonitor::Monitor;
 use crate::statecallback::StateCallback;
+use crate::transport::platformmonitor::Monitor;
 use runloop::RunLoop;
 use std::ffi::OsString;
 

@@ -25,8 +25,7 @@ pub mod platform;
 #[path = "windows/mod.rs"]
 pub mod platform;
 
-#[cfg(
-    not(any(
+#[cfg(not(any(
     target_os = "linux",
     target_os = "freebsd",
     target_os = "openbsd",
