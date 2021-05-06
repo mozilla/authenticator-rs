@@ -381,6 +381,43 @@ mod tests {
     }
 
     #[test]
+    fn test_get_version() {
+        let mut device = platform::TestDevice::new();
+        // channel id
+        let mut cid = [0u8; 4];
+        thread_rng().fill_bytes(&mut cid);
+
+        device.set_cid(cid.clone());
+
+        let info = U2FDeviceInfo {
+            vendor_name: Vec::new(),
+            device_name: Vec::new(),
+            version_interface: 0x02,
+            version_major: 0x04,
+            version_minor: 0x01,
+            version_build: 0x08,
+            cap_flags: Capability::WINK,
+        };
+        device.set_device_info(info);
+
+        // ctap1 U2F_VERSION request
+        let mut msg = cid.to_vec();
+        msg.extend(&[HIDCmd::Msg.into(), 0x0, 0x9]); // cmd + bcnt
+        msg.extend(&[0x0, 0x3, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0]);
+        device.add_write(&msg, 0);
+
+        // fido response
+        let mut msg = cid.to_vec();
+        msg.extend(&[HIDCmd::Msg.into(), 0x0, 0x08]); // cmd + bcnt
+        msg.extend(&[0x55, 0x32, 0x46, 0x5f, 0x56, 0x32]); // 'U2F_V2'
+        msg.extend(&SW_NO_ERROR);
+        device.add_read(&msg, 0);
+
+        let res = is_v2_device(&mut device).expect("Failed to get version");
+        assert!(res);
+    }
+
+    #[test]
     fn test_sendrecv_multiple() {
         let mut device = platform::TestDevice::new();
         let cid = [0x01, 0x02, 0x03, 0x04];
