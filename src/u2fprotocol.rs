@@ -200,7 +200,7 @@ where
     // Now we read. This happens in 2 chunks: The initial packet, which has the
     // size we expect overall, then continuation packets, which will fill in
     // data until we have everything.
-    let mut data = U2FHIDInit::read(dev)?;
+    let (_, mut data) = U2FHIDInit::read(dev)?;
 
     let mut sequence = 0u8;
     while data.len() < data.capacity() {
@@ -233,26 +233,30 @@ where
 ////////////////////////////////////////////////////////////////////////
 
 #[cfg(test)]
-mod tests {
-    use super::{init_device, send_apdu, sendrecv, U2FDevice};
+pub(crate) mod tests {
+    use super::{init_device, is_v2_device, send_apdu, sendrecv, U2FDevice};
     use crate::consts::{Capability, HIDCmd, CID_BROADCAST, SW_NO_ERROR};
+    use crate::u2ftypes::U2FDeviceInfo;
     use rand::{thread_rng, RngCore};
 
-    mod platform {
+    pub(crate) mod platform {
         use std::io;
         use std::io::{Read, Write};
 
         use crate::consts::CID_BROADCAST;
+        use crate::ctap2::commands::get_info::AuthenticatorInfo;
         use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
 
-        const IN_HID_RPT_SIZE: usize = 64;
+        pub(crate) const IN_HID_RPT_SIZE: usize = 64;
         const OUT_HID_RPT_SIZE: usize = 64;
 
+        #[derive(Debug)]
         pub struct TestDevice {
-            cid: [u8; 4],
-            reads: Vec<[u8; IN_HID_RPT_SIZE]>,
-            writes: Vec<[u8; OUT_HID_RPT_SIZE + 1]>,
-            dev_info: Option<U2FDeviceInfo>,
+            pub cid: [u8; 4],
+            pub reads: Vec<[u8; IN_HID_RPT_SIZE]>,
+            pub writes: Vec<[u8; OUT_HID_RPT_SIZE + 1]>,
+            pub dev_info: Option<U2FDeviceInfo>,
+            pub authenticator_info: Option<AuthenticatorInfo>,
         }
 
         impl TestDevice {
@@ -262,6 +266,7 @@ mod tests {
                     reads: vec![],
                     writes: vec![],
                     dev_info: None,
+                    authenticator_info: None,
                 }
             }
 

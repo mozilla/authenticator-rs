@@ -35,6 +35,8 @@ pub use crate::manager::U2FManager;
 mod capi;
 pub use crate::capi::*;
 
+pub mod ctap2;
+
 pub mod errors;
 pub mod statecallback;
 mod transport;

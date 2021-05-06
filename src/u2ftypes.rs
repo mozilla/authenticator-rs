@@ -54,7 +54,7 @@ pub trait U2FDevice {
 pub struct U2FHIDInit {}
 
 impl U2FHIDInit {
-    pub fn read<T>(dev: &mut T) -> io::Result<Vec<u8>>
+    pub fn read<T>(dev: &mut T) -> io::Result<(HIDCmd, Vec<u8>)>
     where
         T: U2FDevice + io::Read,
     {
@@ -69,13 +69,15 @@ impl U2FHIDInit {
             return Err(io_err("invalid init packet"));
         }
 
+        let cmd = HIDCmd::from(frame[4] | TYPE_INIT);
+
         let cap = (frame[5] as usize) << 8 | (frame[6] as usize);
         let mut data = Vec::with_capacity(cap);
 
         let len = cmp::min(cap, dev.in_init_data_size());
         data.extend_from_slice(&frame[7..7 + len]);
 
-        Ok(data)
+        Ok((cmd, data))
     }
 
     pub fn write<T>(dev: &mut T, cmd: u8, data: &[u8]) -> io::Result<usize>
