@@ -1,6 +1,6 @@
 use crate::transport::errors::{ApduErrorStatus, HIDError};
 use crate::transport::FidoDevice;
-use serde_cbor::error::Error as SerdeError;
+use serde_cbor::{error::Error as CborError, Value};
 use std::error::Error as StdErrorT;
 use std::fmt;
 use std::io::{Read, Write};
@@ -8,6 +8,7 @@ use std::io::{Read, Write};
 #[allow(dead_code)] // TODO(MS): Remove me asap
 pub(crate) mod get_info;
 pub(crate) mod get_version;
+pub(crate) mod make_credentials;
 
 pub(crate) trait Request<T>
 where
@@ -314,7 +315,10 @@ impl Into<u8> for StatusCode {
 pub enum CommandError {
     InputTooSmall,
     MissingRequiredField(&'static str),
-    Deserializing(SerdeError),
+    Deserializing(CborError),
+    Serialization(CborError),
+    Parsing(CborError),
+    StatusCode(StatusCode, Option<Value>),
 }
 
 impl fmt::Display for CommandError {
@@ -326,6 +330,13 @@ impl fmt::Display for CommandError {
             }
             CommandError::Deserializing(ref e) => {
                 write!(f, "CommandError: Error while parsing: {}", e)
+            }
+            CommandError::Serialization(ref e) => {
+                write!(f, "CommandError: Error while serializing: {}", e)
+            }
+            CommandError::Parsing(ref e) => write!(f, "CommandError: Error while parsing: {}", e),
+            CommandError::StatusCode(ref code, ref value) => {
+                write!(f, "CommandError: Unexpected code: {:?} ({:?})", code, value)
             }
         }
     }
