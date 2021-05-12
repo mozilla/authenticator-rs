@@ -326,7 +326,7 @@ pub mod test {
             },
             RelyingParty {
                 id: String::from("example.com"),
-                name: None,
+                name: Some(String::from("Acme")),
                 icon: None,
             },
             Some(User {
@@ -632,7 +632,7 @@ pub mod test {
     ];
 
     #[rustfmt::skip]
-    pub const MAKE_CREDENTIALS_SAMPLE_REQUEST_CTAP2: [u8; 244] = [
+    pub const MAKE_CREDENTIALS_SAMPLE_REQUEST_CTAP2: [u8; 254] = [
         // NOTE: This has been taken from CTAP2.0 spec, but the clientDataHash has been replaced
         //       to be able to operate with known values for CollectedClientData (spec doesn't say
         //       what values led to the provided example hash)
@@ -644,17 +644,15 @@ pub mod test {
             0xba, 0xad, 0xb8, 0x5f, 0x95, 0x55, 0xcf, 0xc7, 0x62, 0x9b, 0x9d, 0x53, 0x66, // hash
             0x97, 0x53, 0x80, 0xd7, 0x69, 0x4f, // hash
           0x02, // unsigned(2) - rp
-          // 0xa2, // map(2) Replace line below with this one, once RelyingParty supports "name"
-            0xa1, // map(1)
+            0xa2, // map(2) Replace line below with this one, once RelyingParty supports "name"
               0x62, // text(2)
                 0x69, 0x64, // "id"
               0x6b, // text(11)
                 0x65, 0x78, 0x61, 0x6d, 0x70, 0x6c, 0x65, 0x2e, 0x63, 0x6f, 0x6d, // "example.com"
-          // TODO(MS): RelyingParty does not yet support optional fields "name" and "icon"
-          //    0x64, // text(4)
-          //      0x6e, 0x61, 0x6d, 0x65, // "name"
-          //    0x64, // text(4)
-          //      0x41, 0x63, 0x6d, 0x65, // "Acme"
+              0x64, // text(4)
+                0x6e, 0x61, 0x6d, 0x65, // "name"
+              0x64, // text(4)
+                0x41, 0x63, 0x6d, 0x65, // "Acme"
           0x03, // unsigned(3) - user
           0xa4, // map(4)
             0x62, // text(2)
