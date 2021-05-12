@@ -20,7 +20,7 @@ pub struct RpIdHash(pub [u8; 32]);
 
 impl fmt::Debug for RpIdHash {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let value = base64::encode_config(&self.0[..], base64::URL_SAFE_NO_PAD);
+        let value = base64::encode_config(&self.0, base64::URL_SAFE_NO_PAD);
         write!(f, "RpIdHash({})", value)
     }
 }
@@ -51,7 +51,10 @@ pub struct RelyingParty {
     //              in the example "A PublicKeyCredentialRpEntity DOM object defined as follows:"
     //              inconsistent with https://w3c.github.io/webauthn/#sctn-rp-credential-params
     pub id: String,
-    // TODO(baloo): need to add name and icon fields (optionals)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
 }
 
 impl RelyingParty {
@@ -62,11 +65,10 @@ impl RelyingParty {
 
     pub fn hash(&self) -> RpIdHash {
         let mut hasher = Sha256::new();
-        hasher.input(&self.id.as_bytes());
+        hasher.input(&self.id);
 
         let mut output = [0u8; 32];
-        let len = output.len();
-        output.copy_from_slice(&hasher.result().as_slice()[..len]);
+        output.copy_from_slice(&hasher.result().as_slice());
 
         RpIdHash(output)
     }
@@ -260,7 +262,7 @@ impl Serialize for PublicKeyCredentialDescriptor {
     {
         let mut map = serializer.serialize_map(Some(3))?;
         map.serialize_entry("type", "public-key")?;
-        map.serialize_entry("id", &ByteBuf::from(&self.id[..]))?;
+        map.serialize_entry("id", &ByteBuf::from(self.id.clone()))?;
         map.serialize_entry("transports", &self.transports)?;
         map.end()
     }
@@ -357,6 +359,8 @@ mod test {
     fn serialize_rp() {
         let rp = RelyingParty {
             id: String::from("Acme"),
+            name: None,
+            icon: None,
         };
 
         let payload = rp.to_ctap2();

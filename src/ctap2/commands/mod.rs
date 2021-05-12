@@ -1,6 +1,7 @@
 use crate::transport::errors::{ApduErrorStatus, HIDError};
 use crate::transport::FidoDevice;
 use serde_cbor::{error::Error as CborError, Value};
+use serde_json as json;
 use std::error::Error as StdErrorT;
 use std::fmt;
 use std::io::{Read, Write};
@@ -21,6 +22,7 @@ where
 /// Retryable wraps an error type and may ask manager to retry sending a
 /// command, this is useful for ctap1 where token will reply with "condition not
 /// sufficient" because user needs to press the button.
+#[derive(Debug)]
 pub(crate) enum Retryable<T> {
     Retry,
     Error(T),
@@ -319,6 +321,7 @@ pub enum CommandError {
     Serialization(CborError),
     Parsing(CborError),
     StatusCode(StatusCode, Option<Value>),
+    Json(json::Error),
 }
 
 impl fmt::Display for CommandError {
@@ -338,6 +341,7 @@ impl fmt::Display for CommandError {
             CommandError::StatusCode(ref code, ref value) => {
                 write!(f, "CommandError: Unexpected code: {:?} ({:?})", code, value)
             }
+            CommandError::Json(ref e) => write!(f, "CommandError: Json serializing error: {}", e),
         }
     }
 }
