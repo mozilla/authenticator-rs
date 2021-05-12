@@ -1,11 +1,10 @@
+use super::server::Alg;
+use super::utils::from_slice_stream;
 use crate::ctap2::server::RpIdHash;
-use std::fmt;
-#[cfg(test)]
-use std::io::{self, Write};
-
 #[cfg(test)]
 use byteorder::{BigEndian, WriteBytesExt};
 use nom::{
+    combinator::rest,
     cond, do_parse, map, map_res, named,
     number::complete::{be_u16, be_u32, be_u8},
     take, Err as NomErr, IResult,
@@ -19,11 +18,10 @@ use serde::{
     ser::{Error as SerError, SerializeMap},
     Serializer,
 };
-
 use serde_bytes::ByteBuf;
-
-use super::server::Alg;
-use super::utils::from_slice_stream;
+use std::fmt;
+#[cfg(test)]
+use std::io::{self, Write};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Extension {}
@@ -113,6 +111,7 @@ pub struct AttestedCredentialData {
     pub credential_id: Vec<u8>,
     // TODO(MS): unimplemented!
     // pub credential_public_key: crate::ctap2::commands::client_pin::PublicKey,
+    pub credential_public_key: Vec<u8>,
 }
 
 fn serde_to_nom<'a, Output>(input: &'a [u8]) -> IResult<&'a [u8], Output>
@@ -132,11 +131,12 @@ named!(
         aaguid: map_res!(take!(16), AAGuid::from)
             >> cred_len: be_u16
             >> credential_id: map!(take!(cred_len), Vec::from)
+            >> credential_public_key: rest
             // >> credential_public_key: serde_to_nom
             >> (AttestedCredentialData {
                 aaguid,
                 credential_id,
-                // credential_public_key,
+                credential_public_key: credential_public_key.to_vec(),
             })
     )
 );
