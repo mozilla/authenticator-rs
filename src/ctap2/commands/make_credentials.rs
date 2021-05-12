@@ -25,18 +25,24 @@ use std::io;
 #[derive(Copy, Clone, Debug, Serialize)]
 #[cfg_attr(test, derive(Deserialize))]
 pub struct MakeCredentialsOptions {
-    #[serde(rename = "rk")]
-    pub resident_key: bool,
-    #[serde(rename = "uv")]
-    pub user_validation: bool,
+    #[serde(rename = "rk", skip_serializing_if = "Option::is_none")]
+    pub resident_key: Option<bool>,
+    #[serde(rename = "uv", skip_serializing_if = "Option::is_none")]
+    pub user_validation: Option<bool>,
 }
 
 impl Default for MakeCredentialsOptions {
     fn default() -> Self {
         Self {
-            resident_key: false,
-            user_validation: true,
+            resident_key: None,
+            user_validation: Some(true),
         }
+    }
+}
+
+impl MakeCredentialsOptions {
+    fn has_some(&self) -> bool {
+        self.resident_key.is_some() || self.user_validation.is_some()
     }
 }
 
@@ -44,11 +50,12 @@ pub(crate) trait UserValidation {
     fn ask_user_validation(&self) -> bool;
 }
 
-impl UserValidation for Option<MakeCredentialsOptions> {
+impl UserValidation for MakeCredentialsOptions {
     fn ask_user_validation(&self) -> bool {
-        match *self {
-            Some(ref e) if e.user_validation => true,
-            _ => false,
+        if let Some(e) = self.user_validation {
+            e
+        } else {
+            false
         }
     }
 }
@@ -72,7 +79,7 @@ pub struct MakeCredentials {
     // from the client to the authenticator for authenticator extensions during
     // the processing of these calls.
     extensions: Map<String, json_value::Value>,
-    options: Option<MakeCredentialsOptions>,
+    options: MakeCredentialsOptions,
     pin: Option<Pin>,
     // TODO(MS): pin_protocol
 }
@@ -84,7 +91,7 @@ impl MakeCredentials {
         user: Option<User>,
         pub_cred_params: Vec<PublicKeyCredentialParameters>,
         exclude_list: Vec<PublicKeyCredentialDescriptor>,
-        options: Option<MakeCredentialsOptions>,
+        options: MakeCredentialsOptions,
         pin: Option<Pin>,
     ) -> Self {
         Self {
@@ -115,7 +122,7 @@ impl Serialize for MakeCredentials {
         if !self.extensions.is_empty() {
             map_len += 1;
         }
-        if self.options.is_some() {
+        if self.options.has_some() {
             map_len += 1;
         }
 
@@ -134,7 +141,7 @@ impl Serialize for MakeCredentials {
         if !self.extensions.is_empty() {
             map.serialize_entry(&6, &self.extensions)?;
         }
-        if self.options.is_some() {
+        if self.options.has_some() {
             map.serialize_entry(&7, &self.options)?;
         }
         map.end()
@@ -301,7 +308,7 @@ impl RequestCtap2 for MakeCredentials {
 
 #[cfg(test)]
 pub mod test {
-    use super::MakeCredentials;
+    use super::{MakeCredentials, MakeCredentialsOptions};
     use crate::ctap2::attestation::{
         AAGuid, AttestationCertificate, AttestationObject, AttestationStatement,
         AttestationStatementFidoU2F, AttestationStatementPacked, AttestedCredentialData,
@@ -344,11 +351,10 @@ pub mod test {
                 PublicKeyCredentialParameters { alg: Alg::RS256 },
             ],
             Vec::new(),
-            None,
-            // Some(MakeCredentialsOptions {
-            //     resident_key: true,
-            //     user_validation: false,
-            // }),
+            MakeCredentialsOptions {
+                resident_key: Some(true),
+                user_validation: None,
+            },
             None,
         );
 
@@ -464,11 +470,10 @@ pub mod test {
                 PublicKeyCredentialParameters { alg: Alg::RS256 },
             ],
             Vec::new(),
-            None,
-            // Some(MakeCredentialsOptions {
-            //     resident_key: true,
-            //     user_validation: false,
-            // }),
+            MakeCredentialsOptions {
+                resident_key: Some(true),
+                user_validation: None,
+            },
             None,
         );
 
@@ -632,12 +637,11 @@ pub mod test {
     ];
 
     #[rustfmt::skip]
-    pub const MAKE_CREDENTIALS_SAMPLE_REQUEST_CTAP2: [u8; 254] = [
+    pub const MAKE_CREDENTIALS_SAMPLE_REQUEST_CTAP2: [u8; 260] = [
         // NOTE: This has been taken from CTAP2.0 spec, but the clientDataHash has been replaced
         //       to be able to operate with known values for CollectedClientData (spec doesn't say
         //       what values led to the provided example hash)
-        // 0xa5, // map(5) Replace line below with this one, once MakeCredentialOptions work
-        0xa4, // map(4)
+        0xa5, // map(5)
           0x01, // unsigned(1) - clientDataHash
           0x58, 0x20, // bytes(32)
             0xc1, 0xdd, 0x35, 0x5f, 0x3c, 0x81, 0x69, 0x23, 0xe0, 0x57, 0xca, 0x03, 0x8d, // hash
@@ -696,11 +700,11 @@ pub mod test {
               0x6a, // text(10)
                 0x70, 0x75, 0x62, 0x6C, 0x69, 0x63, 0x2D, 0x6B, 0x65, 0x79, // "public-key"
           // TODO(MS): Options seem to be parsed differently than in the example here.
-          // 0x07, // unsigned(7) - options
-          // 0xa1, // map(1)
-          //   0x62, // text(2)
-          //     0x72, 0x6b, // "rk"
-          //   0xf5, // primitive(21)
+           0x07, // unsigned(7) - options
+           0xa1, // map(1)
+             0x62, // text(2)
+               0x72, 0x6b, // "rk"
+             0xf5, // primitive(21)
     ];
 
     pub const MAKE_CREDENTIALS_SAMPLE_REQUEST_CTAP1: [u8; 73] = [
