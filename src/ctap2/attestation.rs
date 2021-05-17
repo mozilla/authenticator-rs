@@ -276,6 +276,7 @@ pub enum AttestationStatement {
     //AndroidSafetyNet,
     FidoU2F(AttestationStatementFidoU2F),
     // TODO(baloo): should we do an Unknow version? most likely
+    Unparsed(Vec<u8>),
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -432,7 +433,7 @@ impl Serialize for AttestationObject {
                 map.serialize_entry(&1, &"packed")?;
                 map.serialize_entry(&3, v)?;
             }
-            AttestationStatement::FidoU2F(_) => {
+            AttestationStatement::FidoU2F(_) | AttestationStatement::Unparsed(_) => {
                 unimplemented!();
             }
         }
