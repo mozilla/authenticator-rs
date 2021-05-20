@@ -140,8 +140,7 @@ where
             }
             (cmd, data)
         };
-
-        trace!("u2f_read({:?}) cmd={:?}: {:#04X?}", self.id(), cmd, &&data);
+        trace!("u2f_read({:?}) cmd={:?}: {:#04X?}", self.id(), cmd, &data);
         Ok((cmd, data))
     }
 }

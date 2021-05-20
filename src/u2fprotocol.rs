@@ -294,7 +294,7 @@ pub(crate) mod tests {
                 assert!(!self.writes.is_empty(), "Ran out of expected write values!");
                 let check = self.writes.remove(0);
                 assert_eq!(check.len(), bytes.len());
-                assert_eq!(&check[..], bytes);
+                assert_eq!(&check, bytes);
                 Ok(bytes.len())
             }
 
@@ -309,7 +309,7 @@ pub(crate) mod tests {
                 assert!(!self.reads.is_empty(), "Ran out of read values!");
                 let check = self.reads.remove(0);
                 assert_eq!(check.len(), bytes.len());
-                bytes.clone_from_slice(&check[..]);
+                bytes.clone_from_slice(&check);
                 Ok(check.len())
             }
         }

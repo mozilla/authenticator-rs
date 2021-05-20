@@ -289,6 +289,7 @@ pub struct AttestationStatementFidoU2F {
     pub attestation_cert: Vec<AttestationCertificate>,
 }
 
+#[allow(dead_code)] // TODO(MS): Remove me, once we can parse AttestationStatements and use this function
 impl AttestationStatementFidoU2F {
     pub fn new(cert: &[u8], signature: &[u8]) -> Self {
         AttestationStatementFidoU2F {
