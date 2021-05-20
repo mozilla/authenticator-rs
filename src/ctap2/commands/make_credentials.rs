@@ -41,7 +41,7 @@ impl Default for MakeCredentialsOptions {
 }
 
 impl MakeCredentialsOptions {
-    fn has_some(&self) -> bool {
+    pub(crate) fn has_some(&self) -> bool {
         self.resident_key.is_some() || self.user_validation.is_some()
     }
 }
@@ -267,6 +267,7 @@ impl RequestCtap2 for MakeCredentials {
     where
         Dev: U2FDevice + io::Read + io::Write + fmt::Debug,
     {
+        // TODO(MS): Add GetInfo-request here and others (See CommandDevice::new)
         Ok(ser::to_vec(&self).map_err(CommandError::Serialization)?)
     }
 
