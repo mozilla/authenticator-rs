@@ -493,7 +493,9 @@ pub mod test {
     use rand::{thread_rng, RngCore};
 
     #[test]
-    fn test_get_assertion_ctap2() {}
+    fn test_get_assertion_ctap2() {
+        // TODO(MS) Get some example data
+    }
 
     fn fill_device_ctap1(device: &mut TestDevice, cid: [u8; 4], flags: u8, answer_status: [u8; 2]) {
         // ctap2 request
