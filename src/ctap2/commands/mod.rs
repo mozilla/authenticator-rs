@@ -1,3 +1,4 @@
+use super::crypto;
 use crate::transport::errors::{ApduErrorStatus, HIDError};
 use crate::transport::FidoDevice;
 use serde_cbor::{error::Error as CborError, Value};
@@ -6,6 +7,7 @@ use std::error::Error as StdErrorT;
 use std::fmt;
 use std::io::{Read, Write};
 
+pub(crate) mod client_pin;
 pub(crate) mod get_assertion;
 #[allow(dead_code)] // TODO(MS): Remove me asap
 pub(crate) mod get_info;
@@ -324,6 +326,8 @@ pub enum CommandError {
     Parsing(CborError),
     StatusCode(StatusCode, Option<Value>),
     Json(json::Error),
+    Crypto(crypto::CryptoError),
+    UnsupportedPinProtocol,
 }
 
 impl fmt::Display for CommandError {
@@ -344,6 +348,10 @@ impl fmt::Display for CommandError {
                 write!(f, "CommandError: Unexpected code: {:?} ({:?})", code, value)
             }
             CommandError::Json(ref e) => write!(f, "CommandError: Json serializing error: {}", e),
+            CommandError::Crypto(ref e) => write!(f, "CommandError: Crypto error: {:?}", e),
+            CommandError::UnsupportedPinProtocol => {
+                write!(f, "CommandError: Pin protocol is not supported")
+            }
         }
     }
 }
