@@ -5,7 +5,7 @@ use crate::ctap2::attestation::{
     AuthenticatorDataFlags,
 };
 use crate::ctap2::client_data::CollectedClientData;
-use crate::ctap2::commands::client_pin::Pin;
+use crate::ctap2::commands::client_pin::PinAuth;
 use crate::ctap2::server::{
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, User,
 };
@@ -78,7 +78,7 @@ pub struct MakeCredentials {
     // the processing of these calls.
     extensions: Map<String, json_value::Value>,
     options: MakeCredentialsOptions,
-    pin: Option<Pin>,
+    pin_auth: Option<PinAuth>,
     // TODO(MS): pin_protocol
 }
 
@@ -90,7 +90,7 @@ impl MakeCredentials {
         pub_cred_params: Vec<PublicKeyCredentialParameters>,
         exclude_list: Vec<PublicKeyCredentialDescriptor>,
         options: MakeCredentialsOptions,
-        pin: Option<Pin>,
+        pin_auth: Option<PinAuth>,
     ) -> Self {
         Self {
             client_data,
@@ -101,7 +101,7 @@ impl MakeCredentials {
             // TODO(baloo): need to sort those out once final api is in
             extensions: Map::new(),
             options,
-            pin,
+            pin_auth,
         }
     }
 }
@@ -123,6 +123,9 @@ impl Serialize for MakeCredentials {
         if self.options.has_some() {
             map_len += 1;
         }
+        if self.pin_auth.is_some() {
+            map_len += 2;
+        }
 
         let mut map = serializer.serialize_map(Some(map_len))?;
         let client_data_hash = self
@@ -141,6 +144,10 @@ impl Serialize for MakeCredentials {
         }
         if self.options.has_some() {
             map.serialize_entry(&7, &self.options)?;
+        }
+        if let Some(pin_auth) = &self.pin_auth {
+            map.serialize_entry(&8, &pin_auth)?;
+            map.serialize_entry(&9, &1)?; // version
         }
         map.end()
     }
