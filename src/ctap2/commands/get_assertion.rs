@@ -4,7 +4,7 @@ use crate::consts::{
 };
 use crate::ctap2::attestation::{AuthenticatorData, AuthenticatorDataFlags};
 use crate::ctap2::client_data::CollectedClientData;
-use crate::ctap2::commands::client_pin::Pin;
+use crate::ctap2::commands::client_pin::PinAuth;
 use crate::ctap2::commands::get_next_assertion::GetNextAssertion;
 use crate::ctap2::commands::make_credentials::UserValidation;
 use crate::ctap2::server::{PublicKeyCredentialDescriptor, RelyingParty, User};
@@ -75,7 +75,7 @@ pub struct GetAssertion {
     extensions: Map<String, json_value::Value>,
     options: GetAssertionOptions,
 
-    pin: Option<Pin>,
+    pin_auth: Option<PinAuth>,
     //TODO(MS): pinProtocol
 }
 
@@ -85,7 +85,7 @@ impl GetAssertion {
         rp: RelyingParty,
         allow_list: Vec<PublicKeyCredentialDescriptor>,
         options: GetAssertionOptions,
-        pin: Option<Pin>,
+        pin_auth: Option<PinAuth>,
     ) -> Self {
         Self {
             client_data,
@@ -94,7 +94,7 @@ impl GetAssertion {
             // TODO(baloo): need to sort those out once final api is in
             extensions: Map::new(),
             options,
-            pin,
+            pin_auth,
         }
     }
 }
@@ -104,8 +104,6 @@ impl Serialize for GetAssertion {
     where
         S: Serializer,
     {
-        // let pin_auth = &self.pin_auth;
-
         // Need to define how many elements are going to be in the map
         // beforehand
         let mut map_len = 2;
@@ -118,9 +116,9 @@ impl Serialize for GetAssertion {
         if self.options.has_some() {
             map_len += 1;
         }
-        // if pin_auth.is_some() {
-        //     map_len += 2;
-        // }
+        if self.pin_auth.is_some() {
+            map_len += 2;
+        }
 
         let mut map = serializer.serialize_map(Some(map_len))?;
         map.serialize_entry(&1, &self.rp)?;
@@ -139,10 +137,10 @@ impl Serialize for GetAssertion {
         if self.options.has_some() {
             map.serialize_entry(&5, &self.options)?;
         }
-        // if let Some(pin_auth) = pin_auth {
-        //     map.serialize_entry(&6, &pin_auth)?;
-        //     map.serialize_entry(&7, &1)?;
-        // }
+        if let Some(pin_auth) = &self.pin_auth {
+            map.serialize_entry(&6, &pin_auth)?;
+            map.serialize_entry(&7, &1)?;
+        }
         map.end()
     }
 }

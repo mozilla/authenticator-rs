@@ -1,6 +1,7 @@
 use crate::consts::Capability;
 use crate::ctap2::commands::get_info::AuthenticatorInfo;
 use crate::ctap2::commands::{Request, RequestCtap1, RequestCtap2};
+use crate::ctap2::crypto::ECDHSecret;
 use crate::u2ftypes::U2FDevice;
 use std::fmt;
 
@@ -103,4 +104,6 @@ where
 
     fn get_authenticator_info(&self) -> Option<&AuthenticatorInfo>;
     fn set_authenticator_info(&mut self, authenticator_info: AuthenticatorInfo);
+    fn set_shared_secret(&mut self, secret: ECDHSecret);
+    fn get_shared_secret(&self) -> Option<&ECDHSecret>;
 }
