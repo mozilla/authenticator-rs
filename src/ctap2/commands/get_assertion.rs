@@ -4,8 +4,9 @@ use crate::consts::{
 };
 use crate::ctap2::attestation::{AuthenticatorData, AuthenticatorDataFlags};
 use crate::ctap2::client_data::CollectedClientData;
+use crate::ctap2::commands::client_pin::Pin;
 use crate::ctap2::commands::get_next_assertion::GetNextAssertion;
-use crate::ctap2::commands::make_credentials::{Pin, UserValidation};
+use crate::ctap2::commands::make_credentials::UserValidation;
 use crate::ctap2::server::{PublicKeyCredentialDescriptor, RelyingParty, User};
 use crate::transport::errors::{ApduErrorStatus, HIDError};
 use crate::transport::FidoDevice;

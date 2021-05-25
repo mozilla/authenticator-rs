@@ -5,6 +5,7 @@ use crate::ctap2::attestation::{
     AuthenticatorDataFlags,
 };
 use crate::ctap2::client_data::CollectedClientData;
+use crate::ctap2::commands::client_pin::Pin;
 use crate::ctap2::server::{
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, User,
 };
@@ -59,9 +60,6 @@ impl UserValidation for MakeCredentialsOptions {
         }
     }
 }
-
-#[derive(Debug)]
-pub struct Pin(String); // TODO(MS): unimplemented! Requires more crypto
 
 #[derive(Debug)]
 pub struct MakeCredentials {
