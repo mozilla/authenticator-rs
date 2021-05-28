@@ -6,7 +6,7 @@ use crate::errors;
 use crate::statecallback::StateCallback;
 use crate::transport::platform::monitor::Monitor;
 use runloop::RunLoop;
-use std::ffi::OsString;
+use std::path::PathBuf;
 
 pub struct Transaction {
     // Handle to the thread loop.
@@ -20,7 +20,7 @@ impl Transaction {
         new_device_cb: F,
     ) -> crate::Result<Self>
     where
-        F: Fn(OsString, &dyn Fn() -> bool) + Sync + Send + 'static,
+        F: Fn(PathBuf, &dyn Fn() -> bool) + Sync + Send + 'static,
         T: 'static,
     {
         let thread = RunLoop::new_with_timeout(

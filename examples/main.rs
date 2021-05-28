@@ -3,8 +3,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use authenticator::{
-    authenticatorservice::AuthenticatorService, statecallback::StateCallback,
-    AuthenticatorTransports, KeyHandle, RegisterFlags, SignFlags, StatusUpdate,
+    authenticatorservice::AuthenticatorService, authenticatorservice::RegisterArgsCtap1,
+    statecallback::StateCallback, AuthenticatorTransports, KeyHandle, RegisterFlags,
+    RegisterResult, SignFlags, StatusUpdate,
 };
 use getopts::Options;
 use sha2::{Digest, Sha256};
@@ -126,22 +127,24 @@ fn main() {
         register_tx.send(rv).unwrap();
     }));
 
+    let ctap_args = RegisterArgsCtap1 {
+        flags,
+        challenge: chall_bytes.clone(),
+        application: app_bytes.clone(),
+        key_handles: vec![],
+    };
     manager
-        .register(
-            flags,
-            timeout_ms,
-            chall_bytes.clone(),
-            app_bytes.clone(),
-            vec![],
-            status_tx.clone(),
-            callback,
-        )
+        .register(timeout_ms, ctap_args.into(), status_tx.clone(), callback)
         .expect("Couldn't register");
 
     let register_result = register_rx
         .recv()
         .expect("Problem receiving, unable to continue");
-    let (register_data, device_info) = register_result.expect("Registration failed");
+    let (register_data, device_info) = match register_result {
+        Ok(RegisterResult::CTAP1(r, d)) => (r, d),
+        Ok(RegisterResult::CTAP2(_, _)) => panic!("Did not request CTAP2, but got CTAP2 results!"),
+        Err(_) => panic!("Registration failed"),
+    };
 
     println!("Register result: {}", base64::encode(&register_data));
     println!("Device info: {}", &device_info);

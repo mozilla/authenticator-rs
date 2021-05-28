@@ -3,12 +3,15 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use crate::consts::PARAMETER_SIZE;
-use crate::errors;
+use crate::ctap2::commands::make_credentials::MakeCredentials;
+use crate::ctap2::commands::{CommandError, StatusCode};
+use crate::errors::{self, AuthenticatorError};
 use crate::statecallback::StateCallback;
 use crate::transport::platform::{device::Device, transaction::Transaction};
+use crate::transport::{errors::HIDError, FidoDevice, Nonce};
 use crate::u2fprotocol::{u2f_init_device, u2f_is_keyhandle_valid, u2f_register, u2f_sign};
 use crate::u2ftypes::U2FDevice;
-
+use crate::RegisterResult;
 use std::sync::mpsc::Sender;
 use std::sync::Mutex;
 use std::thread;
@@ -137,7 +140,7 @@ impl StateMachine {
                             dev_info: dev.get_device_info(),
                         },
                     );
-                    callback.call(Ok((bytes, dev_info)));
+                    callback.call(Ok(RegisterResult::CTAP1(bytes, dev_info)));
                     break;
                 }
 
@@ -272,6 +275,156 @@ impl StateMachine {
 
         self.transaction = Some(try_or!(transaction, |e| cbc.call(Err(e))));
     }
+
+    // This blocks.
+    pub fn cancel(&mut self) {
+        if let Some(mut transaction) = self.transaction.take() {
+            transaction.cancel();
+        }
+    }
+}
+
+#[derive(Default)]
+// TODO(MS): To be renamed to `StateMachine` once U2FManager and the original StateMachine can be removed.
+pub struct StateMachineCtap2 {
+    transaction: Option<Transaction>,
+}
+
+impl StateMachineCtap2 {
+    pub fn new() -> Self {
+        Default::default()
+    }
+
+    pub fn register(
+        &mut self,
+        timeout: u64,
+        params: MakeCredentials,
+        status: Sender<crate::StatusUpdate>,
+        callback: StateCallback<crate::Result<crate::RegisterResult>>,
+    ) {
+        // Abort any prior register/sign calls.
+        self.cancel();
+        let cbc = callback.clone();
+        let status_mutex = Mutex::new(status);
+
+        let transaction = Transaction::new(timeout, cbc.clone(), move |info, _alive| {
+            // TODO(baloo): what is alive about? have to ask jcj
+            // Create a new device.
+            let dev = &mut match Device::new(info) {
+                Ok(dev) => dev,
+                Err(e) => {
+                    info!("error happened with device: {}", e);
+                    return;
+                }
+            };
+
+            // Try initializing it.
+            if let Err(e) = dev.init(Nonce::CreateRandom) {
+                info!("error while initializing device: {}", e);
+                return;
+            }
+
+            send_status(
+                &status_mutex,
+                crate::StatusUpdate::DeviceAvailable {
+                    dev_info: dev.get_device_info(),
+                },
+            );
+            // TODO(baloo): not sure about this, have to ask
+            // We currently support none of the authenticator selection
+            // criteria because we can't ask tokens whether they do support
+            // those features. If flags are set, ignore all tokens for now.
+            //
+            // Technically, this is a ConstraintError because we shouldn't talk
+            // to this authenticator in the first place. But the result is the
+            // same anyway.
+            //if !flags.is_empty() {
+            //    return;
+            //}
+
+            // TODO(baloo): not sure about this, have to ask
+            // Iterate the exclude list and see if there are any matches.
+            // If so, we'll keep polling the device anyway to test for user
+            // consent, to be consistent with CTAP2 device behavior.
+            //let excluded = key_handles.iter().any(|key_handle| {
+            //    is_valid_transport(key_handle.transports)
+            //        && u2f_is_keyhandle_valid(dev, &challenge, &application, &key_handle.credential)
+            //            .unwrap_or(false) /* no match on failure */
+            //});
+
+            let resp = dev.send_msg(&params);
+            match resp {
+                Ok((attestation, client_data)) => {
+                    send_status(
+                        &status_mutex,
+                        crate::StatusUpdate::Success {
+                            dev_info: dev.get_device_info(),
+                        },
+                    );
+                    callback.call(Ok(RegisterResult::CTAP2(attestation, client_data)))
+                }
+                Err(HIDError::DeviceNotSupported) | Err(HIDError::UnsupportedCommand) => {}
+                Err(HIDError::Command(CommandError::StatusCode(StatusCode::ChannelBusy, _))) => {}
+                Err(e) => {
+                    warn!("error happened: {}", e);
+                    callback.call(Err(AuthenticatorError::HIDError(e)));
+                }
+            }
+            send_status(
+                &status_mutex,
+                crate::StatusUpdate::DeviceUnavailable {
+                    dev_info: dev.get_device_info(),
+                },
+            );
+        });
+
+        self.transaction = Some(try_or!(transaction, |e| cbc.call(Err(e))));
+    }
+    /*
+    pub fn sign<CB>(&mut self, timeout: u64, command: GetAssertion, callback: CB)
+    where
+        CB: Callback<Input = AssertionObject> + Clone + Send + Sync + 'static,
+    {
+        // Abort any prior register/sign calls.
+        self.cancel();
+
+        let cbc = callback.clone();
+
+        let transaction = Transaction::new(timeout, callback.clone(), move |info, alive| {
+            // TODO(baloo): what is alive about? have to ask jcj
+            // Create a new device.
+            let dev = &mut match Device::new(info) {
+                Ok(dev) => dev,
+                Err(e) => {
+                    info!("error happened with device: {}", e);
+                    return;
+                }
+            };
+
+            // Try initializing it.
+            if let Err(e) = dev.init() {
+                info!("error while initializing device: {}", e);
+                return;
+            }
+
+            let resp = dev.send_msg(&command);
+            match resp {
+                Ok(resp) => callback.call(Ok(resp)),
+                // TODO(baloo): if key_handle is invalid for this device, it
+                //              should reply something like:
+                //              CTAP2_ERR_INVALID_CREDENTIAL
+                //              have to check
+                Err(ref e) if e.device_unsupported() || e.unsupported_command() => {}
+                Err(Error::Command(ref e)) if e.device_busy() => {}
+                Err(e) => {
+                    warn!("error happened: {}", e);
+                    callback.call(Err(::Error::Unknown));
+                }
+            }
+        });
+
+        self.transaction = Some(try_or!(transaction, move |e| cbc.call(Err(e))));
+    }*/
 
     // This blocks.
     pub fn cancel(&mut self) {

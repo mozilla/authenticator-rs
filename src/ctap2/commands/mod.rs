@@ -37,10 +37,7 @@ pub(crate) enum Retryable<T> {
 
 impl<T> Retryable<T> {
     pub fn is_retry(&self) -> bool {
-        match *self {
-            Retryable::Retry => true,
-            _ => false,
-        }
+        matches!(*self, Retryable::Retry)
     }
 
     pub fn is_error(&self) -> bool {
@@ -205,17 +202,11 @@ pub enum StatusCode {
 
 impl StatusCode {
     fn is_ok(&self) -> bool {
-        match *self {
-            StatusCode::OK => true,
-            _ => false,
-        }
+        matches!(*self, StatusCode::OK)
     }
 
     fn device_busy(&self) -> bool {
-        match *self {
-            StatusCode::ChannelBusy => true,
-            _ => false,
-        }
+        matches!(*self, StatusCode::ChannelBusy)
     }
 }
 

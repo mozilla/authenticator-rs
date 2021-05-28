@@ -6,9 +6,9 @@ use libc::{c_int, c_short, c_ulong};
 use libudev::EventType;
 use runloop::RunLoop;
 use std::collections::HashMap;
-use std::ffi::OsString;
 use std::io;
 use std::os::unix::io::AsRawFd;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 const UDEV_SUBSYSTEM: &str = "hidraw";
@@ -29,15 +29,15 @@ fn poll(fds: &mut Vec<::libc::pollfd>) -> io::Result<()> {
 
 pub struct Monitor<F>
 where
-    F: Fn(OsString, &dyn Fn() -> bool) + Sync,
+    F: Fn(PathBuf, &dyn Fn() -> bool) + Sync,
 {
-    runloops: HashMap<OsString, RunLoop>,
+    runloops: HashMap<PathBuf, RunLoop>,
     new_device_cb: Arc<F>,
 }
 
 impl<F> Monitor<F>
 where
-    F: Fn(OsString, &dyn Fn() -> bool) + Send + Sync + 'static,
+    F: Fn(PathBuf, &dyn Fn() -> bool) + Send + Sync + 'static,
 {
     pub fn new(new_device_cb: F) -> Self {
         Self {
@@ -54,7 +54,7 @@ where
 
         // Iterate all existing devices.
         for dev in enumerator.scan_devices()? {
-            if let Some(path) = dev.devnode().map(|p| p.to_owned().into_os_string()) {
+            if let Some(path) = dev.devnode().map(|p| p.to_owned()) {
                 self.add_device(path);
             }
         }
@@ -86,10 +86,7 @@ where
     }
 
     fn process_event(&mut self, event: &libudev::Event) {
-        let path = event
-            .device()
-            .devnode()
-            .map(|dn| dn.to_owned().into_os_string());
+        let path = event.device().devnode().map(|dn| dn.to_owned());
 
         match (event.event_type(), path) {
             (EventType::Add, Some(path)) => {
@@ -102,7 +99,7 @@ where
         }
     }
 
-    fn add_device(&mut self, path: OsString) {
+    fn add_device(&mut self, path: PathBuf) {
         let f = self.new_device_cb.clone();
         let key = path.clone();
 
@@ -119,7 +116,7 @@ where
         }
     }
 
-    fn remove_device(&mut self, path: &OsString) {
+    fn remove_device(&mut self, path: &PathBuf) {
         debug!("Removing device {}", path.to_string_lossy());
 
         if let Some(runloop) = self.runloops.remove(path) {
@@ -135,7 +132,7 @@ where
     }
 }
 
-pub fn get_property_linux(path: &OsString, prop_name: &str) -> io::Result<String> {
+pub fn get_property_linux(path: &PathBuf, prop_name: &str) -> io::Result<String> {
     let ctx = libudev::Context::new()?;
 
     let mut enumerator = libudev::Enumerator::new(&ctx)?;

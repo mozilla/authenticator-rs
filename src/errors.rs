@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+use crate::transport::errors::HIDError;
 use std::fmt;
 use std::io;
 use std::sync::mpsc;
@@ -20,6 +21,8 @@ pub enum AuthenticatorError {
     InternalError(String),
     U2FToken(U2FTokenError),
     Custom(String),
+    VersionMismatch(&'static str, u32),
+    HIDError(HIDError),
 }
 
 impl AuthenticatorError {
@@ -50,6 +53,12 @@ impl fmt::Display for AuthenticatorError {
                 write!(f, "A u2f token error occurred {:?}", err)
             }
             AuthenticatorError::Custom(ref err) => write!(f, "A custom error occurred {:?}", err),
+            AuthenticatorError::VersionMismatch(manager, version) => write!(
+                f,
+                "{} expected arguments of version CTAP{}",
+                manager, version
+            ),
+            AuthenticatorError::HIDError(ref e) => write!(f, "Device error: {}", e),
         }
     }
 }

@@ -36,6 +36,8 @@ mod capi;
 pub use crate::capi::*;
 
 pub mod ctap2;
+pub use ctap2::attestation::AttestationObject;
+pub use ctap2::client_data::CollectedClientData;
 
 pub mod errors;
 pub mod statecallback;
@@ -63,14 +65,19 @@ bitflags! {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct KeyHandle {
     pub credential: Vec<u8>,
     pub transports: AuthenticatorTransports,
 }
 
 pub type AppId = Vec<u8>;
-pub type RegisterResult = (Vec<u8>, u2ftypes::U2FDeviceInfo);
+
+pub enum RegisterResult {
+    CTAP1(Vec<u8>, u2ftypes::U2FDeviceInfo),
+    CTAP2(AttestationObject, CollectedClientData),
+}
+
 pub type SignResult = (AppId, Vec<u8>, Vec<u8>, u2ftypes::U2FDeviceInfo);
 
 pub type Result<T> = std::result::Result<T, errors::AuthenticatorError>;

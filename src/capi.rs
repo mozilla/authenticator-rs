@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use crate::authenticatorservice::AuthenticatorService;
+use crate::authenticatorservice::{AuthenticatorService, RegisterArgsCtap1};
 use crate::errors;
 use crate::statecallback::StateCallback;
 use crate::{RegisterResult, SignResult};
@@ -249,7 +249,7 @@ pub unsafe extern "C" fn rust_u2f_mgr_register(
 
     let state_callback = StateCallback::<crate::Result<RegisterResult>>::new(Box::new(move |rv| {
         let result = match rv {
-            Ok((registration, dev_info)) => {
+            Ok(RegisterResult::CTAP1(registration, dev_info)) => {
                 let mut bufs = HashMap::new();
                 bufs.insert(RESBUF_ID_REGISTRATION, registration);
                 bufs.insert(RESBUF_ID_VENDOR_NAME, dev_info.vendor_name);
@@ -259,21 +259,22 @@ pub unsafe extern "C" fn rust_u2f_mgr_register(
                 bufs.insert(RESBUF_ID_FIRMWARE_BUILD, vec![dev_info.version_build]);
                 U2FResult::Success(bufs)
             }
+            Ok(RegisterResult::CTAP2(_, _)) => U2FResult::Error(
+                errors::AuthenticatorError::VersionMismatch("rust_u2f_mgr_register", 1),
+            ),
             Err(e) => U2FResult::Error(e),
         };
 
         callback(tid, Box::into_raw(Box::new(result)));
     }));
-
-    let res = (*mgr).register(
+    let ctap_args = RegisterArgsCtap1 {
         flags,
-        timeout,
         challenge,
         application,
         key_handles,
-        status_tx,
-        state_callback,
-    );
+    };
+
+    let res = (*mgr).register(timeout, ctap_args.into(), status_tx, state_callback);
 
     if res.is_ok() {
         tid
