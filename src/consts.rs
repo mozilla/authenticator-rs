@@ -38,8 +38,8 @@ const CTAPHID_INIT: u8 = TYPE_INIT | 0x06; // Channel initialization
 const CTAPHID_WINK: u8 = TYPE_INIT | 0x08; // Send device identification wink
 const CTAPHID_CBOR: u8 = TYPE_INIT | 0x10; // Encapsulated CBOR encoded message
 const CTAPHID_CANCEL: u8 = TYPE_INIT | 0x11; // Cancel outstanding requests
+const CTAPHID_KEEPALIVE: u8 = TYPE_INIT | 0x3b; // Keepalive sent to authenticator every 100ms and whenever a status changes
 const CTAPHID_ERROR: u8 = TYPE_INIT | 0x3f; // Error response
-const CTAPHID_KEEPALIVE: u8 = TYPE_INIT | 0x3b; // Should be sent a an authenticator every 100ms and whenever a status changes
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 #[repr(u8)]
