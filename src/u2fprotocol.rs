@@ -127,8 +127,10 @@ where
     T: U2FDevice + Read + Write,
 {
     assert_eq!(nonce.len(), INIT_NONCE_SIZE);
-    let raw = sendrecv(dev, U2FHID_INIT, nonce)?;
+    // Send Init to broadcast address to create a new channel
+    let raw = sendrecv(dev, HIDCmd::Init, nonce)?;
     let rsp = U2FHIDInitResp::read(&raw, nonce)?;
+    // Get the new Channel ID
     dev.set_cid(rsp.cid);
 
     let vendor = dev
@@ -181,12 +183,12 @@ fn status_word_to_result<T>(status: [u8; 2], val: T) -> io::Result<T> {
 // Device Communication Functions
 ////////////////////////////////////////////////////////////////////////
 
-pub fn sendrecv<T>(dev: &mut T, cmd: u8, send: &[u8]) -> io::Result<Vec<u8>>
+pub fn sendrecv<T>(dev: &mut T, cmd: HIDCmd, send: &[u8]) -> io::Result<Vec<u8>>
 where
     T: U2FDevice + Read + Write,
 {
     // Send initialization packet.
-    let mut count = U2FHIDInit::write(dev, cmd, send)?;
+    let mut count = U2FHIDInit::write(dev, cmd.into(), send)?;
 
     // Send continuation packets.
     let mut sequence = 0u8;
@@ -198,7 +200,7 @@ where
     // Now we read. This happens in 2 chunks: The initial packet, which has the
     // size we expect overall, then continuation packets, which will fill in
     // data until we have everything.
-    let mut data = U2FHIDInit::read(dev)?;
+    let (_, mut data) = U2FHIDInit::read(dev)?;
 
     let mut sequence = 0u8;
     while data.len() < data.capacity() {
@@ -215,7 +217,7 @@ where
     T: U2FDevice + Read + Write,
 {
     let apdu = U2FAPDUHeader::serialize(cmd, p1, send)?;
-    let mut data = sendrecv(dev, U2FHID_MSG, &apdu)?;
+    let mut data = sendrecv(dev, HIDCmd::Msg, &apdu)?;
 
     if data.len() < 2 {
         return Err(io_err("unexpected response"));
@@ -231,27 +233,30 @@ where
 ////////////////////////////////////////////////////////////////////////
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
+    use super::{init_device, is_v2_device, send_apdu, sendrecv, U2FDevice};
+    use crate::consts::{Capability, HIDCmd, CID_BROADCAST, SW_NO_ERROR};
+    use crate::u2ftypes::U2FDeviceInfo;
     use rand::{thread_rng, RngCore};
 
-    use super::{init_device, send_apdu, sendrecv, U2FDevice};
-    use crate::consts::{CID_BROADCAST, SW_NO_ERROR, U2FHID_INIT, U2FHID_MSG, U2FHID_PING};
-
-    mod platform {
+    pub(crate) mod platform {
         use std::io;
         use std::io::{Read, Write};
 
         use crate::consts::CID_BROADCAST;
+        use crate::ctap2::commands::get_info::AuthenticatorInfo;
         use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
 
-        const IN_HID_RPT_SIZE: usize = 64;
+        pub(crate) const IN_HID_RPT_SIZE: usize = 64;
         const OUT_HID_RPT_SIZE: usize = 64;
 
+        #[derive(Debug)]
         pub struct TestDevice {
-            cid: [u8; 4],
-            reads: Vec<[u8; IN_HID_RPT_SIZE]>,
-            writes: Vec<[u8; OUT_HID_RPT_SIZE + 1]>,
-            dev_info: Option<U2FDeviceInfo>,
+            pub cid: [u8; 4],
+            pub reads: Vec<[u8; IN_HID_RPT_SIZE]>,
+            pub writes: Vec<[u8; OUT_HID_RPT_SIZE + 1]>,
+            pub dev_info: Option<U2FDeviceInfo>,
+            pub authenticator_info: Option<AuthenticatorInfo>,
         }
 
         impl TestDevice {
@@ -261,6 +266,7 @@ mod tests {
                     reads: vec![],
                     writes: vec![],
                     dev_info: None,
+                    authenticator_info: None,
                 }
             }
 
@@ -356,13 +362,13 @@ mod tests {
 
         // init packet
         let mut msg = CID_BROADCAST.to_vec();
-        msg.extend(vec![U2FHID_INIT, 0x00, 0x08]); // cmd + bcnt
+        msg.extend(vec![HIDCmd::Init.into(), 0x00, 0x08]); // cmd + bcnt
         msg.extend_from_slice(&nonce);
         device.add_write(&msg, 0);
 
         // init_resp packet
         let mut msg = CID_BROADCAST.to_vec();
-        msg.extend(vec![U2FHID_INIT, 0x00, 0x11]); // cmd + bcnt
+        msg.extend(vec![HIDCmd::Init.into(), 0x00, 0x11]); // cmd + bcnt
         msg.extend_from_slice(&nonce);
         msg.extend_from_slice(&cid); // new channel id
         msg.extend(vec![0x02, 0x04, 0x01, 0x08, 0x01]); // versions + flags
@@ -376,7 +382,44 @@ mod tests {
         assert_eq!(dev_info.version_major, 0x04);
         assert_eq!(dev_info.version_minor, 0x01);
         assert_eq!(dev_info.version_build, 0x08);
-        assert_eq!(dev_info.cap_flags, 0x01);
+        assert_eq!(dev_info.cap_flags, Capability::WINK); // 0x01
+    }
+
+    #[test]
+    fn test_get_version() {
+        let mut device = platform::TestDevice::new();
+        // channel id
+        let mut cid = [0u8; 4];
+        thread_rng().fill_bytes(&mut cid);
+
+        device.set_cid(cid.clone());
+
+        let info = U2FDeviceInfo {
+            vendor_name: Vec::new(),
+            device_name: Vec::new(),
+            version_interface: 0x02,
+            version_major: 0x04,
+            version_minor: 0x01,
+            version_build: 0x08,
+            cap_flags: Capability::WINK,
+        };
+        device.set_device_info(info);
+
+        // ctap1 U2F_VERSION request
+        let mut msg = cid.to_vec();
+        msg.extend(&[HIDCmd::Msg.into(), 0x0, 0x9]); // cmd + bcnt
+        msg.extend(&[0x0, 0x3, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0]);
+        device.add_write(&msg, 0);
+
+        // fido response
+        let mut msg = cid.to_vec();
+        msg.extend(&[HIDCmd::Msg.into(), 0x0, 0x08]); // cmd + bcnt
+        msg.extend(&[0x55, 0x32, 0x46, 0x5f, 0x56, 0x32]); // 'U2F_V2'
+        msg.extend(&SW_NO_ERROR);
+        device.add_read(&msg, 0);
+
+        let res = is_v2_device(&mut device).expect("Failed to get version");
+        assert!(res);
     }
 
     #[test]
@@ -387,8 +430,8 @@ mod tests {
 
         // init packet
         let mut msg = cid.to_vec();
-        msg.extend(vec![U2FHID_PING, 0x00, 0xe4]); // cmd + length = 228
-                                                   // write msg, append [1u8; 57], 171 bytes remain
+        msg.extend(vec![HIDCmd::Ping.into(), 0x00, 0xe4]); // cmd + length = 228
+                                                           // write msg, append [1u8; 57], 171 bytes remain
         device.add_write(&msg, 1);
         device.add_read(&msg, 1);
 
@@ -415,7 +458,7 @@ mod tests {
         device.add_read(&msg, 0);
 
         let data = [1u8; 228];
-        let d = sendrecv(&mut device, U2FHID_PING, &data).unwrap();
+        let d = sendrecv(&mut device, HIDCmd::Ping, &data).unwrap();
         assert_eq!(d.len(), 228);
         assert_eq!(d, &data[..]);
     }
@@ -429,21 +472,29 @@ mod tests {
 
         let mut msg = cid.to_vec();
         // sendrecv header
-        msg.extend(vec![U2FHID_MSG, 0x00, 0x0e]); // len = 14
-                                                  // apdu header
-        msg.extend(vec![0x00, U2FHID_PING, 0xaa, 0x00, 0x00, 0x00, 0x05]);
+        msg.extend(vec![HIDCmd::Msg.into(), 0x00, 0x0e]); // len = 14
+                                                          // apdu header
+        msg.extend(vec![
+            0x00,
+            HIDCmd::Ping.into(),
+            0xaa,
+            0x00,
+            0x00,
+            0x00,
+            0x05,
+        ]);
         // apdu data
         msg.extend_from_slice(&data);
         device.add_write(&msg, 0);
 
         // Send data back
         let mut msg = cid.to_vec();
-        msg.extend(vec![U2FHID_MSG, 0x00, 0x07]);
+        msg.extend(vec![HIDCmd::Msg.into(), 0x00, 0x07]);
         msg.extend_from_slice(&data);
         msg.extend_from_slice(&SW_NO_ERROR);
         device.add_read(&msg, 0);
 
-        let (result, status) = send_apdu(&mut device, U2FHID_PING, 0xaa, &data).unwrap();
+        let (result, status) = send_apdu(&mut device, HIDCmd::Ping.into(), 0xaa, &data).unwrap();
         assert_eq!(result, &data);
         assert_eq!(status, SW_NO_ERROR);
     }

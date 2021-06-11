@@ -10,7 +10,7 @@ use std::os::unix::io::RawFd;
 
 use super::hidwrapper::{_HIDIOCGRDESC, _HIDIOCGRDESCSIZE};
 use crate::consts::MAX_HID_RPT_SIZE;
-use crate::hidproto::*;
+use crate::transport::hidproto::*;
 use crate::util::{from_unix_result, io_err};
 
 #[allow(non_camel_case_types)]

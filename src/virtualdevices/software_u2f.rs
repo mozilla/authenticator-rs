@@ -1,6 +1,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+use crate::consts::Capability;
 
 pub struct SoftwareU2FToken {}
 
@@ -45,7 +46,7 @@ impl SoftwareU2FToken {
             version_major: 1,
             version_minor: 2,
             version_build: 3,
-            cap_flags: 0,
+            cap_flags: Capability::empty(),
         }
     }
 }

@@ -54,7 +54,7 @@ pub trait U2FDevice {
 pub struct U2FHIDInit {}
 
 impl U2FHIDInit {
-    pub fn read<T>(dev: &mut T) -> io::Result<Vec<u8>>
+    pub fn read<T>(dev: &mut T) -> io::Result<(HIDCmd, Vec<u8>)>
     where
         T: U2FDevice + io::Read,
     {
@@ -69,13 +69,15 @@ impl U2FHIDInit {
             return Err(io_err("invalid init packet"));
         }
 
+        let cmd = HIDCmd::from(frame[4] | TYPE_INIT);
+
         let cap = (frame[5] as usize) << 8 | (frame[6] as usize);
         let mut data = Vec::with_capacity(cap);
 
         let len = cmp::min(cap, dev.in_init_data_size());
         data.extend_from_slice(&frame[7..7 + len]);
 
-        Ok(data)
+        Ok((cmd, data))
     }
 
     pub fn write<T>(dev: &mut T, cmd: u8, data: &[u8]) -> io::Result<usize>
@@ -169,7 +171,7 @@ pub struct U2FHIDInitResp {
     pub version_major: u8,
     pub version_minor: u8,
     pub version_build: u8,
-    pub cap_flags: u8,
+    pub cap_flags: Capability,
 }
 
 impl U2FHIDInitResp {
@@ -195,7 +197,7 @@ impl U2FHIDInitResp {
             version_major: data[INIT_NONCE_SIZE + 5],
             version_minor: data[INIT_NONCE_SIZE + 6],
             version_build: data[INIT_NONCE_SIZE + 7],
-            cap_flags: data[INIT_NONCE_SIZE + 8],
+            cap_flags: Capability::from_bits_truncate(data[INIT_NONCE_SIZE + 8]),
         };
 
         Ok(rsp)
@@ -236,7 +238,7 @@ pub struct U2FDeviceInfo {
     pub version_major: u8,
     pub version_minor: u8,
     pub version_build: u8,
-    pub cap_flags: u8,
+    pub cap_flags: Capability,
 }
 
 impl fmt::Display for U2FDeviceInfo {
@@ -250,7 +252,7 @@ impl fmt::Display for U2FDeviceInfo {
             &self.version_major,
             &self.version_minor,
             &self.version_build,
-            to_hex(&[self.cap_flags], ":"),
+            to_hex(&[self.cap_flags.bits()], ":"),
         )
     }
 }

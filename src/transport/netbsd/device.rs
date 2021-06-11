@@ -11,8 +11,8 @@ use std::mem;
 
 use crate::consts::CID_BROADCAST;
 use crate::consts::MAX_HID_RPT_SIZE;
-use crate::platform::fd::Fd;
-use crate::platform::uhid;
+use crate::transport::platform::fd::Fd;
+use crate::transport::platform::uhid;
 use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
 use crate::util::io_err;
 

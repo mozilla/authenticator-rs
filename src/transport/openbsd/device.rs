@@ -10,7 +10,7 @@ use std::io::{Read, Result, Write};
 use std::mem;
 
 use crate::consts::{CID_BROADCAST, MAX_HID_RPT_SIZE};
-use crate::platform::monitor::FidoDev;
+use crate::transport::platform::monitor::FidoDev;
 use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
 use crate::util::{from_unix_result, io_err};
 
