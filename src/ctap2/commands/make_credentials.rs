@@ -9,7 +9,7 @@ use crate::ctap2::commands::client_pin::PinAuth;
 use crate::ctap2::server::{
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, User,
 };
-use crate::transport::errors::{ApduErrorStatus, HIDError as TransportError};
+use crate::transport::errors::{ApduErrorStatus, HIDError};
 use crate::u2ftypes::{U2FAPDUHeader, U2FDevice};
 use nom::{do_parse, named, number::complete::be_u8, tag, take};
 #[cfg(test)]
@@ -158,7 +158,7 @@ impl Request<(AttestationObject, CollectedClientData)> for MakeCredentials {}
 impl RequestCtap1 for MakeCredentials {
     type Output = (AttestationObject, CollectedClientData);
 
-    fn apdu_format<Dev>(&self, _dev: &mut Dev) -> Result<Vec<u8>, TransportError>
+    fn apdu_format<Dev>(&self, _dev: &mut Dev) -> Result<Vec<u8>, HIDError>
     where
         Dev: U2FDevice,
     {
@@ -179,7 +179,7 @@ impl RequestCtap1 for MakeCredentials {
         register_data.extend_from_slice(
             self.client_data
                 .hash()
-                .map_err(|e| TransportError::Command(CommandError::Json(e)))?
+                .map_err(|e| HIDError::Command(CommandError::Json(e)))?
                 .as_ref(),
         );
         register_data.extend_from_slice(self.rp.hash().as_ref());
@@ -193,7 +193,7 @@ impl RequestCtap1 for MakeCredentials {
         &self,
         status: Result<(), ApduErrorStatus>,
         input: &[u8],
-    ) -> Result<Self::Output, Retryable<TransportError>> {
+    ) -> Result<Self::Output, Retryable<HIDError>> {
         if Err(ApduErrorStatus::ConditionsNotSatisfied) == status {
             return Err(Retryable::Retry);
         }
@@ -214,7 +214,7 @@ impl RequestCtap1 for MakeCredentials {
                 error!("error while parsing registration = {:?}", e);
                 io::Error::new(io::ErrorKind::Other, "unable to parse registration")
             })
-            .map_err(|e| TransportError::IO(None, e))
+            .map_err(|e| HIDError::IO(None, e))
             .map_err(Retryable::Error)?;
 
         // TODO(MS): This is currently not parsed within the crate, but outside by a user-provided function
@@ -226,7 +226,7 @@ impl RequestCtap1 for MakeCredentials {
         //         let err = io::Error::new(io::ErrorKind::Other, "Failed to parse x509 certificate");
         //         let err = error::Error::from(err);
         //         let err = CommandError::Parsing(err);
-        //         let err = TransportError::Command(err);
+        //         let err = HIDError::Command(err);
         //         Retryable::Error(err)
         //     })
         //     .map(|(sig, cert)| (sig, &rest[..rest.len() - sig.len()]))?;
@@ -268,7 +268,7 @@ impl RequestCtap2 for MakeCredentials {
         Command::MakeCredentials
     }
 
-    fn wire_format<Dev>(&self, _dev: &mut Dev) -> Result<Vec<u8>, TransportError>
+    fn wire_format<Dev>(&self, _dev: &mut Dev) -> Result<Vec<u8>, HIDError>
     where
         Dev: U2FDevice + io::Read + io::Write + fmt::Debug,
     {
@@ -280,12 +280,12 @@ impl RequestCtap2 for MakeCredentials {
         &self,
         _dev: &mut Dev,
         input: &[u8],
-    ) -> Result<Self::Output, TransportError>
+    ) -> Result<Self::Output, HIDError>
     where
         Dev: U2FDevice + io::Read + io::Write + fmt::Debug,
     {
         if input.is_empty() {
-            return Err(TransportError::Command(CommandError::InputTooSmall));
+            return Err(HIDError::Command(CommandError::InputTooSmall));
         }
 
         let status: StatusCode = input[0].into();
@@ -297,17 +297,15 @@ impl RequestCtap2 for MakeCredentials {
                 Ok((attestation, client_data))
             } else {
                 let data: Value = from_slice(&input[1..]).map_err(CommandError::Parsing)?;
-                Err(TransportError::Command(CommandError::StatusCode(
+                Err(HIDError::Command(CommandError::StatusCode(
                     status,
                     Some(data),
                 )))
             }
         } else if status.is_ok() {
-            Err(TransportError::Command(CommandError::InputTooSmall))
+            Err(HIDError::Command(CommandError::InputTooSmall))
         } else {
-            Err(TransportError::Command(CommandError::StatusCode(
-                status, None,
-            )))
+            Err(HIDError::Command(CommandError::StatusCode(status, None)))
         }
     }
 }
