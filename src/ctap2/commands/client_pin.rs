@@ -29,7 +29,7 @@ pub enum PINSubcommand {
 }
 
 #[derive(Debug)]
-pub(crate) struct ClientPIN {
+pub struct ClientPIN {
     pin_protocol: u8,
     subcommand: PINSubcommand,
     key_agreement: Option<PublicKey>,
@@ -93,7 +93,7 @@ impl Serialize for ClientPIN {
     }
 }
 
-pub(crate) trait ClientPINSubCommand {
+pub trait ClientPINSubCommand {
     type Output;
     fn as_client_pin(&self) -> Result<ClientPIN, CommandError>;
     fn parse_response_payload(&self, input: &[u8]) -> Result<Self::Output, CommandError>;
@@ -373,7 +373,7 @@ impl AsRef<[u8]> for PinToken {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[cfg_attr(test, derive(Deserialize))]
 pub struct PinAuth([u8; 16]);
 
@@ -392,6 +392,7 @@ impl Serialize for PinAuth {
     }
 }
 
+#[derive(Clone)]
 pub struct Pin(String);
 
 impl fmt::Debug for Pin {

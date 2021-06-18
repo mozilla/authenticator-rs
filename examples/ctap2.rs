@@ -3,7 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use authenticator::{
-    authenticatorservice::{AuthenticatorService, CtapVersion, RegisterArgsCtap1},
+    authenticatorservice::{AuthenticatorService, CtapVersion, RegisterArgsCtap2},
+    ctap2::server::{Alg, PublicKeyCredentialParameters, RelyingParty, User},
     statecallback::StateCallback,
     AuthenticatorTransports, KeyHandle, RegisterFlags, RegisterResult, SignFlags, StatusUpdate,
 };
@@ -41,9 +42,6 @@ fn main() {
 
     let mut opts = Options::new();
     opts.optflag("x", "no-u2f-usb-hid", "do not enable u2f-usb-hid platforms");
-    #[cfg(feature = "webdriver")]
-    opts.optflag("w", "webdriver", "enable WebDriver virtual bus");
-
     opts.optflag("h", "help", "print this help menu").optopt(
         "t",
         "timeout",
@@ -61,18 +59,11 @@ fn main() {
         return;
     }
 
-    let mut manager = AuthenticatorService::new(CtapVersion::CTAP1)
+    let mut manager = AuthenticatorService::new(CtapVersion::CTAP2)
         .expect("The auth service should initialize safely");
 
     if !matches.opt_present("no-u2f-usb-hid") {
         manager.add_u2f_usb_hid_platform_transports();
-    }
-
-    #[cfg(feature = "webdriver")]
-    {
-        if matches.opt_present("webdriver") {
-            manager.add_webdriver_virtual_bus();
-        }
     }
 
     let timeout_ms = match matches.opt_get_default::<u64>("timeout", 15) {
@@ -91,17 +82,14 @@ fn main() {
     let challenge_str = format!(
         "{}{}",
         r#"{"challenge": "1vQ9mxionq0ngCnjD-wTsv1zUSrGRtFqG2xP09SbZ70","#,
-        r#" "version": "U2F_V2", "appId": "http://demo.yubico.com"}"#
+        r#" "version": "U2F_V2", "appId": "http://example.com"}"#
     );
     let mut challenge = Sha256::default();
     challenge.input(challenge_str.as_bytes());
     let chall_bytes = challenge.result().to_vec();
 
-    let mut application = Sha256::default();
-    application.input(b"http://demo.yubico.com");
-    let app_bytes = application.result().to_vec();
-
-    let flags = RegisterFlags::empty();
+    // TODO(MS): Needs to be added to RegisterArgsCtap2
+    // let flags = RegisterFlags::empty();
 
     let (status_tx, status_rx) = channel::<StatusUpdate>();
     thread::spawn(move || loop {
@@ -127,11 +115,25 @@ fn main() {
         register_tx.send(rv).unwrap();
     }));
 
-    let ctap_args = RegisterArgsCtap1 {
-        flags,
+    let ctap_args = RegisterArgsCtap2 {
         challenge: chall_bytes.clone(),
-        application: app_bytes.clone(),
-        key_handles: vec![],
+        relying_party: RelyingParty {
+            id: "example.com".to_string(),
+            name: None,
+            icon: None,
+        },
+        origin: "https://example.com".to_string(),
+        user: User {
+            id: "user_id".as_bytes().to_vec(),
+            icon: None,
+            name: "A. User".to_string(),
+            display_name: None,
+        },
+        pub_cred_params: vec![
+            PublicKeyCredentialParameters { alg: Alg::ES256 },
+            PublicKeyCredentialParameters { alg: Alg::RS256 },
+        ],
+        pin: None,
     };
     manager
         .register(timeout_ms, ctap_args.into(), status_tx.clone(), callback)
@@ -140,14 +142,15 @@ fn main() {
     let register_result = register_rx
         .recv()
         .expect("Problem receiving, unable to continue");
-    let (register_data, device_info) = match register_result {
-        Ok(RegisterResult::CTAP1(r, d)) => (r, d),
-        Ok(RegisterResult::CTAP2(_, _)) => panic!("Did not request CTAP2, but got CTAP2 results!"),
-        Err(_) => panic!("Registration failed"),
+    let (attestation_object, client_data) = match register_result {
+        Ok(RegisterResult::CTAP1(_, _)) => panic!("Requested CTAP2, but got CTAP1 results!"),
+        Ok(RegisterResult::CTAP2(a, c)) => (a, c),
+        Err(e) => panic!("Registration failed: {:?}", e),
     };
 
-    println!("Register result: {}", base64::encode(&register_data));
-    println!("Device info: {}", &device_info);
+    println!("Register result: {:?}", &attestation_object);
+    println!("Collected client data: {:?}", &client_data);
+    /*
     println!("Asking a security key to sign now, with the data from the register...");
     let credential = u2f_get_key_handle_from_register_response(&register_data).unwrap();
     let key_handle = KeyHandle {
@@ -182,5 +185,6 @@ fn main() {
     println!("Sign result: {}", base64::encode(&sign_data));
     println!("Key handle used: {}", base64::encode(&handle_used));
     println!("Device info: {}", &device_info);
+    */
     println!("Done.");
 }

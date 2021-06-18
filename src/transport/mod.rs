@@ -57,7 +57,7 @@ pub enum Nonce {
 
 // TODO(MS): This is the lazy way: FidoDevice currently only extends U2FDevice by more functions,
 //           but the goal is to remove U2FDevice entirely and copy over the trait-definition here
-pub(crate) trait FidoDevice: U2FDevice
+pub trait FidoDevice: U2FDevice
 where
     Self: fmt::Debug,
 {

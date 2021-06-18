@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use crate::authenticatorservice::{AuthenticatorService, RegisterArgsCtap1};
+use crate::authenticatorservice::{AuthenticatorService, CtapVersion, RegisterArgsCtap1};
 use crate::errors;
 use crate::statecallback::StateCallback;
 use crate::{RegisterResult, SignResult};
@@ -46,7 +46,7 @@ unsafe fn from_raw(ptr: *const u8, len: usize) -> Vec<u8> {
 /// The handle returned by this method must be freed by the caller.
 #[no_mangle]
 pub extern "C" fn rust_u2f_mgr_new() -> *mut AuthenticatorService {
-    if let Ok(mut mgr) = AuthenticatorService::new() {
+    if let Ok(mut mgr) = AuthenticatorService::new(CtapVersion::CTAP1) {
         mgr.add_detected_transports();
         Box::into_raw(Box::new(mgr))
     } else {

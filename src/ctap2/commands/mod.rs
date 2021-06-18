@@ -18,7 +18,7 @@ pub(crate) mod get_next_assertion;
 pub(crate) mod get_version;
 pub(crate) mod make_credentials;
 
-pub(crate) trait Request<T>
+pub trait Request<T>
 where
     Self: fmt::Debug,
     Self: RequestCtap1<Output = T>,
@@ -30,7 +30,7 @@ where
 /// command, this is useful for ctap1 where token will reply with "condition not
 /// sufficient" because user needs to press the button.
 #[derive(Debug)]
-pub(crate) enum Retryable<T> {
+pub enum Retryable<T> {
     Retry,
     Error(T),
 }
@@ -51,7 +51,7 @@ impl<T> From<T> for Retryable<T> {
     }
 }
 
-pub(crate) trait RequestCtap1: fmt::Debug {
+pub trait RequestCtap1: fmt::Debug {
     type Output;
 
     fn apdu_format<Dev>(&self, dev: &mut Dev) -> Result<Vec<u8>, HIDError>
@@ -65,7 +65,7 @@ pub(crate) trait RequestCtap1: fmt::Debug {
     ) -> Result<Self::Output, Retryable<HIDError>>;
 }
 
-pub(crate) trait RequestCtap2: fmt::Debug {
+pub trait RequestCtap2: fmt::Debug {
     type Output;
 
     fn command() -> Command;
@@ -354,7 +354,7 @@ impl fmt::Display for CommandError {
 
 impl StdErrorT for CommandError {}
 
-pub(crate) fn calculate_pin_auth<Dev, Cmd>(
+pub(crate) fn calculate_pin_auth<Dev>(
     dev: &mut Dev,
     client_data_hash: &ClientDataHash,
     pin: &Option<Pin>,

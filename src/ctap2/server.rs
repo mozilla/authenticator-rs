@@ -43,7 +43,7 @@ impl RpIdHash {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 #[cfg_attr(test, derive(Deserialize))]
 pub struct RelyingParty {
     // TODO(baloo): spec is wrong !!!!111
@@ -223,7 +223,7 @@ impl<'de> Deserialize<'de> for PublicKeyCredentialParameters {
     }
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize, Eq)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, Eq, Clone)]
 #[serde(rename_all = "lowercase")]
 pub enum Transport {
     USB,
@@ -249,7 +249,7 @@ impl From<AuthenticatorTransports> for Vec<Transport> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PublicKeyCredentialDescriptor {
     pub id: Vec<u8>,
     pub transports: Vec<Transport>,

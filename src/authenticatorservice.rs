@@ -6,8 +6,16 @@ use crate::consts::PARAMETER_SIZE;
 use crate::ctap2::commands::client_pin::Pin;
 use crate::ctap2::server::{PublicKeyCredentialParameters, RelyingParty, User};
 use crate::errors::*;
+use crate::manager::Manager;
 use crate::statecallback::StateCallback;
 use std::sync::{mpsc::Sender, Arc, Mutex};
+
+// TODO(MS): Once U2FManager gets completely removed, this can be removed as well
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CtapVersion {
+    CTAP1,
+    CTAP2,
+}
 
 #[derive(Debug, Clone)]
 pub struct RegisterArgsCtap1 {
@@ -17,7 +25,7 @@ pub struct RegisterArgsCtap1 {
     pub key_handles: Vec<crate::KeyHandle>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RegisterArgsCtap2 {
     pub challenge: Vec<u8>, // TODO(MS): Check if we really need that
     pub relying_party: RelyingParty,
@@ -74,6 +82,7 @@ pub trait AuthenticatorTransport {
 
 pub struct AuthenticatorService {
     transports: Vec<Arc<Mutex<Box<dyn AuthenticatorTransport + Send>>>>,
+    ctap_version: CtapVersion,
 }
 
 fn clone_and_configure_cancellation_callback<T>(
@@ -96,9 +105,10 @@ fn clone_and_configure_cancellation_callback<T>(
 }
 
 impl AuthenticatorService {
-    pub fn new() -> crate::Result<Self> {
+    pub fn new(ctap_version: CtapVersion) -> crate::Result<Self> {
         Ok(Self {
             transports: Vec::new(),
+            ctap_version,
         })
     }
 
@@ -112,9 +122,16 @@ impl AuthenticatorService {
     }
 
     pub fn add_u2f_usb_hid_platform_transports(&mut self) {
-        match crate::U2FManager::new() {
-            Ok(token) => self.add_transport(Box::new(token)),
-            Err(e) => error!("Could not add U2F HID transport: {}", e),
+        if self.ctap_version == CtapVersion::CTAP1 {
+            match crate::U2FManager::new() {
+                Ok(token) => self.add_transport(Box::new(token)),
+                Err(e) => error!("Could not add U2F HID transport: {}", e),
+            }
+        } else {
+            match Manager::new() {
+                Ok(token) => self.add_transport(Box::new(token)),
+                Err(e) => error!("Could not add CTAP2 HID transport: {}", e),
+            }
         }
     }
 
@@ -138,9 +155,7 @@ impl AuthenticatorService {
     ) -> crate::Result<()> {
         match ctap_args {
             RegisterArgs::CTAP1(a) => self.register_ctap1(timeout, a, status, callback),
-            RegisterArgs::CTAP2(_) => Err(AuthenticatorError::InternalError(
-                "unimplemented".to_string(),
-            )),
+            RegisterArgs::CTAP2(a) => self.register_ctap2(timeout, a, status, callback),
         }
     }
 
@@ -184,6 +199,54 @@ impl AuthenticatorService {
             transport_mutex.lock().unwrap().register(
                 timeout,
                 RegisterArgs::CTAP1(args.clone()),
+                status.clone(),
+                clone_and_configure_cancellation_callback(callback.clone(), transports_to_cancel),
+            )?;
+        }
+
+        Ok(())
+    }
+
+    fn register_ctap2(
+        &mut self,
+        timeout: u64,
+        args: RegisterArgsCtap2,
+        status: Sender<crate::StatusUpdate>,
+        callback: StateCallback<crate::Result<crate::RegisterResult>>,
+    ) -> crate::Result<()> {
+        // if args.challenge.len() != PARAMETER_SIZE || args.application.len() != PARAMETER_SIZE {
+        //     return Err(AuthenticatorError::InvalidRelyingPartyInput);
+        // }
+
+        // for key_handle in &args.key_handles {
+        //     if key_handle.credential.len() > 256 {
+        //         return Err(AuthenticatorError::InvalidRelyingPartyInput);
+        //     }
+        // }
+
+        let iterable_transports = self.transports.clone();
+        if iterable_transports.is_empty() {
+            return Err(AuthenticatorError::NoConfiguredTransports);
+        }
+
+        debug!(
+            "register called with {} transports, iterable is {}",
+            self.transports.len(),
+            iterable_transports.len()
+        );
+
+        for (idx, transport_mutex) in iterable_transports.iter().enumerate() {
+            let mut transports_to_cancel = iterable_transports.clone();
+            transports_to_cancel.remove(idx);
+
+            debug!(
+                "register transports_to_cancel {}",
+                transports_to_cancel.len()
+            );
+
+            transport_mutex.lock().unwrap().register(
+                timeout,
+                RegisterArgs::CTAP2(args.clone()),
                 status.clone(),
                 clone_and_configure_cancellation_callback(callback.clone(), transports_to_cancel),
             )?;
@@ -264,7 +327,9 @@ impl AuthenticatorService {
 
 #[cfg(test)]
 mod tests {
-    use super::{AuthenticatorService, AuthenticatorTransport, RegisterArgs, RegisterArgsCtap1};
+    use super::{
+        AuthenticatorService, AuthenticatorTransport, CtapVersion, RegisterArgs, RegisterArgsCtap1,
+    };
     use crate::consts::Capability;
     use crate::consts::PARAMETER_SIZE;
     use crate::statecallback::StateCallback;
@@ -371,7 +436,7 @@ mod tests {
         init();
         let (status_tx, _) = channel::<StatusUpdate>();
 
-        let mut s = AuthenticatorService::new().unwrap();
+        let mut s = AuthenticatorService::new(CtapVersion::CTAP1).unwrap();
         s.add_transport(Box::new(TestTransportDriver::new(true).unwrap()));
 
         assert_matches!(
@@ -411,7 +476,7 @@ mod tests {
         init();
         let (status_tx, _) = channel::<StatusUpdate>();
 
-        let mut s = AuthenticatorService::new().unwrap();
+        let mut s = AuthenticatorService::new(CtapVersion::CTAP1).unwrap();
         s.add_transport(Box::new(TestTransportDriver::new(true).unwrap()));
 
         assert_matches!(
@@ -454,7 +519,7 @@ mod tests {
         // This test yields OKs.
         let (status_tx, _) = channel::<StatusUpdate>();
 
-        let mut s = AuthenticatorService::new().unwrap();
+        let mut s = AuthenticatorService::new(CtapVersion::CTAP1).unwrap();
         s.add_transport(Box::new(TestTransportDriver::new(true).unwrap()));
 
         assert_matches!(
@@ -497,7 +562,7 @@ mod tests {
             transports: AuthenticatorTransports::USB,
         };
 
-        let mut s = AuthenticatorService::new().unwrap();
+        let mut s = AuthenticatorService::new(CtapVersion::CTAP1).unwrap();
         s.add_transport(Box::new(TestTransportDriver::new(true).unwrap()));
 
         assert_matches!(
@@ -537,7 +602,7 @@ mod tests {
         init();
         let (status_tx, _) = channel::<StatusUpdate>();
 
-        let mut s = AuthenticatorService::new().unwrap();
+        let mut s = AuthenticatorService::new(CtapVersion::CTAP1).unwrap();
         assert_matches!(
             s.register(
                 1_000,
@@ -580,7 +645,7 @@ mod tests {
         init();
         let (status_tx, _) = channel::<StatusUpdate>();
 
-        let mut s = AuthenticatorService::new().unwrap();
+        let mut s = AuthenticatorService::new(CtapVersion::CTAP1).unwrap();
         let ttd_one = TestTransportDriver::new(true).unwrap();
         let ttd_two = TestTransportDriver::new(false).unwrap();
         let ttd_three = TestTransportDriver::new(false).unwrap();
@@ -620,7 +685,7 @@ mod tests {
         init();
         let (status_tx, _) = channel::<StatusUpdate>();
 
-        let mut s = AuthenticatorService::new().unwrap();
+        let mut s = AuthenticatorService::new(CtapVersion::CTAP1).unwrap();
         let ttd_one = TestTransportDriver::new(true).unwrap();
         let ttd_two = TestTransportDriver::new(false).unwrap();
         let ttd_three = TestTransportDriver::new(false).unwrap();
@@ -657,7 +722,7 @@ mod tests {
         init();
         let (status_tx, _) = channel::<StatusUpdate>();
 
-        let mut s = AuthenticatorService::new().unwrap();
+        let mut s = AuthenticatorService::new(CtapVersion::CTAP1).unwrap();
         // Let both of these race which one provides consent.
         let ttd_one = TestTransportDriver::new(true).unwrap();
         let ttd_two = TestTransportDriver::new(true).unwrap();

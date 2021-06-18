@@ -311,8 +311,8 @@ impl AuthenticatorTransport for Manager {
                 resident_key: None,
                 user_validation: None,
             },
-            // args.pin, // TODO(MS)
-            None,
+            args.pin,
+            // pin_auth will be filled in Statemachine, once we have a device
         );
 
         let action = QueueAction::RegisterCtap2 {

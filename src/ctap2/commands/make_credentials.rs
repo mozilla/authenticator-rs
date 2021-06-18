@@ -4,12 +4,14 @@ use crate::ctap2::attestation::{
     AAGuid, AttestationObject, AttestationStatement, AttestedCredentialData, AuthenticatorData,
     AuthenticatorDataFlags,
 };
-use crate::ctap2::client_data::CollectedClientData;
-use crate::ctap2::commands::client_pin::PinAuth;
+use crate::ctap2::client_data::{ClientDataHash, CollectedClientData};
+use crate::ctap2::commands::calculate_pin_auth;
+use crate::ctap2::commands::client_pin::{Pin, PinAuth};
 use crate::ctap2::server::{
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, User,
 };
 use crate::transport::errors::{ApduErrorStatus, HIDError};
+use crate::transport::FidoDevice;
 use crate::u2ftypes::{U2FAPDUHeader, U2FDevice};
 use nom::{do_parse, named, number::complete::be_u8, tag, take};
 #[cfg(test)]
@@ -61,14 +63,14 @@ impl UserValidation for MakeCredentialsOptions {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MakeCredentials {
-    client_data: CollectedClientData,
-    rp: RelyingParty,
+    pub(crate) client_data: CollectedClientData,
+    pub(crate) rp: RelyingParty,
     // Note(baloo): If none -> ctap1
-    user: Option<User>,
-    pub_cred_params: Vec<PublicKeyCredentialParameters>,
-    exclude_list: Vec<PublicKeyCredentialDescriptor>,
+    pub(crate) user: Option<User>,
+    pub(crate) pub_cred_params: Vec<PublicKeyCredentialParameters>,
+    pub(crate) exclude_list: Vec<PublicKeyCredentialDescriptor>,
 
     // https://www.w3.org/TR/webauthn/#client-extension-input
     // The client extension input, which is a value that can be encoded in JSON,
@@ -76,9 +78,10 @@ pub struct MakeCredentials {
     // create() call, while the CBOR authenticator extension input is passed
     // from the client to the authenticator for authenticator extensions during
     // the processing of these calls.
-    extensions: Map<String, json_value::Value>,
-    options: MakeCredentialsOptions,
-    pin_auth: Option<PinAuth>,
+    pub(crate) extensions: Map<String, json_value::Value>,
+    pub(crate) options: MakeCredentialsOptions,
+    pub(crate) pin: Option<Pin>,
+    pub(crate) pin_auth: Option<PinAuth>,
     // TODO(MS): pin_protocol
 }
 
@@ -90,7 +93,7 @@ impl MakeCredentials {
         pub_cred_params: Vec<PublicKeyCredentialParameters>,
         exclude_list: Vec<PublicKeyCredentialDescriptor>,
         options: MakeCredentialsOptions,
-        pin_auth: Option<PinAuth>,
+        pin: Option<Pin>,
     ) -> Self {
         Self {
             client_data,
@@ -101,8 +104,25 @@ impl MakeCredentials {
             // TODO(baloo): need to sort those out once final api is in
             extensions: Map::new(),
             options,
-            pin_auth,
+            pin,
+            pin_auth: None,
         }
+    }
+
+    pub fn client_data_hash(&self) -> Result<ClientDataHash, HIDError> {
+        self.client_data
+            .hash()
+            .map_err(|e| HIDError::Command(CommandError::Json(e)))
+    }
+
+    pub fn determine_pin_auth<D: FidoDevice>(&mut self, dev: &mut D) -> Result<(), HIDError> {
+        let client_data_hash = self
+            .client_data
+            .hash()
+            .map_err(|e| HIDError::Command(CommandError::Json(e)))?;
+        let pin_auth = calculate_pin_auth(dev, &client_data_hash, &self.pin)?;
+        self.pin_auth = pin_auth;
+        Ok(())
     }
 }
 
@@ -111,6 +131,7 @@ impl Serialize for MakeCredentials {
     where
         S: Serializer,
     {
+        debug!("Serialize MakeCredentials");
         // Need to define how many elements are going to be in the map
         // beforehand
         let mut map_len = 4;
@@ -201,7 +222,7 @@ impl RequestCtap1 for MakeCredentials {
         named!(
             parse_register<(&[u8], &[u8])>,
             do_parse!(
-                reserved: tag!(&[0x05])
+                _reserved: tag!(&[0x05])
                     >> public_key: take!(65)
                     >> key_handle_len: be_u8
                     >> key_handle: take!(key_handle_len)

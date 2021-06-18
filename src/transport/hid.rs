@@ -64,7 +64,6 @@ where
         }
 
         let rsp = U2FHIDInitResp::read(&raw, &nonce)?;
-
         // Get the new Channel ID
         self.set_cid(rsp.cid);
 
@@ -221,7 +220,7 @@ where
     }
 
     fn init(&mut self, nonce: Nonce) -> Result<(), HIDError> {
-        let resp = <Self as HIDDevice>::initialize(self, nonce);
+        let resp = <Self as HIDDevice>::initialize(self, nonce)?;
         // TODO(baloo): this logic should be moved to
         //              transport/mod.rs::Device trait
         if self.supports_ctap2() {
@@ -236,7 +235,7 @@ where
             // We don't really use the result here
             self.send_apdu(&command)?;
         }
-        resp
+        Ok(resp)
     }
 
     fn initialized(&self) -> bool {

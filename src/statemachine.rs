@@ -306,7 +306,6 @@ impl StateMachineCtap2 {
         self.cancel();
         let cbc = callback.clone();
         let status_mutex = Mutex::new(status);
-
         let transaction = Transaction::new(timeout, cbc.clone(), move |info, _alive| {
             // TODO(baloo): what is alive about? have to ask jcj
             // Create a new device.
@@ -320,10 +319,9 @@ impl StateMachineCtap2 {
 
             // Try initializing it.
             if let Err(e) = dev.init(Nonce::CreateRandom) {
-                info!("error while initializing device: {}", e);
+                warn!("error while initializing device: {}", e);
                 return;
             }
-
             send_status(
                 &status_mutex,
                 crate::StatusUpdate::DeviceAvailable {
@@ -352,7 +350,18 @@ impl StateMachineCtap2 {
             //            .unwrap_or(false) /* no match on failure */
             //});
 
-            let resp = dev.send_msg(&params);
+            // TODO(MS): This is wasteful, but the current setup with read only-functions doesn't allow me
+            //           to modify "params" directly.
+            let mut makecred = params.clone();
+            match makecred.determine_pin_auth(dev) {
+                Ok(x) => x,
+                Err(e) => {
+                    callback.call(Err(errors::AuthenticatorError::HIDError(e)));
+                    return;
+                }
+            };
+
+            let resp = dev.send_msg(&makecred);
             match resp {
                 Ok((attestation, client_data)) => {
                     send_status(
