@@ -4,25 +4,24 @@
 
 extern crate libc;
 
+use crate::consts::CID_BROADCAST;
 use crate::transport::hid::HIDDevice;
+use crate::transport::platform::{hidraw, monitor};
 use crate::transport::AuthenticatorInfo;
 use crate::transport::ECDHSecret;
 use crate::transport::HIDError;
+use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
+use crate::util::from_unix_result;
 use std::fs::OpenOptions;
 use std::io;
 use std::io::{Read, Write};
-use std::os::unix::prelude::*;
+use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
-
-use crate::consts::CID_BROADCAST;
-use crate::transport::platform::{hidraw, monitor};
-use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
-use crate::util::from_unix_result;
 
 #[derive(Debug)]
 pub struct Device {
     path: PathBuf,
-    fd: libc::c_int,
+    fd: std::fs::File,
     in_rpt_size: usize,
     out_rpt_size: usize,
     cid: [u8; 4],
@@ -37,10 +36,11 @@ impl Device {
             .read(true)
             .write(true)
             .open(path.clone())?;
+
         let (in_rpt_size, out_rpt_size) = hidraw::read_hid_rpt_sizes_or_defaults(fd.as_raw_fd());
         Ok(Self {
             path,
-            fd: fd.as_raw_fd(),
+            fd,
             in_rpt_size,
             out_rpt_size,
             cid: CID_BROADCAST,
@@ -51,14 +51,14 @@ impl Device {
     }
 
     pub fn is_u2f(&self) -> bool {
-        hidraw::is_u2f_device(self.fd)
+        hidraw::is_u2f_device(self.fd.as_raw_fd())
     }
 }
 
 impl Drop for Device {
     fn drop(&mut self) {
         // Close the fd, ignore any errors.
-        let _ = unsafe { libc::close(self.fd) };
+        let _ = unsafe { libc::close(self.fd.as_raw_fd()) };
     }
 }
 
@@ -71,7 +71,7 @@ impl PartialEq for Device {
 impl Read for Device {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let bufp = buf.as_mut_ptr() as *mut libc::c_void;
-        let rv = unsafe { libc::read(self.fd, bufp, buf.len()) };
+        let rv = unsafe { libc::read(self.fd.as_raw_fd(), bufp, buf.len()) };
         from_unix_result(rv as usize)
     }
 }
@@ -79,7 +79,7 @@ impl Read for Device {
 impl Write for Device {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let bufp = buf.as_ptr() as *const libc::c_void;
-        let rv = unsafe { libc::write(self.fd, bufp, buf.len()) };
+        let rv = unsafe { libc::write(self.fd.as_raw_fd(), bufp, buf.len()) };
         from_unix_result(rv as usize)
     }
 
@@ -137,7 +137,7 @@ impl HIDDevice for Device {
             info!("new device {:?}", path);
             Ok(Self {
                 path,
-                fd: fd.as_raw_fd(),
+                fd,
                 in_rpt_size,
                 out_rpt_size,
                 cid: CID_BROADCAST,
