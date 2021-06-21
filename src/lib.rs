@@ -38,6 +38,7 @@ pub use crate::capi::*;
 pub mod ctap2;
 pub use ctap2::attestation::AttestationObject;
 pub use ctap2::client_data::CollectedClientData;
+pub use ctap2::AssertionObject;
 
 pub mod errors;
 pub mod statecallback;
@@ -78,7 +79,10 @@ pub enum RegisterResult {
     CTAP2(AttestationObject, CollectedClientData),
 }
 
-pub type SignResult = (AppId, Vec<u8>, Vec<u8>, u2ftypes::U2FDeviceInfo);
+pub enum SignResult {
+    CTAP1(AppId, Vec<u8>, Vec<u8>, u2ftypes::U2FDeviceInfo),
+    CTAP2(AssertionObject),
+}
 
 pub type Result<T> = std::result::Result<T, errors::AuthenticatorError>;
 

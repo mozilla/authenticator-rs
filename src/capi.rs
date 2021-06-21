@@ -330,7 +330,7 @@ pub unsafe extern "C" fn rust_u2f_mgr_sign(
     let tid = new_tid();
     let state_callback = StateCallback::<crate::Result<SignResult>>::new(Box::new(move |rv| {
         let result = match rv {
-            Ok((app_id, key_handle, signature, dev_info)) => {
+            Ok(SignResult::CTAP1(app_id, key_handle, signature, dev_info)) => {
                 let mut bufs = HashMap::new();
                 bufs.insert(RESBUF_ID_KEYHANDLE, key_handle);
                 bufs.insert(RESBUF_ID_SIGNATURE, signature);
@@ -342,6 +342,9 @@ pub unsafe extern "C" fn rust_u2f_mgr_sign(
                 bufs.insert(RESBUF_ID_FIRMWARE_BUILD, vec![dev_info.version_build]);
                 U2FResult::Success(bufs)
             }
+            Ok(SignResult::CTAP2(_)) => U2FResult::Error(
+                errors::AuthenticatorError::VersionMismatch("rust_u2f_mgr_sign", 1),
+            ),
             Err(e) => U2FResult::Error(e),
         };
 

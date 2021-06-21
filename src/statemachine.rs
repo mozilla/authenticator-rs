@@ -11,7 +11,7 @@ use crate::transport::platform::{device::Device, transaction::Transaction};
 use crate::transport::{errors::HIDError, FidoDevice, Nonce};
 use crate::u2fprotocol::{u2f_init_device, u2f_is_keyhandle_valid, u2f_register, u2f_sign};
 use crate::u2ftypes::U2FDevice;
-use crate::RegisterResult;
+use crate::{RegisterResult, SignResult};
 use std::sync::mpsc::Sender;
 use std::sync::Mutex;
 use std::thread;
@@ -250,7 +250,7 @@ impl StateMachine {
                                     dev_info: dev.get_device_info(),
                                 },
                             );
-                            callback.call(Ok((
+                            callback.call(Ok(SignResult::CTAP1(
                                 app_id.clone(),
                                 key_handle.credential.clone(),
                                 bytes,

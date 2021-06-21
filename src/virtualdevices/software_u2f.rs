@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 use crate::consts::Capability;
-use crate::RegisterResult;
+use crate::{RegisterResult, SignResult};
 
 pub struct SoftwareU2FToken {}
 
@@ -36,7 +36,12 @@ impl SoftwareU2FToken {
         _app_ids: Vec<crate::AppId>,
         _key_handles: Vec<crate::KeyHandle>,
     ) -> crate::Result<crate::SignResult> {
-        Ok((vec![0u8; 0], vec![0u8; 0], vec![0u8; 0], self.dev_info()))
+        Ok(SignResult::CTAP1(
+            vec![0u8; 0],
+            vec![0u8; 0],
+            vec![0u8; 0],
+            self.dev_info(),
+        ))
     }
 
     pub fn dev_info(&self) -> crate::u2ftypes::U2FDeviceInfo {
