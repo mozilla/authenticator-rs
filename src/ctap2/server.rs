@@ -258,10 +258,14 @@ impl Serialize for PublicKeyCredentialDescriptor {
     where
         S: Serializer,
     {
-        let mut map = serializer.serialize_map(Some(3))?;
-        map.serialize_entry("type", "public-key")?;
+        // TODO(MS): Transports is OPTIONAL, but some older tokens don't understand it
+        //           and return a CBOR-Parsing error. It is only a hint for the token,
+        //           so we'll leave it out for the moment
+        let mut map = serializer.serialize_map(Some(2))?;
+        // let mut map = serializer.serialize_map(Some(3))?;
         map.serialize_entry("id", &ByteBuf::from(self.id.clone()))?;
-        map.serialize_entry("transports", &self.transports)?;
+        map.serialize_entry("type", "public-key")?;
+        // map.serialize_entry("transports", &self.transports)?;
         map.end()
     }
 }
