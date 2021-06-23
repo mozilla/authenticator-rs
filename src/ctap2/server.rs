@@ -263,8 +263,8 @@ impl Serialize for PublicKeyCredentialDescriptor {
         //           so we'll leave it out for the moment
         let mut map = serializer.serialize_map(Some(2))?;
         // let mut map = serializer.serialize_map(Some(3))?;
-        map.serialize_entry("id", &ByteBuf::from(self.id.clone()))?;
         map.serialize_entry("type", "public-key")?;
+        map.serialize_entry("id", &ByteBuf::from(self.id.clone()))?;
         // map.serialize_entry("transports", &self.transports)?;
         map.end()
     }
@@ -526,7 +526,8 @@ mod test {
         assert_eq!(
             payload,
             vec![
-                0xa3, // map(3)
+                // 0xa3, // map(3)
+                0xa2, // map(2)
                 0x64, // text(4)
                 0x74, 0x79, 0x70, 0x65, // "type"
                 0x6a, // text(10)
@@ -540,15 +541,18 @@ mod test {
                 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, // ...
                 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, // ...
                 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, // ...
-                0x1e, 0x1f, // ...
-                0x6a, // text(10)
-                0x74, 0x72, 0x61, 0x6e, 0x73, 0x70, // "transports"
-                0x6f, 0x72, 0x74, 0x73, // ...
-                0x82, // array(2)
-                0x63, // text(3)
-                0x62, 0x6c, 0x65, // "ble"
-                0x63, // text(3)
-                0x75, 0x73, 0x62 // "usb"
+                0x1e,
+                0x1f, // ...
+
+                      // Deactivated for now
+                      //0x6a, // text(10)
+                      //0x74, 0x72, 0x61, 0x6e, 0x73, 0x70, // "transports"
+                      //0x6f, 0x72, 0x74, 0x73, // ...
+                      //0x82, // array(2)
+                      //0x63, // text(3)
+                      //0x62, 0x6c, 0x65, // "ble"
+                      //0x63, // text(3)
+                      //0x75, 0x73, 0x62 // "usb"
             ]
         );
     }
