@@ -4,7 +4,6 @@ use serde_cbor::{error, ser};
 use sha2::{Digest, Sha256};
 use std::fmt;
 
-#[cfg(test)]
 use serde::de::MapAccess;
 use serde::{
     de::{Error as SerdeError, Unexpected, Visitor},
@@ -144,7 +143,7 @@ impl<'de> Deserialize<'de> for Alg {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicKeyCredentialParameters {
     pub alg: Alg,
 }
@@ -161,7 +160,6 @@ impl Serialize for PublicKeyCredentialParameters {
     }
 }
 
-#[cfg(test)]
 impl<'de> Deserialize<'de> for PublicKeyCredentialParameters {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where

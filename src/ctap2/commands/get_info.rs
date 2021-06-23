@@ -1,4 +1,5 @@
 use super::{Command, CommandError, RequestCtap2, StatusCode};
+use crate::ctap2::server::PublicKeyCredentialParameters;
 use crate::transport::errors::HIDError;
 use crate::u2ftypes::U2FDevice;
 use serde::{
@@ -208,6 +209,12 @@ pub struct AuthenticatorInfo {
     pub(crate) options: AuthenticatorOptions,
     pub(crate) max_msg_size: Option<usize>,
     pub(crate) pin_protocols: Vec<u32>,
+    // CTAP 2.1
+    pub(crate) max_credential_count_in_list: Option<usize>,
+    pub(crate) max_credential_id_length: Option<usize>,
+    pub(crate) transports: Option<Vec<String>>,
+    pub(crate) algorithms: Option<Vec<PublicKeyCredentialParameters>>,
+    // lots more to come
 }
 
 impl<'de> Deserialize<'de> for AuthenticatorInfo {
@@ -234,7 +241,10 @@ impl<'de> Deserialize<'de> for AuthenticatorInfo {
                 let mut options = AuthenticatorOptions::default();
                 let mut max_msg_size = None;
                 let mut pin_protocols = Vec::new();
-
+                let mut max_credential_count_in_list = None;
+                let mut max_credential_id_length = None;
+                let mut transports = None;
+                let mut algorithms = None;
                 while let Some(key) = map.next_key()? {
                     match key {
                         1 => {
@@ -264,6 +274,34 @@ impl<'de> Deserialize<'de> for AuthenticatorInfo {
                         6 => {
                             pin_protocols = map.next_value()?;
                         }
+                        7 => {
+                            if max_credential_count_in_list.is_some() {
+                                return Err(serde::de::Error::duplicate_field(
+                                    "max_credential_count_in_list",
+                                ));
+                            }
+                            max_credential_count_in_list = Some(map.next_value()?);
+                        }
+                        8 => {
+                            if max_credential_id_length.is_some() {
+                                return Err(serde::de::Error::duplicate_field(
+                                    "max_credential_id_length",
+                                ));
+                            }
+                            max_credential_id_length = Some(map.next_value()?);
+                        }
+                        9 => {
+                            if transports.is_some() {
+                                return Err(serde::de::Error::duplicate_field("transports"));
+                            }
+                            transports = Some(map.next_value()?);
+                        }
+                        10 => {
+                            if algorithms.is_some() {
+                                return Err(serde::de::Error::duplicate_field("algorithms"));
+                            }
+                            algorithms = Some(map.next_value()?);
+                        }
                         k => return Err(M::Error::custom(format!("unexpected key: {:?}", k))),
                     }
                 }
@@ -282,6 +320,10 @@ impl<'de> Deserialize<'de> for AuthenticatorInfo {
                         options,
                         max_msg_size,
                         pin_protocols,
+                        max_credential_count_in_list,
+                        max_credential_id_length,
+                        transports,
+                        algorithms,
                     })
                 } else {
                     Err(M::Error::custom("No AAGuid specified".to_string()))
@@ -336,6 +378,10 @@ pub mod tests {
             },
             max_msg_size: Some(1200),
             pin_protocols: vec![1],
+            max_credential_count_in_list: None,
+            max_credential_id_length: None,
+            transports: None,
+            algorithms: None,
         };
 
         assert_eq!(authenticator_info, expected);
@@ -413,6 +459,10 @@ pub mod tests {
             },
             max_msg_size: Some(1200),
             pin_protocols: vec![1],
+            max_credential_count_in_list: None,
+            max_credential_id_length: None,
+            transports: None,
+            algorithms: None,
         };
 
         assert_eq!(result, &expected);
