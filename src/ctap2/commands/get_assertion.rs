@@ -1,4 +1,4 @@
-use super::{Command, CommandError, RequestCtap1, RequestCtap2, Retryable, StatusCode};
+use super::{Command, CommandError, Request, RequestCtap1, RequestCtap2, Retryable, StatusCode};
 use crate::consts::{
     PARAMETER_SIZE, U2F_AUTHENTICATE, U2F_CHECK_IS_REGISTERED, U2F_REQUEST_USER_PRESENCE,
 };
@@ -144,6 +144,8 @@ impl Serialize for GetAssertion {
         map.end()
     }
 }
+
+impl Request<AssertionObject> for GetAssertion {}
 
 impl RequestCtap1 for GetAssertion {
     type Output = AssertionObject;
