@@ -389,7 +389,10 @@ impl AuthenticatorTransport for Manager {
         //    return;
         //}
         let options = if args.flags == SignFlags::empty() {
-            GetAssertionOptions::default()
+            GetAssertionOptions {
+                user_validation: None,
+                user_presence: None,
+            }
         } else {
             GetAssertionOptions {
                 user_validation: Some(args.flags.contains(SignFlags::REQUIRE_USER_VERIFICATION)),
