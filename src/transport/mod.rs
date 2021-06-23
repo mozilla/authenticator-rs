@@ -48,7 +48,6 @@ pub mod platform;
 #[path = "stub/mod.rs"]
 pub mod platform;
 
-#[allow(dead_code)]
 #[derive(Debug)]
 pub enum Nonce {
     CreateRandom,

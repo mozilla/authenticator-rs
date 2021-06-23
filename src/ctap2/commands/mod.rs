@@ -12,7 +12,6 @@ use std::io::{Read, Write};
 
 pub(crate) mod client_pin;
 pub(crate) mod get_assertion;
-#[allow(dead_code)] // TODO(MS): Remove me asap
 pub(crate) mod get_info;
 pub(crate) mod get_next_assertion;
 pub(crate) mod get_version;
