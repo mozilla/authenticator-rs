@@ -328,7 +328,11 @@ impl RequestCtap2 for GetAssertion {
         }
 
         let status: StatusCode = input[0].into();
-        debug!("response status code: {:?}", status);
+        debug!(
+            "response status code: {:?}, rest: {:?}",
+            status,
+            &input[1..]
+        );
         if input.len() > 1 {
             if status.is_ok() {
                 let assertion: GetAssertionResponse =

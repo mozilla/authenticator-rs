@@ -2,7 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use crate::authenticatorservice::{AuthenticatorService, CtapVersion, RegisterArgsCtap1};
+use crate::authenticatorservice::{
+    AuthenticatorService, CtapVersion, RegisterArgsCtap1, SignArgsCtap1,
+};
 use crate::errors;
 use crate::statecallback::StateCallback;
 use crate::{RegisterResult, SignResult};
@@ -352,11 +354,14 @@ pub unsafe extern "C" fn rust_u2f_mgr_sign(
     }));
 
     let res = (*mgr).sign(
-        flags,
         timeout,
-        challenge,
-        app_ids,
-        key_handles,
+        SignArgsCtap1 {
+            flags,
+            challenge,
+            app_ids,
+            key_handles,
+        }
+        .into(),
         status_tx,
         state_callback,
     );

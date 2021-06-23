@@ -3,9 +3,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use authenticator::{
-    authenticatorservice::{AuthenticatorService, CtapVersion, RegisterArgsCtap1},
+    authenticatorservice::{AuthenticatorService, CtapVersion, RegisterArgsCtap1, SignArgsCtap1},
     statecallback::StateCallback,
-    AuthenticatorTransports, KeyHandle, RegisterFlags, RegisterResult, SignFlags, StatusUpdate,
+    AuthenticatorTransports, KeyHandle, RegisterFlags, RegisterResult, SignFlags, SignResult,
+    StatusUpdate,
 };
 use getopts::Options;
 use sha2::{Digest, Sha256};
@@ -163,11 +164,14 @@ fn main() {
     }));
 
     if let Err(e) = manager.sign(
-        flags,
         timeout_ms,
-        chall_bytes,
-        vec![app_bytes],
-        vec![key_handle],
+        SignArgsCtap1 {
+            flags,
+            challenge: chall_bytes,
+            app_ids: vec![app_bytes],
+            key_handles: vec![key_handle],
+        }
+        .into(),
         status_tx,
         callback,
     ) {
@@ -177,10 +181,14 @@ fn main() {
     let sign_result = sign_rx
         .recv()
         .expect("Problem receiving, unable to continue");
-    let (_, handle_used, sign_data, device_info) = sign_result.expect("Sign failed");
-
-    println!("Sign result: {}", base64::encode(&sign_data));
-    println!("Key handle used: {}", base64::encode(&handle_used));
-    println!("Device info: {}", &device_info);
-    println!("Done.");
+    if let SignResult::CTAP1(_, handle_used, sign_data, device_info) =
+        sign_result.expect("Sign failed")
+    {
+        println!("Sign result: {}", base64::encode(&sign_data));
+        println!("Key handle used: {}", base64::encode(&handle_used));
+        println!("Device info: {}", &device_info);
+        println!("Done.");
+    } else {
+        panic!("Expected CTAP version 1 for sign result!");
+    }
 }

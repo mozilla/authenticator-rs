@@ -3,31 +3,18 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use authenticator::{
-    authenticatorservice::{AuthenticatorService, CtapVersion, RegisterArgsCtap2},
-    ctap2::server::{Alg, PublicKeyCredentialParameters, RelyingParty, User},
+    authenticatorservice::{AuthenticatorService, CtapVersion, RegisterArgsCtap2, SignArgsCtap2},
+    ctap2::server::{
+        Alg, PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, Transport,
+        User,
+    },
     statecallback::StateCallback,
-    AuthenticatorTransports, KeyHandle, RegisterFlags, RegisterResult, SignFlags, StatusUpdate,
+    RegisterResult, SignFlags, SignResult, StatusUpdate,
 };
 use getopts::Options;
 use sha2::{Digest, Sha256};
 use std::sync::mpsc::{channel, RecvError};
-use std::{env, io, thread};
-
-fn u2f_get_key_handle_from_register_response(register_response: &[u8]) -> io::Result<Vec<u8>> {
-    if register_response[0] != 0x05 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Reserved byte not set correctly",
-        ));
-    }
-
-    let key_handle_len = register_response[66] as usize;
-    let mut public_key = register_response.to_owned();
-    let mut key_handle = public_key.split_off(67);
-    let _attestation = key_handle.split_off(key_handle_len);
-
-    Ok(key_handle)
-}
+use std::{env, thread};
 
 fn print_usage(program: &str, opts: Options) {
     let brief = format!("Usage: {} [options]", program);
@@ -115,6 +102,13 @@ fn main() {
         register_tx.send(rv).unwrap();
     }));
 
+    let user = User {
+        id: "user_id".as_bytes().to_vec(),
+        icon: None,
+        name: "A. User".to_string(),
+        display_name: None,
+    };
+    let origin = "https://example.com".to_string();
     let ctap_args = RegisterArgsCtap2 {
         challenge: chall_bytes.clone(),
         relying_party: RelyingParty {
@@ -122,18 +116,21 @@ fn main() {
             name: None,
             icon: None,
         },
-        origin: "https://example.com".to_string(),
-        user: User {
-            id: "user_id".as_bytes().to_vec(),
-            icon: None,
-            name: "A. User".to_string(),
-            display_name: None,
-        },
+        origin: origin.clone(),
+        user: user.clone(),
         pub_cred_params: vec![
             PublicKeyCredentialParameters { alg: Alg::ES256 },
             PublicKeyCredentialParameters { alg: Alg::RS256 },
         ],
         pin: None,
+        exclude_list: vec![PublicKeyCredentialDescriptor {
+            id: vec![
+                0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
+                0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b,
+                0x1c, 0x1d, 0x1e, 0x1f,
+            ],
+            transports: vec![Transport::USB, Transport::NFC],
+        }],
     };
     manager
         .register(timeout_ms, ctap_args.into(), status_tx.clone(), callback)
@@ -150,41 +147,49 @@ fn main() {
 
     println!("Register result: {:?}", &attestation_object);
     println!("Collected client data: {:?}", &client_data);
-    /*
-    println!("Asking a security key to sign now, with the data from the register...");
-    let credential = u2f_get_key_handle_from_register_response(&register_data).unwrap();
-    let key_handle = KeyHandle {
-        credential,
-        transports: AuthenticatorTransports::empty(),
-    };
 
-    let flags = SignFlags::empty();
+    println!("");
+    println!("*********************************************************************");
+    println!("Asking a security key to sign now, with the data from the register...");
+    println!("*********************************************************************");
+
     let (sign_tx, sign_rx) = channel();
 
     let callback = StateCallback::new(Box::new(move |rv| {
         sign_tx.send(rv).unwrap();
     }));
 
-    if let Err(e) = manager.sign(
-        flags,
-        timeout_ms,
-        chall_bytes,
-        vec![app_bytes],
-        vec![key_handle],
-        status_tx,
-        callback,
-    ) {
+    let allow_list;
+    if let Some(cred_data) = attestation_object.auth_data.credential_data {
+        println!("======================================================= GOT CRED ID");
+        allow_list = vec![PublicKeyCredentialDescriptor {
+            id: cred_data.credential_id.clone(),
+            transports: vec![Transport::USB],
+        }];
+    } else {
+        allow_list = Vec::new();
+    }
+
+    let ctap_args = SignArgsCtap2 {
+        flags: SignFlags::empty(),
+        challenge: chall_bytes,
+        origin,
+        user,
+        relying_party_id: "example.com".to_string(),
+        allow_list,
+    };
+
+    if let Err(e) = manager.sign(timeout_ms, ctap_args.into(), status_tx, callback) {
         panic!("Couldn't register: {:?}", e);
     }
 
     let sign_result = sign_rx
         .recv()
         .expect("Problem receiving, unable to continue");
-    let (_, handle_used, sign_data, device_info) = sign_result.expect("Sign failed");
-
-    println!("Sign result: {}", base64::encode(&sign_data));
-    println!("Key handle used: {}", base64::encode(&handle_used));
-    println!("Device info: {}", &device_info);
-    */
-    println!("Done.");
+    if let SignResult::CTAP2(assertion_object) = sign_result.expect("Sign failed") {
+        println!("Assertion Object: {:?}", assertion_object);
+        println!("Done.");
+    } else {
+        panic!("Expected sign result to be CTAP2, but got CTAP1");
+    }
 }

@@ -4,7 +4,9 @@
 
 use crate::consts::PARAMETER_SIZE;
 use crate::ctap2::commands::client_pin::Pin;
-use crate::ctap2::server::{PublicKeyCredentialParameters, RelyingParty, User};
+use crate::ctap2::server::{
+    PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, User,
+};
 use crate::errors::*;
 use crate::manager::Manager;
 use crate::statecallback::StateCallback;
@@ -32,6 +34,7 @@ pub struct RegisterArgsCtap2 {
     pub origin: String,
     pub user: User,
     pub pub_cred_params: Vec<PublicKeyCredentialParameters>,
+    pub exclude_list: Vec<PublicKeyCredentialDescriptor>,
     pub pin: Option<Pin>,
 }
 
@@ -53,6 +56,43 @@ impl From<RegisterArgsCtap2> for RegisterArgs {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct SignArgsCtap1 {
+    pub flags: crate::SignFlags,
+    pub challenge: Vec<u8>,
+    pub app_ids: Vec<crate::AppId>,
+    pub key_handles: Vec<crate::KeyHandle>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SignArgsCtap2 {
+    pub flags: crate::SignFlags, // Change to MakeCredentialOptions?
+    pub challenge: Vec<u8>,
+    pub origin: String,
+    pub user: User,
+    pub relying_party_id: String,
+    pub allow_list: Vec<PublicKeyCredentialDescriptor>,
+    // Todo: Extensions
+}
+
+#[derive(Debug)]
+pub enum SignArgs {
+    CTAP1(SignArgsCtap1),
+    CTAP2(SignArgsCtap2),
+}
+
+impl From<SignArgsCtap1> for SignArgs {
+    fn from(args: SignArgsCtap1) -> Self {
+        SignArgs::CTAP1(args)
+    }
+}
+
+impl From<SignArgsCtap2> for SignArgs {
+    fn from(args: SignArgsCtap2) -> Self {
+        SignArgs::CTAP2(args)
+    }
+}
+
 pub trait AuthenticatorTransport {
     /// The implementation of this method must return quickly and should
     /// report its status via the status and callback methods
@@ -68,11 +108,8 @@ pub trait AuthenticatorTransport {
     /// report its status via the status and callback methods
     fn sign(
         &mut self,
-        flags: crate::SignFlags,
         timeout: u64,
-        challenge: Vec<u8>,
-        app_ids: Vec<crate::AppId>,
-        key_handles: Vec<crate::KeyHandle>,
+        ctap_args: SignArgs,
         status: Sender<crate::StatusUpdate>,
         callback: StateCallback<crate::Result<crate::SignResult>>,
     ) -> crate::Result<()>;
@@ -214,15 +251,13 @@ impl AuthenticatorService {
         status: Sender<crate::StatusUpdate>,
         callback: StateCallback<crate::Result<crate::RegisterResult>>,
     ) -> crate::Result<()> {
-        // if args.challenge.len() != PARAMETER_SIZE || args.application.len() != PARAMETER_SIZE {
-        //     return Err(AuthenticatorError::InvalidRelyingPartyInput);
-        // }
+        if args.challenge.len() != PARAMETER_SIZE {
+            return Err(AuthenticatorError::InvalidRelyingPartyInput);
+        }
 
-        // for key_handle in &args.key_handles {
-        //     if key_handle.credential.len() > 256 {
-        //         return Err(AuthenticatorError::InvalidRelyingPartyInput);
-        //     }
-        // }
+        if args.exclude_list.iter().any(|x| x.id.len() > 256) {
+            return Err(AuthenticatorError::InvalidRelyingPartyInput);
+        }
 
         let iterable_transports = self.transports.clone();
         if iterable_transports.is_empty() {
@@ -257,29 +292,39 @@ impl AuthenticatorService {
 
     pub fn sign(
         &mut self,
-        flags: crate::SignFlags,
         timeout: u64,
-        challenge: Vec<u8>,
-        app_ids: Vec<crate::AppId>,
-        key_handles: Vec<crate::KeyHandle>,
+        ctap_args: SignArgs,
         status: Sender<crate::StatusUpdate>,
         callback: StateCallback<crate::Result<crate::SignResult>>,
     ) -> crate::Result<()> {
-        if challenge.len() != PARAMETER_SIZE {
+        match ctap_args {
+            SignArgs::CTAP1(a) => self.sign_ctap1(timeout, a, status, callback),
+            SignArgs::CTAP2(a) => self.sign_ctap2(timeout, a, status, callback),
+        }
+    }
+
+    pub fn sign_ctap1(
+        &mut self,
+        timeout: u64,
+        args: SignArgsCtap1,
+        status: Sender<crate::StatusUpdate>,
+        callback: StateCallback<crate::Result<crate::SignResult>>,
+    ) -> crate::Result<()> {
+        if args.challenge.len() != PARAMETER_SIZE {
             return Err(AuthenticatorError::InvalidRelyingPartyInput);
         }
 
-        if app_ids.is_empty() {
+        if args.app_ids.is_empty() {
             return Err(AuthenticatorError::InvalidRelyingPartyInput);
         }
 
-        for app_id in &app_ids {
+        for app_id in &args.app_ids {
             if app_id.len() != PARAMETER_SIZE {
                 return Err(AuthenticatorError::InvalidRelyingPartyInput);
             }
         }
 
-        for key_handle in &key_handles {
+        for key_handle in &args.key_handles {
             if key_handle.credential.len() > 256 {
                 return Err(AuthenticatorError::InvalidRelyingPartyInput);
             }
@@ -295,11 +340,35 @@ impl AuthenticatorService {
             transports_to_cancel.remove(idx);
 
             transport_mutex.lock().unwrap().sign(
-                flags,
                 timeout,
-                challenge.clone(),
-                app_ids.clone(),
-                key_handles.clone(),
+                SignArgs::CTAP1(args.clone()),
+                status.clone(),
+                clone_and_configure_cancellation_callback(callback.clone(), transports_to_cancel),
+            )?;
+        }
+
+        Ok(())
+    }
+
+    pub fn sign_ctap2(
+        &mut self,
+        timeout: u64,
+        args: SignArgsCtap2,
+        status: Sender<crate::StatusUpdate>,
+        callback: StateCallback<crate::Result<crate::SignResult>>,
+    ) -> crate::Result<()> {
+        let iterable_transports = self.transports.clone();
+        if iterable_transports.is_empty() {
+            return Err(AuthenticatorError::NoConfiguredTransports);
+        }
+
+        for (idx, transport_mutex) in iterable_transports.iter().enumerate() {
+            let mut transports_to_cancel = iterable_transports.clone();
+            transports_to_cancel.remove(idx);
+
+            transport_mutex.lock().unwrap().sign(
+                timeout,
+                SignArgs::CTAP2(args.clone()),
                 status.clone(),
                 clone_and_configure_cancellation_callback(callback.clone(), transports_to_cancel),
             )?;
@@ -329,12 +398,13 @@ impl AuthenticatorService {
 mod tests {
     use super::{
         AuthenticatorService, AuthenticatorTransport, CtapVersion, RegisterArgs, RegisterArgsCtap1,
+        SignArgs, SignArgsCtap1,
     };
     use crate::consts::Capability;
     use crate::consts::PARAMETER_SIZE;
     use crate::statecallback::StateCallback;
-    use crate::RegisterResult;
     use crate::{AuthenticatorTransports, KeyHandle, RegisterFlags, SignFlags, StatusUpdate};
+    use crate::{RegisterResult, SignResult};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc::{channel, Sender};
     use std::sync::Arc;
@@ -389,16 +459,18 @@ mod tests {
 
         fn sign(
             &mut self,
-            _flags: crate::SignFlags,
             _timeout: u64,
-            _challenge: Vec<u8>,
-            _app_ids: Vec<crate::AppId>,
-            _key_handles: Vec<crate::KeyHandle>,
+            _ctap_args: SignArgs,
             _status: Sender<crate::StatusUpdate>,
             callback: StateCallback<crate::Result<crate::SignResult>>,
         ) -> crate::Result<()> {
             if self.consent {
-                let rv = Ok((vec![0u8; 0], vec![0u8; 0], vec![0u8; 0], self.dev_info()));
+                let rv = Ok(SignResult::CTAP1(
+                    vec![0u8; 0],
+                    vec![0u8; 0],
+                    vec![0u8; 0],
+                    self.dev_info(),
+                ));
                 thread::spawn(move || callback.call(rv));
             }
             Ok(())
@@ -458,11 +530,14 @@ mod tests {
 
         assert_matches!(
             s.sign(
-                SignFlags::empty(),
                 1_000,
-                vec![],
-                vec![mk_appid()],
-                vec![mk_key()],
+                SignArgsCtap1 {
+                    flags: SignFlags::empty(),
+                    challenge: vec![],
+                    app_ids: vec![mk_appid()],
+                    key_handles: vec![mk_key()]
+                }
+                .into(),
                 status_tx,
                 StateCallback::new(Box::new(move |_rv| {})),
             )
@@ -498,11 +573,14 @@ mod tests {
 
         assert_matches!(
             s.sign(
-                SignFlags::empty(),
                 1_000,
-                mk_challenge(),
-                vec![],
-                vec![mk_key()],
+                SignArgsCtap1 {
+                    flags: SignFlags::empty(),
+                    challenge: mk_challenge(),
+                    app_ids: vec![],
+                    key_handles: vec![mk_key()]
+                }
+                .into(),
                 status_tx,
                 StateCallback::new(Box::new(move |_rv| {})),
             )
@@ -540,11 +618,14 @@ mod tests {
 
         assert_matches!(
             s.sign(
-                SignFlags::empty(),
                 100,
-                mk_challenge(),
-                vec![mk_appid()],
-                vec![],
+                SignArgsCtap1 {
+                    flags: SignFlags::empty(),
+                    challenge: mk_challenge(),
+                    app_ids: vec![mk_appid()],
+                    key_handles: vec![]
+                }
+                .into(),
                 status_tx,
                 StateCallback::new(Box::new(move |_rv| {})),
             ),
@@ -584,11 +665,14 @@ mod tests {
 
         assert_matches!(
             s.sign(
-                SignFlags::empty(),
                 1_000,
-                mk_challenge(),
-                vec![mk_appid()],
-                vec![large_key],
+                SignArgsCtap1 {
+                    flags: SignFlags::empty(),
+                    challenge: mk_challenge(),
+                    app_ids: vec![mk_appid()],
+                    key_handles: vec![large_key]
+                }
+                .into(),
                 status_tx,
                 StateCallback::new(Box::new(move |_rv| {})),
             )
@@ -622,11 +706,14 @@ mod tests {
 
         assert_matches!(
             s.sign(
-                SignFlags::empty(),
                 1_000,
-                mk_challenge(),
-                vec![mk_appid()],
-                vec![mk_key()],
+                SignArgsCtap1 {
+                    flags: SignFlags::empty(),
+                    challenge: mk_challenge(),
+                    app_ids: vec![mk_appid()],
+                    key_handles: vec![mk_key()]
+                }
+                .into(),
                 status_tx,
                 StateCallback::new(Box::new(move |_rv| {})),
             )
@@ -701,11 +788,14 @@ mod tests {
         let callback = StateCallback::new(Box::new(move |_rv| {}));
         assert!(s
             .sign(
-                SignFlags::empty(),
                 1_000,
-                mk_challenge(),
-                vec![mk_appid()],
-                vec![mk_key()],
+                SignArgsCtap1 {
+                    flags: SignFlags::empty(),
+                    challenge: mk_challenge(),
+                    app_ids: vec![mk_appid()],
+                    key_handles: vec![mk_key()]
+                }
+                .into(),
                 status_tx,
                 callback.clone(),
             )

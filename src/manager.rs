@@ -3,14 +3,17 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use crate::authenticatorservice::AuthenticatorTransport;
-use crate::authenticatorservice::{RegisterArgs, RegisterArgsCtap1};
+use crate::authenticatorservice::{RegisterArgs, RegisterArgsCtap1, SignArgs};
 use crate::consts::PARAMETER_SIZE;
 use crate::ctap2::client_data::{CollectedClientData, WebauthnType};
+use crate::ctap2::commands::get_assertion::{GetAssertion, GetAssertionOptions};
 use crate::ctap2::commands::make_credentials::MakeCredentials;
 use crate::ctap2::commands::make_credentials::MakeCredentialsOptions;
+use crate::ctap2::server::RelyingParty;
 use crate::errors::*;
 use crate::statecallback::StateCallback;
 use crate::statemachine::{StateMachine, StateMachineCtap2};
+use crate::SignFlags;
 use runloop::RunLoop;
 use std::io;
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
@@ -29,12 +32,18 @@ enum QueueAction {
         status: Sender<crate::StatusUpdate>,
         callback: StateCallback<crate::Result<crate::RegisterResult>>,
     },
-    Sign {
+    SignCtap1 {
         flags: crate::SignFlags,
         timeout: u64,
         challenge: Vec<u8>,
         app_ids: Vec<crate::AppId>,
         key_handles: Vec<crate::KeyHandle>,
+        status: Sender<crate::StatusUpdate>,
+        callback: StateCallback<crate::Result<crate::SignResult>>,
+    },
+    SignCtap2 {
+        timeout: u64,
+        get_assertion: GetAssertion,
         status: Sender<crate::StatusUpdate>,
         callback: StateCallback<crate::Result<crate::SignResult>>,
     },
@@ -73,7 +82,7 @@ impl U2FManager {
                             callback,
                         );
                     }
-                    Ok(QueueAction::Sign {
+                    Ok(QueueAction::SignCtap1 {
                         flags,
                         timeout,
                         challenge,
@@ -99,6 +108,10 @@ impl U2FManager {
                         sm.cancel();
                     }
                     Ok(QueueAction::RegisterCtap2 { .. }) => {
+                        // TODO(MS): What to do here? Error out? Silently ignore?
+                        unimplemented!();
+                    }
+                    Ok(QueueAction::SignCtap2 { .. }) => {
                         // TODO(MS): What to do here? Error out? Silently ignore?
                         unimplemented!();
                     }
@@ -152,40 +165,44 @@ impl AuthenticatorTransport for U2FManager {
 
     fn sign(
         &mut self,
-        flags: crate::SignFlags,
         timeout: u64,
-        challenge: Vec<u8>,
-        app_ids: Vec<crate::AppId>,
-        key_handles: Vec<crate::KeyHandle>,
+        ctap_args: SignArgs,
         status: Sender<crate::StatusUpdate>,
         callback: StateCallback<crate::Result<crate::SignResult>>,
     ) -> crate::Result<()> {
-        if challenge.len() != PARAMETER_SIZE {
+        let args = match ctap_args {
+            SignArgs::CTAP1(args) => args,
+            SignArgs::CTAP2(_) => {
+                return Err(AuthenticatorError::VersionMismatch("U2FManager", 1));
+            }
+        };
+
+        if args.challenge.len() != PARAMETER_SIZE {
             return Err(AuthenticatorError::InvalidRelyingPartyInput);
         }
 
-        if app_ids.is_empty() {
+        if args.app_ids.is_empty() {
             return Err(AuthenticatorError::InvalidRelyingPartyInput);
         }
 
-        for app_id in &app_ids {
+        for app_id in &args.app_ids {
             if app_id.len() != PARAMETER_SIZE {
                 return Err(AuthenticatorError::InvalidRelyingPartyInput);
             }
         }
 
-        for key_handle in &key_handles {
+        for key_handle in &args.key_handles {
             if key_handle.credential.len() > 256 {
                 return Err(AuthenticatorError::InvalidRelyingPartyInput);
             }
         }
 
-        let action = QueueAction::Sign {
-            flags,
+        let action = QueueAction::SignCtap1 {
+            flags: args.flags,
             timeout,
-            challenge,
-            app_ids,
-            key_handles,
+            challenge: args.challenge,
+            app_ids: args.app_ids,
+            key_handles: args.key_handles,
             status,
             callback,
         };
@@ -239,7 +256,7 @@ impl Manager {
                         unimplemented!();
                     }
 
-                    Ok(QueueAction::Sign {
+                    Ok(QueueAction::SignCtap1 {
                         timeout: _,
                         callback: _,
                         flags: _,
@@ -251,6 +268,17 @@ impl Manager {
                         // This must not block, otherwise we can't cancel.
                         // sm.sign(timeout, command, callback);
                     }
+
+                    Ok(QueueAction::SignCtap2 {
+                        timeout,
+                        get_assertion,
+                        status,
+                        callback,
+                    }) => {
+                        // This must not block, otherwise we can't cancel.
+                        sm.sign(timeout, get_assertion, status, callback);
+                    }
+
                     Ok(QueueAction::Cancel) => {
                         // Cancelling must block so that we don't start a new
                         // polling thread before the old one has shut down.
@@ -306,7 +334,7 @@ impl AuthenticatorTransport for Manager {
             args.relying_party,
             Some(args.user),
             args.pub_cred_params,
-            Vec::new(),
+            args.exclude_list,
             MakeCredentialsOptions {
                 resident_key: None,
                 user_validation: None,
@@ -323,100 +351,74 @@ impl AuthenticatorTransport for Manager {
         };
         Ok(self.tx.send(action)?)
     }
+
     fn sign(
         &mut self,
-        _flags: crate::SignFlags,
-        _timeout: u64,
-        _challenge: Vec<u8>,
-        _app_ids: Vec<crate::AppId>,
-        _key_handles: Vec<crate::KeyHandle>,
-        _status: Sender<crate::StatusUpdate>,
-        _callback: StateCallback<crate::Result<crate::SignResult>>,
+        timeout: u64,
+        ctap_args: SignArgs,
+        status: Sender<crate::StatusUpdate>,
+        callback: StateCallback<crate::Result<crate::SignResult>>,
     ) -> crate::Result<()> {
-        unimplemented!();
+        let args = match ctap_args {
+            SignArgs::CTAP1(_args) => {
+                // TODO(MS): Implement the backwards compatible ctap1 registration using MakeCredentials
+                unimplemented!();
+            }
+            SignArgs::CTAP2(args) => args,
+        };
+
+        let client_data = CollectedClientData {
+            webauthn_type: WebauthnType::Create,
+            challenge: args.challenge.into(),
+            origin: args.origin,
+            cross_origin: None,
+            token_binding: None,
+        };
+        // TODO(baloo): This block of code and commend was previously in src/statemanchine.rs
+        //              I moved this logic here, and I'm not quite sure about what we
+        //              should do, have to ask jcj
+        //
+        // We currently support none of the authenticator selection
+        // criteria because we can't ask tokens whether they do support
+        // those features. If flags are set, ignore all tokens for now.
+        //
+        // Technically, this is a ConstraintError because we shouldn't talk
+        // to this authenticator in the first place. But the result is the
+        // same anyway.
+        //if !flags.is_empty() {
+        //    return;
+        //}
+        let options = if args.flags == SignFlags::empty() {
+            GetAssertionOptions::default()
+        } else {
+            GetAssertionOptions {
+                user_validation: Some(args.flags.contains(SignFlags::REQUIRE_USER_VERIFICATION)),
+                ..GetAssertionOptions::default()
+            }
+        };
+
+        let get_assertion = GetAssertion::new(
+            client_data.clone(),
+            RelyingParty {
+                id: args.relying_party_id,
+                name: None,
+                icon: None,
+            },
+            args.allow_list,
+            options,
+            None,
+        );
+
+        let action = QueueAction::SignCtap2 {
+            timeout,
+            get_assertion,
+            status,
+            callback,
+        };
+        self.tx.send(action)?;
+
+        Ok(())
     }
-    /*
-        fn sign<F>(
-            &self,
-            flags: SignFlags,
-            timeout: u64,
-            challenge: Vec<u8>,
-            app_ids: Vec<::AppId>,
-            key_handles: Vec<::KeyHandle>,
-            callback: F,
-        ) -> Result<(), AuthenticatorError>
-        where
-            F: FnOnce(Result<::SignResult, AuthenticatorError>),
-            F: Send + 'static,
-        {
-            if challenge.len() != PARAMETER_SIZE {
-                return Err(AuthenticatorError::InvalidRelyingPartyInput);
-            }
-
-            let challenge = Challenge::from(challenge);
-            let callback = OnceCallback::new(callback);
-
-            if app_ids.is_empty() {
-                return Err(AuthenticatorError::InvalidRelyingPartyInput);
-            }
-
-            let client_data = CollectedClientData {
-                type_: WebauthnType::Get,
-                challenge,
-                origin: Origin::None,
-                token_binding: None,
-            };
-
-            // TODO(baloo): This block of code and commend was previously in src/statemanchine.rs
-            //              I moved this logic here, and I'm not quite sure about what we
-            //              should do, have to ask jcj
-            //
-            // We currently support none of the authenticator selection
-            // criteria because we can't ask tokens whether they do support
-            // those features. If flags are set, ignore all tokens for now.
-            //
-            // Technically, this is a ConstraintError because we shouldn't talk
-            // to this authenticator in the first place. But the result is the
-            // same anyway.
-            //if !flags.is_empty() {
-            //    return;
-            //}
-            let options = MakeCredentialsOptions {
-                user_validation: flags.contains(SignFlags::REQUIRE_USER_VERIFICATION),
-                ..MakeCredentialsOptions::default()
-            };
-
-            for app_id in &app_ids {
-                for key_handle in &key_handles {
-                    if key_handle.credential.len() > 256 {
-                        return Err(AuthenticatorError::InvalidRelyingPartyInput);
-                    }
-                    let rp = RelyingParty::new_hash(app_id)?;
-
-                    let allow_list = vec![key_handle.into()];
-
-                    let command =
-                        GetAssertion::new(client_data.clone(), rp, allow_list, Some(options), None);
-
-                    let app_id = app_id.clone();
-                    let key_handle = key_handle.credential.clone();
-                    let callback = callback.clone();
-
-                    let callback = callback.map(move |assertion_object: AssertionObject| {
-                        (app_id, key_handle, assertion_object.u2f_sign_data())
-                    });
-
-                    let action = QueueAction::Sign {
-                        command,
-                        timeout,
-                        callback,
-                    };
-                    self.tx.send(action)?;
-                }
-            }
-            Ok(())
-        }
-    */
 
     fn cancel(&mut self) -> Result<(), AuthenticatorError> {
         Ok(self.tx.send(QueueAction::Cancel)?)

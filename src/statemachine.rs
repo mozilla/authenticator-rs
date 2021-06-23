@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use crate::consts::PARAMETER_SIZE;
+use crate::ctap2::commands::get_assertion::GetAssertion;
 use crate::ctap2::commands::make_credentials::MakeCredentials;
 use crate::ctap2::commands::{CommandError, StatusCode};
 use crate::errors::{self, AuthenticatorError};
@@ -361,6 +362,9 @@ impl StateMachineCtap2 {
                 }
             };
 
+            debug!("------------------------------------------------------------------");
+            debug!("{:?}", makecred);
+            debug!("------------------------------------------------------------------");
             let resp = dev.send_msg(&makecred);
             match resp {
                 Ok((attestation, client_data)) => {
@@ -389,19 +393,20 @@ impl StateMachineCtap2 {
 
         self.transaction = Some(try_or!(transaction, |e| cbc.call(Err(e))));
     }
-    /*
-    pub fn sign<CB>(&mut self, timeout: u64, command: GetAssertion, callback: CB)
-    where
-        CB: Callback<Input = AssertionObject> + Clone + Send + Sync + 'static,
-    {
+
+    pub fn sign(
+        &mut self,
+        timeout: u64,
+        command: GetAssertion,
+        status: Sender<crate::StatusUpdate>,
+        callback: StateCallback<crate::Result<crate::SignResult>>,
+    ) {
         // Abort any prior register/sign calls.
         self.cancel();
-
         let cbc = callback.clone();
+        let status_mutex = Mutex::new(status);
 
-        let transaction = Transaction::new(timeout, callback.clone(), move |info, alive| {
-            // TODO(baloo): what is alive about? have to ask jcj
-            // Create a new device.
+        let transaction = Transaction::new(timeout, callback.clone(), move |info, _alive| {
             let dev = &mut match Device::new(info) {
                 Ok(dev) => dev,
                 Err(e) => {
@@ -411,29 +416,39 @@ impl StateMachineCtap2 {
             };
 
             // Try initializing it.
-            if let Err(e) = dev.init() {
-                info!("error while initializing device: {}", e);
+            if let Err(e) = dev.init(Nonce::CreateRandom) {
+                warn!("error while initializing device: {}", e);
                 return;
             }
+            send_status(
+                &status_mutex,
+                crate::StatusUpdate::DeviceAvailable {
+                    dev_info: dev.get_device_info(),
+                },
+            );
+
+            debug!("------------------------------------------------------------------");
+            debug!("{:?}", command);
+            debug!("------------------------------------------------------------------");
 
             let resp = dev.send_msg(&command);
             match resp {
-                Ok(resp) => callback.call(Ok(resp)),
+                Ok(resp) => callback.call(Ok(SignResult::CTAP2(resp))),
                 // TODO(baloo): if key_handle is invalid for this device, it
                 //              should reply something like:
                 //              CTAP2_ERR_INVALID_CREDENTIAL
                 //              have to check
-                Err(ref e) if e.device_unsupported() || e.unsupported_command() => {}
-                Err(Error::Command(ref e)) if e.device_busy() => {}
+                Err(HIDError::DeviceNotSupported) | Err(HIDError::UnsupportedCommand) => {}
+                Err(HIDError::Command(CommandError::StatusCode(StatusCode::ChannelBusy, _))) => {}
                 Err(e) => {
                     warn!("error happened: {}", e);
-                    callback.call(Err(::Error::Unknown));
+                    callback.call(Err(AuthenticatorError::HIDError(e)));
                 }
             }
         });
 
         self.transaction = Some(try_or!(transaction, move |e| cbc.call(Err(e))));
-    }*/
+    }
 
     // This blocks.
     pub fn cancel(&mut self) {
