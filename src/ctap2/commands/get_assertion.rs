@@ -121,7 +121,7 @@ impl Serialize for GetAssertion {
         }
 
         let mut map = serializer.serialize_map(Some(map_len))?;
-        map.serialize_entry(&1, &self.rp)?;
+        map.serialize_entry(&1, &self.rp.id)?;
 
         let client_data_hash = self
             .client_data
