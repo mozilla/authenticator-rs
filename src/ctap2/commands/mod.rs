@@ -372,6 +372,8 @@ where
         info
     };
 
+    // TODO(MS): What to do if token supports client_pin, but none has been set: Some(false)
+    //           AND a Pin is not None?
     let pin_auth = if info.options.client_pin == Some(true) {
         let pin = pin
             .as_ref()

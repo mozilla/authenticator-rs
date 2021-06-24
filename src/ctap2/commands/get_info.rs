@@ -185,6 +185,8 @@ pub(crate) struct AuthenticatorOptions {
     /// If a device is capable of verifying the user within itself as well as
     /// able to do Client PIN, it will return both "uv" and the Client PIN
     /// option.
+    // TODO(MS): My Token (key-ID FIDO2) does return Some(false) here, even though
+    //           it has no built-in verification method. Not to be trusted...
     #[serde(rename = "uv")]
     pub(crate) user_verification: Option<bool>,
 }

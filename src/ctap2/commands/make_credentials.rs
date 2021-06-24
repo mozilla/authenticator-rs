@@ -32,6 +32,8 @@ pub struct MakeCredentialsOptions {
     pub resident_key: Option<bool>,
     #[serde(rename = "uv", skip_serializing_if = "Option::is_none")]
     pub user_validation: Option<bool>,
+    // TODO(MS): ctap2.1 supports user_presence, but ctap2.0 does not and tokens will error out
+    //           Commands need a version-flag to know what to de/serialize and what to ignore.
 }
 
 impl Default for MakeCredentialsOptions {
