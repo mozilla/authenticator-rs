@@ -46,6 +46,8 @@ pub mod statecallback;
 mod transport;
 mod virtualdevices;
 
+mod crypto;
+
 // Keep this in sync with the constants in u2fhid-capi.h.
 bitflags! {
     pub struct RegisterFlags: u64 {

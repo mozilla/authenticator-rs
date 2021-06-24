@@ -14,8 +14,16 @@ travis-ci = { repository = "mozilla/authenticator-rs", branch = "master" }
 maintenance = { status = "actively-developed" }
 
 [features]
+default = ["crypto_nss"]
 binding-recompile = ["bindgen"]
 webdriver = ["bytes", "warp", "tokio"]
+# Crypto backends
+# NOTE: These are mutually exclusive, but cargo does not support that.
+#       Selecting more than one will result in a compilation error!
+# Default: NSS
+crypto_ring = ["ring"]
+crypto_openssl = ["openssl", "openssl-sys"]
+crypto_nss = []
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libudev = "^0.2"
@@ -55,6 +63,11 @@ bytes = { version = "0.5", optional = true, features = ["serde"] }
 base64 = "^0.10"
 nom = "^5.1"
 sha2 = "^0.8.0"
+cfg-if = "1.0"
+# Crypto backends
+ring = { version = "0.16", optional = true }
+openssl-sys = { version = "0.9", optional = true}
+openssl = { version = "0.10", optional = true}
 
 [dev-dependencies]
 base64 = "^0.10"

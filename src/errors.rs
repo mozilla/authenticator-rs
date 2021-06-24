@@ -23,6 +23,7 @@ pub enum AuthenticatorError {
     Custom(String),
     VersionMismatch(&'static str, u32),
     HIDError(HIDError),
+    CryptoError,
 }
 
 impl AuthenticatorError {
@@ -59,6 +60,9 @@ impl fmt::Display for AuthenticatorError {
                 manager, version
             ),
             AuthenticatorError::HIDError(ref e) => write!(f, "Device error: {}", e),
+            AuthenticatorError::CryptoError => {
+                write!(f, "The cryptography implementation encountered an error")
+            }
         }
     }
 }
