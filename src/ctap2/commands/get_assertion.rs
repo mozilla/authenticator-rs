@@ -311,7 +311,6 @@ impl RequestCtap2 for GetAssertion {
     where
         Dev: FidoDevice + io::Read + io::Write + fmt::Debug,
     {
-        // TODO(MS): Add GetInfo-request here and others (See CommandDevice::new)
         Ok(ser::to_vec(&self).map_err(CommandError::Serialization)?)
     }
 

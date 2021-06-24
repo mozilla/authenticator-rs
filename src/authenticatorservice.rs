@@ -29,7 +29,7 @@ pub struct RegisterArgsCtap1 {
 
 #[derive(Debug, Clone)]
 pub struct RegisterArgsCtap2 {
-    pub challenge: Vec<u8>, // TODO(MS): Check if we really need that
+    pub challenge: Vec<u8>,
     pub relying_party: RelyingParty,
     pub origin: String,
     pub user: User,
