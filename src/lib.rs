@@ -38,6 +38,7 @@ pub use crate::capi::*;
 pub mod ctap2;
 pub use ctap2::attestation::AttestationObject;
 pub use ctap2::client_data::CollectedClientData;
+pub use ctap2::commands::client_pin::Pin;
 pub use ctap2::AssertionObject;
 
 pub mod errors;
