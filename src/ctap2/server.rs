@@ -6,8 +6,8 @@ use std::fmt;
 
 use serde::de::MapAccess;
 use serde::{
-    de::{Error as SerdeError, Unexpected, Visitor},
-    ser::SerializeMap,
+    de::{Error as SerdeError, Visitor},
+    ser::{Error as SerError, SerializeMap},
     Deserialize, Deserializer, Serialize, Serializer,
 };
 
@@ -99,6 +99,7 @@ impl User {
 pub enum Alg {
     ES256,
     RS256,
+    Unknown(i64),
 }
 
 impl Serialize for Alg {
@@ -109,6 +110,7 @@ impl Serialize for Alg {
         match *self {
             Alg::ES256 => serializer.serialize_i8(-7),
             Alg::RS256 => serializer.serialize_i16(-257),
+            Alg::Unknown(_) => Err(SerError::custom("Unkown algorithm!")),
         }
     }
 }
@@ -134,7 +136,8 @@ impl<'de> Deserialize<'de> for Alg {
                 match v {
                     -7 => Ok(Alg::ES256),
                     -257 => Ok(Alg::RS256),
-                    v => Err(SerdeError::invalid_value(Unexpected::Signed(v), &self)),
+                    v => Ok(Alg::Unknown(v)),
+                    // v => Err(SerdeError::invalid_value(Unexpected::Signed(v), &self)),
                 }
             }
         }
@@ -180,14 +183,12 @@ impl<'de> Deserialize<'de> for PublicKeyCredentialParameters {
             {
                 let mut found_type = false;
                 let mut alg = None;
-
                 while let Some(key) = map.next_key()? {
                     match key {
                         "alg" => {
                             if alg.is_some() {
                                 return Err(SerdeError::duplicate_field("alg"));
                             }
-
                             alg = Some(map.next_value()?);
                         }
                         "type" => {
