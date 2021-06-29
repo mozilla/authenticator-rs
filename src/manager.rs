@@ -409,7 +409,7 @@ impl AuthenticatorTransport for Manager {
             },
             args.allow_list,
             options,
-            None,
+            args.pin,
         );
 
         let action = QueueAction::SignCtap2 {

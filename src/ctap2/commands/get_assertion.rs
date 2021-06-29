@@ -1,10 +1,13 @@
-use super::{Command, CommandError, Request, RequestCtap1, RequestCtap2, Retryable, StatusCode};
+use super::{
+    Command, CommandError, PinAuthCommand, Request, RequestCtap1, RequestCtap2, Retryable,
+    StatusCode,
+};
 use crate::consts::{
     PARAMETER_SIZE, U2F_AUTHENTICATE, U2F_CHECK_IS_REGISTERED, U2F_REQUEST_USER_PRESENCE,
 };
 use crate::ctap2::attestation::{AuthenticatorData, AuthenticatorDataFlags};
 use crate::ctap2::client_data::CollectedClientData;
-use crate::ctap2::commands::client_pin::PinAuth;
+use crate::ctap2::commands::client_pin::{Pin, PinAuth};
 use crate::ctap2::commands::get_next_assertion::GetNextAssertion;
 use crate::ctap2::commands::make_credentials::UserValidation;
 use crate::ctap2::server::{PublicKeyCredentialDescriptor, RelyingParty, User};
@@ -60,7 +63,7 @@ impl UserValidation for GetAssertionOptions {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct GetAssertion {
     client_data: CollectedClientData,
     rp: RelyingParty,
@@ -74,7 +77,7 @@ pub struct GetAssertion {
     // the processing of these calls.
     extensions: Map<String, json_value::Value>,
     options: GetAssertionOptions,
-
+    pin: Option<Pin>,
     pin_auth: Option<PinAuth>,
     //TODO(MS): pinProtocol
 }
@@ -85,7 +88,7 @@ impl GetAssertion {
         rp: RelyingParty,
         allow_list: Vec<PublicKeyCredentialDescriptor>,
         options: GetAssertionOptions,
-        pin_auth: Option<PinAuth>,
+        pin: Option<Pin>,
     ) -> Self {
         Self {
             client_data,
@@ -94,8 +97,27 @@ impl GetAssertion {
             // TODO(baloo): need to sort those out once final api is in
             extensions: Map::new(),
             options,
-            pin_auth,
+            pin,
+            pin_auth: None,
         }
+    }
+}
+
+impl PinAuthCommand for GetAssertion {
+    fn pin(&self) -> &Option<Pin> {
+        &self.pin
+    }
+
+    fn pin_auth(&self) -> &Option<PinAuth> {
+        &self.pin_auth
+    }
+
+    fn set_pin_auth(&mut self, pin_auth: Option<PinAuth>) {
+        self.pin_auth = pin_auth;
+    }
+
+    fn client_data(&self) -> &CollectedClientData {
+        &self.client_data
     }
 }
 

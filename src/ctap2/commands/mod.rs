@@ -1,5 +1,5 @@
 use crate::crypto;
-use crate::ctap2::client_data::ClientDataHash;
+use crate::ctap2::client_data::{ClientDataHash, CollectedClientData};
 use crate::ctap2::commands::client_pin::{GetKeyAgreement, GetPinToken, Pin, PinAuth, PinError};
 use crate::ctap2::commands::get_info::GetInfo;
 use crate::transport::errors::{ApduErrorStatus, HIDError};
@@ -80,6 +80,22 @@ pub trait RequestCtap2: fmt::Debug {
     ) -> Result<Self::Output, HIDError>
     where
         Dev: FidoDevice + Read + Write + fmt::Debug;
+}
+
+pub(crate) trait PinAuthCommand {
+    fn pin(&self) -> &Option<Pin>;
+    fn pin_auth(&self) -> &Option<PinAuth>;
+    fn set_pin_auth(&mut self, pin_auth: Option<PinAuth>);
+    fn client_data(&self) -> &CollectedClientData;
+    fn determine_pin_auth<D: FidoDevice>(&mut self, dev: &mut D) -> Result<(), HIDError> {
+        let client_data_hash = self
+            .client_data()
+            .hash()
+            .map_err(|e| HIDError::Command(CommandError::Json(e)))?;
+        let pin_auth = calculate_pin_auth(dev, &client_data_hash, &self.pin())?;
+        self.set_pin_auth(pin_auth);
+        Ok(())
+    }
 }
 
 // Spec: https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html#authenticator-api

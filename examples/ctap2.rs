@@ -176,6 +176,7 @@ fn main() {
         user,
         relying_party_id: "example.com".to_string(),
         allow_list,
+        pin: Some(Pin::new("1234")),
     };
 
     if let Err(e) = manager.sign(timeout_ms, ctap_args.into(), status_tx, callback) {

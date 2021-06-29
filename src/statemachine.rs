@@ -5,7 +5,7 @@
 use crate::consts::PARAMETER_SIZE;
 use crate::ctap2::commands::get_assertion::GetAssertion;
 use crate::ctap2::commands::make_credentials::MakeCredentials;
-use crate::ctap2::commands::{CommandError, StatusCode};
+use crate::ctap2::commands::{CommandError, PinAuthCommand, StatusCode};
 use crate::errors::{self, AuthenticatorError};
 use crate::statecallback::StateCallback;
 use crate::transport::platform::{device::Device, transaction::Transaction};
@@ -397,7 +397,7 @@ impl StateMachineCtap2 {
     pub fn sign(
         &mut self,
         timeout: u64,
-        command: GetAssertion,
+        params: GetAssertion,
         status: Sender<crate::StatusUpdate>,
         callback: StateCallback<crate::Result<crate::SignResult>>,
     ) {
@@ -427,11 +427,22 @@ impl StateMachineCtap2 {
                 },
             );
 
+            // TODO(MS): This is wasteful, but the current setup with read only-functions doesn't allow me
+            //           to modify "params" directly.
+            let mut getassertion = params.clone();
+            match getassertion.determine_pin_auth(dev) {
+                Ok(x) => x,
+                Err(e) => {
+                    callback.call(Err(errors::AuthenticatorError::HIDError(e)));
+                    return;
+                }
+            };
+
             debug!("------------------------------------------------------------------");
-            debug!("{:?}", command);
+            debug!("{:?}", getassertion);
             debug!("------------------------------------------------------------------");
 
-            let resp = dev.send_msg(&command);
+            let resp = dev.send_msg(&getassertion);
             match resp {
                 Ok(resp) => callback.call(Ok(SignResult::CTAP2(resp))),
                 // TODO(baloo): if key_handle is invalid for this device, it

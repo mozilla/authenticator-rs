@@ -1,17 +1,18 @@
-use super::{Command, CommandError, Request, RequestCtap1, RequestCtap2, Retryable, StatusCode};
+use super::{
+    Command, CommandError, PinAuthCommand, Request, RequestCtap1, RequestCtap2, Retryable,
+    StatusCode,
+};
 use crate::consts::{PARAMETER_SIZE, U2F_REGISTER, U2F_REQUEST_USER_PRESENCE};
 use crate::ctap2::attestation::{
     AAGuid, AttestationObject, AttestationStatement, AttestedCredentialData, AuthenticatorData,
     AuthenticatorDataFlags,
 };
-use crate::ctap2::client_data::{ClientDataHash, CollectedClientData};
-use crate::ctap2::commands::calculate_pin_auth;
+use crate::ctap2::client_data::CollectedClientData;
 use crate::ctap2::commands::client_pin::{Pin, PinAuth};
 use crate::ctap2::server::{
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, User,
 };
 use crate::transport::errors::{ApduErrorStatus, HIDError};
-use crate::transport::FidoDevice;
 use crate::u2ftypes::{U2FAPDUHeader, U2FDevice};
 use nom::{do_parse, named, number::complete::be_u8, tag, take};
 #[cfg(test)]
@@ -110,21 +111,23 @@ impl MakeCredentials {
             pin_auth: None,
         }
     }
+}
 
-    pub fn client_data_hash(&self) -> Result<ClientDataHash, HIDError> {
-        self.client_data
-            .hash()
-            .map_err(|e| HIDError::Command(CommandError::Json(e)))
+impl PinAuthCommand for MakeCredentials {
+    fn pin(&self) -> &Option<Pin> {
+        &self.pin
     }
 
-    pub fn determine_pin_auth<D: FidoDevice>(&mut self, dev: &mut D) -> Result<(), HIDError> {
-        let client_data_hash = self
-            .client_data
-            .hash()
-            .map_err(|e| HIDError::Command(CommandError::Json(e)))?;
-        let pin_auth = calculate_pin_auth(dev, &client_data_hash, &self.pin)?;
+    fn pin_auth(&self) -> &Option<PinAuth> {
+        &self.pin_auth
+    }
+
+    fn set_pin_auth(&mut self, pin_auth: Option<PinAuth>) {
         self.pin_auth = pin_auth;
-        Ok(())
+    }
+
+    fn client_data(&self) -> &CollectedClientData {
+        &self.client_data
     }
 }
 
