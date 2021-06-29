@@ -1,6 +1,8 @@
 use crate::crypto;
 use crate::ctap2::client_data::{ClientDataHash, CollectedClientData};
-use crate::ctap2::commands::client_pin::{GetKeyAgreement, GetPinToken, Pin, PinAuth, PinError};
+use crate::ctap2::commands::client_pin::{
+    GetKeyAgreement, GetPinToken, GetRetries, Pin, PinAuth, PinError,
+};
 use crate::ctap2::commands::get_info::GetInfo;
 use crate::transport::errors::{ApduErrorStatus, HIDError};
 use crate::transport::FidoDevice;
@@ -92,7 +94,33 @@ pub(crate) trait PinAuthCommand {
             .client_data()
             .hash()
             .map_err(|e| HIDError::Command(CommandError::Json(e)))?;
-        let pin_auth = calculate_pin_auth(dev, &client_data_hash, &self.pin())?;
+        let pin_auth = match calculate_pin_auth(dev, &client_data_hash, &self.pin()) {
+            Ok(pin_auth) => pin_auth,
+            Err(HIDError::Command(CommandError::StatusCode(StatusCode::PinInvalid, _))) => {
+                // Determine retries
+                let cmd = GetRetries::new();
+                let retries = dev.send_cbor(&cmd).ok(); // If we got retries, wrap it in Some, otherwise ignore
+                                                        // Repackage error
+                return Err(HIDError::Command(CommandError::Pin(PinError::InvalidPin(
+                    retries,
+                ))));
+            }
+            Err(HIDError::Command(CommandError::StatusCode(StatusCode::PinAuthBlocked, _))) => {
+                return Err(HIDError::Command(CommandError::Pin(
+                    PinError::PinAuthBlocked,
+                )));
+            }
+            Err(HIDError::Command(CommandError::StatusCode(StatusCode::PinBlocked, _))) => {
+                return Err(HIDError::Command(CommandError::Pin(PinError::PinBlocked)));
+            }
+            // TODO(MS): Add "PinRequired"
+            // TODO(MS): Add "PinNotSet"
+            // TODO(MS): Add "PinBlocked"
+            // TODO(MS): Add "PinPolicyViolated"
+            Err(err) => {
+                return Err(err);
+            }
+        };
         self.set_pin_auth(pin_auth);
         Ok(())
     }

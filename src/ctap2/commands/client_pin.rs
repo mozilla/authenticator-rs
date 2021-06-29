@@ -32,7 +32,7 @@ pub enum PINSubcommand {
 
 #[derive(Debug)]
 pub struct ClientPIN {
-    pin_protocol: u8,
+    pin_protocol: Option<u8>,
     subcommand: PINSubcommand,
     key_agreement: Option<PublicKey>,
     pin_auth: Option<[u8; 16]>,
@@ -43,7 +43,7 @@ pub struct ClientPIN {
 impl Default for ClientPIN {
     fn default() -> Self {
         ClientPIN {
-            pin_protocol: 0,
+            pin_protocol: None,
             subcommand: PINSubcommand::GetRetries,
             key_agreement: None,
             pin_auth: None,
@@ -60,7 +60,10 @@ impl Serialize for ClientPIN {
     {
         // Need to define how many elements are going to be in the map
         // beforehand
-        let mut map_len = 2;
+        let mut map_len = 1;
+        if self.pin_protocol.is_some() {
+            map_len += 1;
+        }
         if self.key_agreement.is_some() {
             map_len += 1;
         }
@@ -75,7 +78,9 @@ impl Serialize for ClientPIN {
         }
 
         let mut map = serializer.serialize_map(Some(map_len))?;
-        map.serialize_entry(&1, &self.pin_protocol)?;
+        if let Some(ref pin_protocol) = self.pin_protocol {
+            map.serialize_entry(&1, pin_protocol)?;
+        }
         let command: u8 = self.subcommand as u8;
         map.serialize_entry(&2, &command)?;
         if let Some(ref key_agreement) = self.key_agreement {
@@ -105,7 +110,7 @@ struct ClientPinResponse {
     key_agreement: Option<PublicKey>,
     pin_token: Option<EncryptedPinToken>,
     /// Number of PIN attempts remaining before lockout.
-    _retries: Option<u8>,
+    retries: Option<u8>,
 }
 
 impl<'de> Deserialize<'de> for ClientPinResponse {
@@ -156,7 +161,7 @@ impl<'de> Deserialize<'de> for ClientPinResponse {
                 Ok(ClientPinResponse {
                     key_agreement,
                     pin_token,
-                    _retries: retries,
+                    retries,
                 })
             }
         }
@@ -185,7 +190,7 @@ impl ClientPINSubCommand for GetKeyAgreement {
 
     fn as_client_pin(&self) -> Result<ClientPIN, CommandError> {
         Ok(ClientPIN {
-            pin_protocol: self.pin_protocol,
+            pin_protocol: Some(self.pin_protocol),
             subcommand: PINSubcommand::GetKeyAgreement,
             ..ClientPIN::default()
         })
@@ -241,7 +246,7 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinToken<'sc, 'pin> {
         trace!("pin_hash_enc = {:#04X?}", &pin_hash_enc);
 
         Ok(ClientPIN {
-            pin_protocol: self.pin_protocol,
+            pin_protocol: Some(self.pin_protocol),
             subcommand: PINSubcommand::GetPINToken,
             key_agreement: Some(self.shared_secret.my_public_key().clone()),
             pin_hash_enc: Some(ByteBuf::from(pin_hash_enc)),
@@ -263,6 +268,38 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinToken<'sc, 'pin> {
                 Ok(pin_token)
             }
             None => Err(CommandError::MissingRequiredField("key_agreement")),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct GetRetries {}
+
+impl GetRetries {
+    pub fn new() -> Self {
+        GetRetries {}
+    }
+}
+
+impl ClientPINSubCommand for GetRetries {
+    type Output = u8;
+
+    fn as_client_pin(&self) -> Result<ClientPIN, CommandError> {
+        Ok(ClientPIN {
+            subcommand: PINSubcommand::GetRetries,
+            ..ClientPIN::default()
+        })
+    }
+
+    fn parse_response_payload(&self, input: &[u8]) -> Result<Self::Output, CommandError> {
+        let value: Value = from_slice(input).map_err(CommandError::Parsing)?;
+        debug!("GetKeyAgreement::parse_response_payload {:?}", value);
+
+        let get_pin_response: ClientPinResponse =
+            from_slice(input).map_err(CommandError::Parsing)?;
+        match get_pin_response.retries {
+            Some(retries) => Ok(retries),
+            None => Err(CommandError::MissingRequiredField("retries")),
         }
     }
 }
@@ -417,6 +454,9 @@ pub enum PinError {
     PinIsTooShort,
     PinIsTooLong(usize),
     InvalidKeyLen,
+    InvalidPin(Option<u8>),
+    PinAuthBlocked,
+    PinBlocked,
     Backend(BackendError),
 }
 
@@ -426,6 +466,21 @@ impl fmt::Display for PinError {
             PinError::PinIsTooShort => write!(f, "PinError: pin is too short"),
             PinError::PinIsTooLong(len) => write!(f, "PinError: pin is too long ({})", len),
             PinError::InvalidKeyLen => write!(f, "PinError: invalid key len"),
+            PinError::InvalidPin(ref e) => {
+                let mut res = write!(f, "PinError: Invalid Pin.");
+                if let Some(retries) = e {
+                    res = write!(f, " Retries left: {:?}", retries)
+                }
+                res
+            }
+            PinError::PinAuthBlocked => write!(
+                f,
+                "PinError: Pin authentication blocked. Device needs power cycle."
+            ),
+            PinError::PinBlocked => write!(
+                f,
+                "PinError: No retries left. Pin blocked. Device needs reset."
+            ),
             PinError::Backend(ref e) => write!(f, "PinError: Crypto backend error: {:?}", e),
         }
     }
