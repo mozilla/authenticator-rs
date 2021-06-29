@@ -1,8 +1,8 @@
 use crate::consts::{HIDCmd, CID_BROADCAST};
+use crate::crypto::ECDHSecret;
 use crate::ctap2::commands::get_info::{AuthenticatorInfo, GetInfo};
 use crate::ctap2::commands::get_version::GetVersion;
 use crate::ctap2::commands::{RequestCtap1, RequestCtap2, Retryable};
-use crate::ctap2::crypto::ECDHSecret;
 use crate::transport::{
     errors::{ApduErrorStatus, HIDError},
     FidoDevice, Nonce,

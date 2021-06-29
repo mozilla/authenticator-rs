@@ -1,7 +1,7 @@
 use crate::consts::Capability;
+use crate::crypto::ECDHSecret;
 use crate::ctap2::commands::get_info::AuthenticatorInfo;
 use crate::ctap2::commands::{Request, RequestCtap1, RequestCtap2};
-use crate::ctap2::crypto::ECDHSecret;
 use crate::u2ftypes::U2FDevice;
 use std::fmt;
 

@@ -1,4 +1,4 @@
-use super::crypto;
+use crate::crypto;
 use crate::ctap2::client_data::ClientDataHash;
 use crate::ctap2::commands::client_pin::{GetKeyAgreement, GetPinToken, Pin, PinAuth, PinError};
 use crate::ctap2::commands::get_info::GetInfo;
@@ -411,8 +411,8 @@ where
 pub mod tests {
     use super::*;
     use crate::consts::CID_BROADCAST;
+    use crate::crypto::ECDHSecret;
     use crate::ctap2::commands::get_info::AuthenticatorInfo;
-    use crate::ctap2::crypto::ECDHSecret;
     use crate::transport::hid::HIDDevice;
     use crate::u2fprotocol::tests::platform::TestDevice;
     use crate::u2ftypes::U2FDevice;

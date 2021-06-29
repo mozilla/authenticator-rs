@@ -9,7 +9,7 @@ use authenticator::{
         User,
     },
     statecallback::StateCallback,
-    RegisterResult, SignFlags, SignResult, StatusUpdate,
+    Pin, RegisterResult, SignFlags, SignResult, StatusUpdate,
 };
 use getopts::Options;
 use sha2::{Digest, Sha256};
@@ -122,7 +122,7 @@ fn main() {
             PublicKeyCredentialParameters { alg: Alg::ES256 },
             PublicKeyCredentialParameters { alg: Alg::RS256 },
         ],
-        pin: None,
+        pin: Some(Pin::new("1234")),
         exclude_list: vec![PublicKeyCredentialDescriptor {
             id: vec![
                 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
@@ -161,7 +161,6 @@ fn main() {
 
     let allow_list;
     if let Some(cred_data) = attestation_object.auth_data.credential_data {
-        println!("======================================================= GOT CRED ID");
         allow_list = vec![PublicKeyCredentialDescriptor {
             id: cred_data.credential_id.clone(),
             transports: vec![Transport::USB],

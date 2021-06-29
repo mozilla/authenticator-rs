@@ -1,6 +1,8 @@
 use super::{get_info::AuthenticatorInfo, Command, CommandError, RequestCtap2, StatusCode};
+use crate::crypto::{
+    authenticate, decrypt, encapsulate, encrypt, BackendError, CryptoError, ECDHSecret, PublicKey,
+};
 use crate::ctap2::client_data::ClientDataHash;
-use crate::ctap2::crypto::{ECDHSecret, PublicKey};
 use crate::transport::errors::HIDError;
 use crate::u2ftypes::U2FDevice;
 use serde::{
@@ -232,10 +234,10 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinToken<'sc, 'pin> {
     type Output = PinToken;
 
     fn as_client_pin(&self) -> Result<ClientPIN, CommandError> {
-        let iv = [0u8; 16];
         let input = self.pin.for_pin_token();
         trace!("pin_hash = {:#04X?}", &input.as_ref());
-        let pin_hash_enc = self.shared_secret.encrypt(input.as_ref(), &iv)?;
+        let pin_hash_enc =
+            encrypt(self.shared_secret, input.as_ref()).map_err(|e| CryptoError::Backend(e))?;
         trace!("pin_hash_enc = {:#04X?}", &pin_hash_enc);
 
         Ok(ClientPIN {
@@ -253,15 +255,14 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinToken<'sc, 'pin> {
 
         let get_pin_response: ClientPinResponse =
             from_slice(input).map_err(CommandError::Parsing)?;
-        if let Some(encrypted_pin_token) = get_pin_response.pin_token {
-            let iv = [0u8; 16];
-            let pin_token = self
-                .shared_secret
-                .decrypt(encrypted_pin_token.as_ref(), &iv)?;
-            let pin_token = PinToken(pin_token);
-            Ok(pin_token)
-        } else {
-            Err(CommandError::MissingRequiredField("key_agreement"))
+        match get_pin_response.pin_token {
+            Some(encrypted_pin_token) => {
+                let pin_token = decrypt(self.shared_secret, encrypted_pin_token.as_ref())
+                    .map_err(|e| CryptoError::Backend(e))?;
+                let pin_token = PinToken(pin_token);
+                Ok(pin_token)
+            }
+            None => Err(CommandError::MissingRequiredField("key_agreement")),
         }
     }
 }
@@ -324,11 +325,7 @@ pub struct KeyAgreement(PublicKey);
 
 impl KeyAgreement {
     pub fn shared_secret(&self) -> Result<ECDHSecret, CommandError> {
-        unimplemented!();
-        //         self.0
-        //             .complete_handshake()
-        //             .map_err(|_| Error::ECDH)
-        //             .map(ECDHSecret)
+        encapsulate(&self.0).map_err(|e| CommandError::Crypto(CryptoError::Backend(e)))
     }
 }
 
@@ -345,7 +342,7 @@ impl AsRef<[u8]> for EncryptedPinToken {
 pub struct PinToken(Vec<u8>);
 
 impl PinToken {
-    pub fn auth(&self, _client_hash_data: &ClientDataHash) -> Result<PinAuth, PinError> {
+    pub fn auth(&self, client_hash_data: &ClientDataHash) -> Result<PinAuth, PinError> {
         if self.0.len() < 4 {
             return Err(PinError::PinIsTooShort);
         }
@@ -355,15 +352,12 @@ impl PinToken {
             return Err(PinError::PinIsTooLong(bytes.len()));
         }
 
-        unimplemented!();
-        /*let mut mac =
-            Hmac::<Sha256>::new_varkey(self.as_ref()).map_err(|_| PinError::InvalidKeyLen)?;
-        mac.input(client_hash_data.as_ref());
+        let hmac = authenticate(self.as_ref(), client_hash_data.as_ref())?;
 
         let mut out = [0u8; 16];
-        out.copy_from_slice(&mac.result().code().as_slice()[0..16]);
+        out.copy_from_slice(&hmac[0..16]);
 
-        Ok(PinAuth(out))*/
+        Ok(PinAuth(out))
     }
 }
 
@@ -418,11 +412,12 @@ impl Pin {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug)]
 pub enum PinError {
     PinIsTooShort,
     PinIsTooLong(usize),
     InvalidKeyLen,
+    Backend(BackendError),
 }
 
 impl fmt::Display for PinError {
@@ -431,16 +426,15 @@ impl fmt::Display for PinError {
             PinError::PinIsTooShort => write!(f, "PinError: pin is too short"),
             PinError::PinIsTooLong(len) => write!(f, "PinError: pin is too long ({})", len),
             PinError::InvalidKeyLen => write!(f, "PinError: invalid key len"),
+            PinError::Backend(ref e) => write!(f, "PinError: Crypto backend error: {:?}", e),
         }
     }
 }
 
-impl StdErrorT for PinError {
-    fn description(&self) -> &str {
-        match *self {
-            PinError::PinIsTooShort => "PinError: pin is too short",
-            PinError::PinIsTooLong(_) => "PinError: pin is too long",
-            PinError::InvalidKeyLen => "PinError: hmac invalid key len",
-        }
+impl StdErrorT for PinError {}
+
+impl From<BackendError> for PinError {
+    fn from(e: BackendError) -> Self {
+        PinError::Backend(e)
     }
 }
