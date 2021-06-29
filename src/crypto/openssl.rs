@@ -150,7 +150,7 @@ pub(crate) fn encrypt<T: Key>(
     // TODO(baloo): This might trigger a panic if size is not big enough
     let mut cypher_text = vec![0; plain_text.len() * 2];
     cypher_text.resize(plain_text.len() * 2, 0);
-    // TODO(MS): Do we need an IV here?
+    // Spec says explicitly IV=0
     let iv = [0u8; 16];
     let mut encrypter = Crypter::new(cipher, Mode::Encrypt, key.key(), Some(&iv))?;
     encrypter.pad(false);
@@ -171,7 +171,7 @@ pub(crate) fn decrypt<T: Key>(
     // TODO(baloo): This might trigger a panic if size is not big enough
     let mut plain_text = vec![0; cypher_text.len() * 2];
     plain_text.resize(cypher_text.len() * 2, 0);
-    // TODO(MS): Do we need an IV here?
+    // Spec says explicitly IV=0
     let iv = [0u8; 16];
     let mut encrypter = Crypter::new(cipher, Mode::Decrypt, key.key(), Some(&iv))?;
     encrypter.pad(false);
