@@ -97,10 +97,9 @@ pub(crate) trait PinAuthCommand {
         let pin_auth = match calculate_pin_auth(dev, &client_data_hash, &self.pin()) {
             Ok(pin_auth) => pin_auth,
             Err(HIDError::Command(CommandError::StatusCode(StatusCode::PinInvalid, _))) => {
-                // Determine retries
+                // If the given PIN was wrong, determine no. of left retries
                 let cmd = GetRetries::new();
-                let retries = dev.send_cbor(&cmd).ok(); // If we got retries, wrap it in Some, otherwise ignore
-                                                        // Repackage error
+                let retries = dev.send_cbor(&cmd).ok(); // If we got retries, wrap it in Some, otherwise ignore err
                 return Err(HIDError::Command(CommandError::Pin(PinError::InvalidPin(
                     retries,
                 ))));
@@ -115,7 +114,6 @@ pub(crate) trait PinAuthCommand {
             }
             // TODO(MS): Add "PinRequired"
             // TODO(MS): Add "PinNotSet"
-            // TODO(MS): Add "PinBlocked"
             // TODO(MS): Add "PinPolicyViolated"
             Err(err) => {
                 return Err(err);
@@ -421,10 +419,7 @@ where
     let pin_auth = if info.options.client_pin == Some(true) {
         let pin = pin
             .as_ref()
-            .ok_or(HIDError::Command(CommandError::StatusCode(
-                StatusCode::PinRequired,
-                None,
-            )))?;
+            .ok_or(CommandError::Pin(PinError::PinRequired))?;
 
         let shared_secret = if let Some(shared_secret) = dev.get_shared_secret().cloned() {
             shared_secret

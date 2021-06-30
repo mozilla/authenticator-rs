@@ -451,6 +451,7 @@ impl Pin {
 
 #[derive(Debug)]
 pub enum PinError {
+    PinRequired,
     PinIsTooShort,
     PinIsTooLong(usize),
     InvalidKeyLen,
@@ -463,6 +464,7 @@ pub enum PinError {
 impl fmt::Display for PinError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
+            PinError::PinRequired => write!(f, "PinError: Pin required."),
             PinError::PinIsTooShort => write!(f, "PinError: pin is too short"),
             PinError::PinIsTooLong(len) => write!(f, "PinError: pin is too long ({})", len),
             PinError::InvalidKeyLen => write!(f, "PinError: invalid key len"),

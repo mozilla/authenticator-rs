@@ -363,7 +363,8 @@ impl RequestCtap2 for GetAssertion {
                 assertions.push(assertion.into());
 
                 let msg = GetNextAssertion;
-                for _ in (1..number_of_credentials).rev() {
+                // We already have one, so skipping 0
+                for _ in 1..number_of_credentials {
                     let new_cred = dev.send_cbor(&msg)?;
                     assertions.push(new_cred.into());
                 }
