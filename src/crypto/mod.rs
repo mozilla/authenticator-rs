@@ -276,3 +276,98 @@ impl fmt::Debug for ECDHSecret {
         )
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::{
+        decrypt, encrypt, parse_key, serialize_key, test_encapsulate, PublicKey, SignatureAlgorithm,
+    };
+    use crate::util::decode_hex;
+    use serde_bytes::ByteBuf;
+    use serde_cbor::de::from_slice;
+
+    #[test]
+    fn test_serialize_key() {
+        let key = PublicKey {
+            curve: SignatureAlgorithm::PS256,
+            bytes: vec![
+                0x04, 0xfc, 0x9e, 0xd3, 0x6f, 0x7c, 0x1a, 0xa9, 0x15, 0xce, 0x3e, 0xa1, 0x77, 0xf0,
+                0x75, 0x67, 0xf0, 0x7f, 0x16, 0xf9, 0x47, 0x9d, 0x95, 0xad, 0x8e, 0xd4, 0x97, 0x1d,
+                0x33, 0x05, 0xe3, 0x1a, 0x80, 0x50, 0xb7, 0x33, 0xaf, 0x8c, 0x0b, 0x0e, 0xe1, 0xda,
+                0x8d, 0xe0, 0xac, 0xf9, 0xd8, 0xe1, 0x32, 0x82, 0xf0, 0x63, 0xb7, 0xb3, 0x0d, 0x73,
+                0xd4, 0xd3, 0x2c, 0x9a, 0xad, 0x6d, 0xfa, 0x8b, 0x27,
+            ],
+        };
+
+        let (x, y) = serialize_key(&key).unwrap();
+
+        assert_eq!(
+            x,
+            [
+                0xfc, 0x9e, 0xd3, 0x6f, 0x7c, 0x1a, 0xa9, 0x15, 0xce, 0x3e, 0xa1, 0x77, 0xf0, 0x75,
+                0x67, 0xf0, 0x7f, 0x16, 0xf9, 0x47, 0x9d, 0x95, 0xad, 0x8e, 0xd4, 0x97, 0x1d, 0x33,
+                0x05, 0xe3, 0x1a, 0x80
+            ]
+        );
+        assert_eq!(
+            y,
+            [
+                0x50, 0xb7, 0x33, 0xaf, 0x8c, 0x0b, 0x0e, 0xe1, 0xda, 0x8d, 0xe0, 0xac, 0xf9, 0xd8,
+                0xe1, 0x32, 0x82, 0xf0, 0x63, 0xb7, 0xb3, 0x0d, 0x73, 0xd4, 0xd3, 0x2c, 0x9a, 0xad,
+                0x6d, 0xfa, 0x8b, 0x27
+            ]
+        );
+    }
+
+    #[test]
+    fn test_parse_es256_serialize_key() {
+        let key_data = decode_hex("A5010203262001215820A5FD5CE1B1C458C530A54FA61B31BF6B04BE8B97AFDE54DD8CBB69275A8A1BE1225820FA3A3231DD9DEED9D1897BE5A6228C59501E4BCD12975D3DFF730F01278EA61C");
+        let key: PublicKey = from_slice(&key_data).unwrap();
+        let (x, y) = serialize_key(&key).unwrap();
+        assert_eq!(key.curve, SignatureAlgorithm::ES256);
+        assert_eq!(
+            x,
+            ByteBuf::from(decode_hex(
+                "A5FD5CE1B1C458C530A54FA61B31BF6B04BE8B97AFDE54DD8CBB69275A8A1BE1"
+            ))
+        );
+        assert_eq!(
+            y,
+            ByteBuf::from(decode_hex(
+                "FA3A3231DD9DEED9D1897BE5A6228C59501E4BCD12975D3DFF730F01278EA61C"
+            ))
+        );
+    }
+
+    #[test]
+    #[allow(non_snake_case)]
+    fn test_shared_secret() {
+        let EC_PRIV =
+            decode_hex("7452E599FEE739D8A653F6A507343D12D382249108A651402520B72F24FE7684");
+        let EC_PUB_X =
+            decode_hex("44D78D7989B97E62EA993496C9EF6E8FD58B8B00715F9A89153DDD9C4657E47F");
+        let EC_PUB_Y =
+            decode_hex("EC802EE7D22BD4E100F12E48537EB4E7E96ED3A47A0A3BD5F5EEAB65001664F9");
+        let DEV_PUB_X =
+            decode_hex("0501D5BC78DA9252560A26CB08FCC60CBE0B6D3B8E1D1FCEE514FAC0AF675168");
+        let DEV_PUB_Y =
+            decode_hex("D551B3ED46F665731F95B4532939C25D91DB7EB844BD96D4ABD4083785F8DF47");
+        let SHARED = decode_hex("c42a039d548100dfba521e487debcbbb8b66bb7496f8b1862a7a395ed83e1a1c");
+        let TOKEN_ENC = decode_hex("7A9F98E31B77BE90F9C64D12E9635040");
+        let TOKEN = decode_hex("aff12c6dcfbf9df52f7a09211e8865cd");
+        //let PIN_HASH_ENC = decode_hex("afe8327ce416da8ee3d057589c2ce1a9");
+
+        let peer_key = parse_key(SignatureAlgorithm::PS256, &DEV_PUB_X, &DEV_PUB_Y).unwrap();
+        // TODO: This fails of course, as private key is generated on the fly.
+        //       Need some nice way to hand in private and public keypair for testing
+        let my_pub_key = parse_key(SignatureAlgorithm::PS256, &EC_PUB_X, &EC_PUB_Y).unwrap();
+        let shared_secret = test_encapsulate(&peer_key, my_pub_key.as_ref(), &EC_PRIV).unwrap();
+        assert_eq!(shared_secret.shared_secret, SHARED);
+
+        let token_enc = encrypt(&shared_secret, &TOKEN).unwrap();
+        assert_eq!(token_enc, TOKEN_ENC);
+
+        let token = decrypt(&shared_secret, &TOKEN_ENC).unwrap();
+        assert_eq!(token, TOKEN);
+    }
+}

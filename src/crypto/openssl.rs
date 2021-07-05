@@ -8,7 +8,7 @@ use openssl::ec::{EcGroup, EcKey, EcPoint, PointConversionForm};
 use openssl::error::ErrorStack;
 use openssl::hash::{hash, MessageDigest};
 use openssl::nid::Nid;
-use openssl::pkey::PKey;
+use openssl::pkey::{PKey, Private};
 use openssl::sign::Signer;
 use openssl::symm::{Cipher, Crypter, Mode};
 use serde_bytes::ByteBuf;
@@ -108,6 +108,14 @@ pub(crate) fn encapsulate<T: Key>(key: &T) -> Result<ECDHSecret> {
     let group = EcGroup::from_curve_name(curve_name)?;
     let my_key = EcKey::generate(&group)?;
 
+    encapsulate_helper(key, group, my_key)
+}
+
+pub(crate) fn encapsulate_helper<T: Key>(
+    key: &T,
+    group: EcGroup,
+    my_key: EcKey<Private>,
+) -> Result<ECDHSecret> {
     let mut ctx = BigNumContext::new()?;
     let my_public_key = PublicKey {
         curve: key.curve(),
@@ -137,6 +145,23 @@ pub(crate) fn encapsulate<T: Key>(key: &T) -> Result<ECDHSecret> {
         my: my_public_key,
         shared_secret: digest.as_ref().to_vec(),
     })
+}
+
+#[cfg(test)]
+pub(crate) fn test_encapsulate<T: Key>(
+    key: &T,
+    my_pub_key: &[u8],
+    my_priv_key: &[u8],
+) -> Result<ECDHSecret> {
+    let curve_name = to_openssl_name(key.curve());
+    let group = EcGroup::from_curve_name(curve_name)?;
+
+    let mut ctx = BigNumContext::new()?;
+    let my_pub_point = EcPoint::from_bytes(&group, &my_pub_key, &mut ctx)?;
+    let my_priv_bignum = BigNum::from_slice(my_priv_key)?;
+    let my_key = EcKey::from_private_components(&group, &my_priv_bignum, &my_pub_point)?;
+
+    encapsulate_helper(key, group, my_key)
 }
 
 /// Encrypts a plaintext to produce a ciphertext, which may be longer than the plaintext.
