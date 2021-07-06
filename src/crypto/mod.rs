@@ -282,6 +282,7 @@ mod test {
     use super::{
         decrypt, encrypt, parse_key, serialize_key, test_encapsulate, PublicKey, SignatureAlgorithm,
     };
+    use crate::ctap2::commands::client_pin::Pin;
     use crate::util::decode_hex;
     use serde_bytes::ByteBuf;
     use serde_cbor::de::from_slice;
@@ -321,6 +322,7 @@ mod test {
 
     #[test]
     fn test_parse_es256_serialize_key() {
+        // Test values taken from https://github.com/Yubico/python-fido2/blob/master/test/test_cose.py
         let key_data = decode_hex("A5010203262001215820A5FD5CE1B1C458C530A54FA61B31BF6B04BE8B97AFDE54DD8CBB69275A8A1BE1225820FA3A3231DD9DEED9D1897BE5A6228C59501E4BCD12975D3DFF730F01278EA61C");
         let key: PublicKey = from_slice(&key_data).unwrap();
         let (x, y) = serialize_key(&key).unwrap();
@@ -342,6 +344,7 @@ mod test {
     #[test]
     #[allow(non_snake_case)]
     fn test_shared_secret() {
+        // Test values taken from https://github.com/Yubico/python-fido2/blob/master/test/test_ctap2.py
         let EC_PRIV =
             decode_hex("7452E599FEE739D8A653F6A507343D12D382249108A651402520B72F24FE7684");
         let EC_PUB_X =
@@ -355,12 +358,12 @@ mod test {
         let SHARED = decode_hex("c42a039d548100dfba521e487debcbbb8b66bb7496f8b1862a7a395ed83e1a1c");
         let TOKEN_ENC = decode_hex("7A9F98E31B77BE90F9C64D12E9635040");
         let TOKEN = decode_hex("aff12c6dcfbf9df52f7a09211e8865cd");
-        //let PIN_HASH_ENC = decode_hex("afe8327ce416da8ee3d057589c2ce1a9");
+        let PIN_HASH_ENC = decode_hex("afe8327ce416da8ee3d057589c2ce1a9");
 
         let peer_key = parse_key(SignatureAlgorithm::PS256, &DEV_PUB_X, &DEV_PUB_Y).unwrap();
-        // TODO: This fails of course, as private key is generated on the fly.
-        //       Need some nice way to hand in private and public keypair for testing
         let my_pub_key = parse_key(SignatureAlgorithm::PS256, &EC_PUB_X, &EC_PUB_Y).unwrap();
+        // We are using `test_encapsulate()` here, because we need a way to hand in the private key
+        // which would be generated on the fly otherwise (ephemeral keys), to predict the outputs
         let shared_secret = test_encapsulate(&peer_key, my_pub_key.as_ref(), &EC_PRIV).unwrap();
         assert_eq!(shared_secret.shared_secret, SHARED);
 
@@ -369,5 +372,9 @@ mod test {
 
         let token = decrypt(&shared_secret, &TOKEN_ENC).unwrap();
         assert_eq!(token, TOKEN);
+
+        let pin = Pin::new("1234");
+        let pin_hash_enc = encrypt(&shared_secret, pin.for_pin_token().as_ref()).unwrap();
+        assert_eq!(pin_hash_enc, PIN_HASH_ENC);
     }
 }
