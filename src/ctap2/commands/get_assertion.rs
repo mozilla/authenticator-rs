@@ -41,8 +41,8 @@ pub struct GetAssertionOptions {
 impl Default for GetAssertionOptions {
     fn default() -> Self {
         Self {
-            user_presence: None,
-            user_validation: Some(true),
+            user_presence: Some(true),
+            user_validation: None,
         }
     }
 }

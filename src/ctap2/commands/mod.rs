@@ -90,6 +90,11 @@ pub(crate) trait PinAuthCommand {
     fn set_pin_auth(&mut self, pin_auth: Option<PinAuth>);
     fn client_data(&self) -> &CollectedClientData;
     fn determine_pin_auth<D: FidoDevice>(&mut self, dev: &mut D) -> Result<(), HIDError> {
+        if !dev.supports_ctap2() {
+            self.set_pin_auth(None);
+            return Ok(());
+        }
+
         let client_data_hash = self
             .client_data()
             .hash()
