@@ -25,6 +25,7 @@ where
     Self: RequestCtap1<Output = T>,
     Self: RequestCtap2<Output = T>,
 {
+    fn is_ctap2_request(&self) -> bool;
 }
 
 /// Retryable wraps an error type and may ask manager to retry sending a

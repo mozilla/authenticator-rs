@@ -10,7 +10,7 @@ use crate::ctap2::client_data::CollectedClientData;
 use crate::ctap2::commands::client_pin::{Pin, PinAuth};
 use crate::ctap2::commands::get_next_assertion::GetNextAssertion;
 use crate::ctap2::commands::make_credentials::UserValidation;
-use crate::ctap2::server::{PublicKeyCredentialDescriptor, RelyingParty, User};
+use crate::ctap2::server::{PublicKeyCredentialDescriptor, RelyingPartyWrapper, User};
 use crate::transport::errors::{ApduErrorStatus, HIDError};
 use crate::transport::FidoDevice;
 use crate::u2ftypes::{U2FAPDUHeader, U2FDevice};
@@ -65,9 +65,9 @@ impl UserValidation for GetAssertionOptions {
 
 #[derive(Debug, Clone)]
 pub struct GetAssertion {
-    client_data: CollectedClientData,
-    rp: RelyingParty,
-    allow_list: Vec<PublicKeyCredentialDescriptor>,
+    pub(crate) client_data: CollectedClientData,
+    pub(crate) rp: RelyingPartyWrapper,
+    pub(crate) allow_list: Vec<PublicKeyCredentialDescriptor>,
 
     // https://www.w3.org/TR/webauthn/#client-extension-input
     // The client extension input, which is a value that can be encoded in JSON,
@@ -75,17 +75,17 @@ pub struct GetAssertion {
     // create() call, while the CBOR authenticator extension input is passed
     // from the client to the authenticator for authenticator extensions during
     // the processing of these calls.
-    extensions: Map<String, json_value::Value>,
-    options: GetAssertionOptions,
-    pin: Option<Pin>,
-    pin_auth: Option<PinAuth>,
+    pub(crate) extensions: Map<String, json_value::Value>,
+    pub(crate) options: GetAssertionOptions,
+    pub(crate) pin: Option<Pin>,
+    pub(crate) pin_auth: Option<PinAuth>,
     //TODO(MS): pinProtocol
 }
 
 impl GetAssertion {
     pub fn new(
         client_data: CollectedClientData,
-        rp: RelyingParty,
+        rp: RelyingPartyWrapper,
         allow_list: Vec<PublicKeyCredentialDescriptor>,
         options: GetAssertionOptions,
         pin: Option<Pin>,
@@ -143,7 +143,16 @@ impl Serialize for GetAssertion {
         }
 
         let mut map = serializer.serialize_map(Some(map_len))?;
-        map.serialize_entry(&1, &self.rp.id)?;
+        match self.rp {
+            RelyingPartyWrapper::Data(ref d) => {
+                map.serialize_entry(&1, &d.id)?;
+            }
+            _ => {
+                return Err(S::Error::custom(
+                    "Can't serialize a RelyingParty::Hash for CTAP2",
+                ));
+            }
+        }
 
         let client_data_hash = self
             .client_data
@@ -167,7 +176,14 @@ impl Serialize for GetAssertion {
     }
 }
 
-impl Request<AssertionObject> for GetAssertion {}
+impl Request<AssertionObject> for GetAssertion {
+    fn is_ctap2_request(&self) -> bool {
+        match self.rp {
+            RelyingPartyWrapper::Data(_) => true,
+            RelyingPartyWrapper::Hash(_) => false,
+        }
+    }
+}
 
 impl RequestCtap1 for GetAssertion {
     type Output = AssertionObject;
@@ -184,7 +200,7 @@ impl RequestCtap1 for GetAssertion {
         struct GetAssertionCheck<'assertion> {
             key_handle: &'assertion [u8],
             client_data: &'assertion CollectedClientData,
-            rp: &'assertion RelyingParty,
+            rp: &'assertion RelyingPartyWrapper,
         }
 
         impl<'assertion> RequestCtap1 for GetAssertionCheck<'assertion> {
@@ -513,7 +529,9 @@ pub mod test {
     use crate::ctap2::client_data::{Challenge, CollectedClientData, TokenBinding, WebauthnType};
     use crate::ctap2::commands::get_assertion::AssertionObject;
     use crate::ctap2::commands::RequestCtap1;
-    use crate::ctap2::server::{PublicKeyCredentialDescriptor, RelyingParty, RpIdHash, Transport};
+    use crate::ctap2::server::{
+        PublicKeyCredentialDescriptor, RelyingParty, RelyingPartyWrapper, RpIdHash, Transport,
+    };
     use crate::transport::FidoDevice;
     use crate::u2fprotocol::tests::platform::TestDevice;
     use crate::u2ftypes::U2FDevice;
@@ -572,11 +590,11 @@ pub mod test {
                 cross_origin: None,
                 token_binding: Some(TokenBinding::Present(vec![0x00, 0x01, 0x02, 0x03])),
             },
-            RelyingParty {
+            RelyingPartyWrapper::Data(RelyingParty {
                 id: String::from("example.com"),
                 name: Some(String::from("Acme")),
                 icon: None,
-            },
+            }),
             vec![PublicKeyCredentialDescriptor {
                 id: vec![
                     0x3E, 0xBD, 0x89, 0xBF, 0x77, 0xEC, 0x50, 0x97, 0x55, 0xEE, 0x9C, 0x26, 0x35,

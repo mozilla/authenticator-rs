@@ -9,7 +9,9 @@ use crate::ctap2::client_data::{CollectedClientData, WebauthnType};
 use crate::ctap2::commands::get_assertion::{GetAssertion, GetAssertionOptions};
 use crate::ctap2::commands::make_credentials::MakeCredentials;
 use crate::ctap2::commands::make_credentials::MakeCredentialsOptions;
-use crate::ctap2::server::RelyingParty;
+use crate::ctap2::server::{
+    Alg, PublicKeyCredentialParameters, RelyingParty, RelyingPartyWrapper, RpIdHash,
+};
 use crate::errors::*;
 use crate::statecallback::StateCallback;
 use crate::statemachine::{StateMachine, StateMachineCtap2};
@@ -244,30 +246,6 @@ impl Manager {
                         // This must not block, otherwise we can't cancel.
                         sm.register(timeout, make_credentials, status, callback);
                     }
-                    Ok(QueueAction::RegisterCtap1 {
-                        timeout: _,
-                        ctap_args: _,
-                        status: _,
-                        callback: _,
-                    }) => {
-                        // TODO(MS): Repackage CTAP1 info into MakeCredentials.
-                        // Only until U2FManager is deleted, then this repackaging probably makes more sense
-                        // when creating QueueAction::RegisterCtap1.
-                        unimplemented!();
-                    }
-
-                    Ok(QueueAction::SignCtap1 {
-                        timeout: _,
-                        callback: _,
-                        flags: _,
-                        challenge: _,
-                        app_ids: _,
-                        key_handles: _,
-                        status: _,
-                    }) => {
-                        // This must not block, otherwise we can't cancel.
-                        // sm.sign(timeout, command, callback);
-                    }
 
                     Ok(QueueAction::SignCtap2 {
                         timeout,
@@ -284,9 +262,36 @@ impl Manager {
                         // polling thread before the old one has shut down.
                         sm.cancel();
                     }
+
+                    Ok(QueueAction::RegisterCtap1 {
+                        timeout: _,
+                        ctap_args: _,
+                        status: _,
+                        callback: _,
+                    }) => {
+                        // TODO(MS): Remove QueueAction::RegisterCtap1 once U2FManager is deleted.
+                        //           The repackaging from CTAP1 to CTAP2 happens in self.register()
+                        unimplemented!();
+                    }
+
+                    Ok(QueueAction::SignCtap1 {
+                        timeout: _,
+                        callback: _,
+                        flags: _,
+                        challenge: _,
+                        app_ids: _,
+                        key_handles: _,
+                        status: _,
+                    }) => {
+                        // TODO(MS): Remove QueueAction::SignCtap1 once U2FManager is deleted.
+                        //           The repackaging from CTAP1 to CTAP2 happens in self.sign()
+                        unimplemented!()
+                    }
+
                     Err(RecvTimeoutError::Disconnected) => {
                         break;
                     }
+
                     _ => { /* continue */ }
                 }
             }
@@ -313,35 +318,53 @@ impl AuthenticatorTransport for Manager {
         status: Sender<crate::StatusUpdate>,
         callback: StateCallback<crate::Result<crate::RegisterResult>>,
     ) -> Result<(), AuthenticatorError> {
-        let args = match ctap_args {
-            RegisterArgs::CTAP2(args) => args,
-            RegisterArgs::CTAP1(_) => {
-                // TODO(MS): Implement the backwards compatible ctap1 registration using MakeCredentials
-                unimplemented!();
+        let make_credentials = match ctap_args {
+            RegisterArgs::CTAP2(args) => {
+                let client_data = CollectedClientData {
+                    webauthn_type: WebauthnType::Create,
+                    challenge: args.challenge.into(),
+                    origin: args.origin,
+                    cross_origin: None,
+                    token_binding: None,
+                };
+
+                MakeCredentials::new(
+                    client_data,
+                    RelyingPartyWrapper::Data(args.relying_party),
+                    Some(args.user),
+                    args.pub_cred_params,
+                    args.exclude_list,
+                    MakeCredentialsOptions {
+                        resident_key: None,
+                        user_validation: None,
+                    },
+                    args.pin,
+                    // pin_auth will be filled in Statemachine, once we have a device
+                )
+            }
+            RegisterArgs::CTAP1(args) => {
+                let client_data = CollectedClientData {
+                    webauthn_type: WebauthnType::Create,
+                    challenge: args.challenge.into(),
+                    origin: String::new(),
+                    cross_origin: None,
+                    token_binding: None,
+                };
+
+                MakeCredentials::new(
+                    client_data,
+                    RelyingPartyWrapper::Hash(RpIdHash::from(&args.application)?),
+                    None,
+                    vec![PublicKeyCredentialParameters { alg: Alg::ES256 }],
+                    vec![], // TODO(MS): Implement excludeList. See spec.
+                    MakeCredentialsOptions {
+                        resident_key: None,
+                        user_validation: None,
+                    },
+                    None,
+                )
             }
         };
-
-        let client_data = CollectedClientData {
-            webauthn_type: WebauthnType::Create,
-            challenge: args.challenge.into(),
-            origin: args.origin,
-            cross_origin: None,
-            token_binding: None,
-        };
-
-        let make_credentials = MakeCredentials::new(
-            client_data,
-            args.relying_party,
-            Some(args.user),
-            args.pub_cred_params,
-            args.exclude_list,
-            MakeCredentialsOptions {
-                resident_key: None,
-                user_validation: None,
-            },
-            args.pin,
-            // pin_auth will be filled in Statemachine, once we have a device
-        );
 
         let action = QueueAction::RegisterCtap2 {
             timeout,
@@ -359,64 +382,114 @@ impl AuthenticatorTransport for Manager {
         status: Sender<crate::StatusUpdate>,
         callback: StateCallback<crate::Result<crate::SignResult>>,
     ) -> crate::Result<()> {
-        let args = match ctap_args {
-            SignArgs::CTAP1(_args) => {
-                // TODO(MS): Implement the backwards compatible ctap1 registration using MakeCredentials
-                unimplemented!();
+        match ctap_args {
+            SignArgs::CTAP1(args) => {
+                if args.challenge.len() != PARAMETER_SIZE {
+                    return Err(AuthenticatorError::InvalidRelyingPartyInput);
+                }
+
+                if args.app_ids.is_empty() {
+                    return Err(AuthenticatorError::InvalidRelyingPartyInput);
+                }
+
+                let client_data = CollectedClientData {
+                    webauthn_type: WebauthnType::Create,
+                    challenge: args.challenge.into(),
+                    origin: String::new(),
+                    cross_origin: None,
+                    token_binding: None,
+                };
+                let options = if args.flags == SignFlags::empty() {
+                    GetAssertionOptions::default()
+                } else {
+                    GetAssertionOptions {
+                        user_validation: Some(
+                            args.flags.contains(SignFlags::REQUIRE_USER_VERIFICATION),
+                        ),
+                        ..GetAssertionOptions::default()
+                    }
+                };
+
+                for app_id in &args.app_ids {
+                    if app_id.len() != PARAMETER_SIZE {
+                        return Err(AuthenticatorError::InvalidRelyingPartyInput);
+                    }
+                    for key_handle in &args.key_handles {
+                        if key_handle.credential.len() > 256 {
+                            return Err(AuthenticatorError::InvalidRelyingPartyInput);
+                        }
+                        let rp = RelyingPartyWrapper::Hash(RpIdHash::from(&app_id)?);
+
+                        let allow_list = vec![key_handle.into()];
+
+                        let get_assertion =
+                            GetAssertion::new(client_data.clone(), rp, allow_list, options, None);
+
+                        let action = QueueAction::SignCtap2 {
+                            timeout,
+                            get_assertion,
+                            status: status.clone(),
+                            callback: callback.clone(),
+                        };
+                        self.tx.send(action)?;
+                    }
+                }
             }
-            SignArgs::CTAP2(args) => args,
-        };
 
-        let client_data = CollectedClientData {
-            webauthn_type: WebauthnType::Create,
-            challenge: args.challenge.into(),
-            origin: args.origin,
-            cross_origin: None,
-            token_binding: None,
-        };
-        // TODO(baloo): This block of code and commend was previously in src/statemanchine.rs
-        //              I moved this logic here, and I'm not quite sure about what we
-        //              should do, have to ask jcj
-        //
-        // We currently support none of the authenticator selection
-        // criteria because we can't ask tokens whether they do support
-        // those features. If flags are set, ignore all tokens for now.
-        //
-        // Technically, this is a ConstraintError because we shouldn't talk
-        // to this authenticator in the first place. But the result is the
-        // same anyway.
-        //if !flags.is_empty() {
-        //    return;
-        //}
-        let options = if args.flags == SignFlags::empty() {
-            GetAssertionOptions::default()
-        } else {
-            GetAssertionOptions {
-                user_validation: Some(args.flags.contains(SignFlags::REQUIRE_USER_VERIFICATION)),
-                ..GetAssertionOptions::default()
+            SignArgs::CTAP2(args) => {
+                let client_data = CollectedClientData {
+                    webauthn_type: WebauthnType::Create,
+                    challenge: args.challenge.into(),
+                    origin: args.origin,
+                    cross_origin: None,
+                    token_binding: None,
+                };
+                // TODO(baloo): This block of code and commend was previously in src/statemanchine.rs
+                //              I moved this logic here, and I'm not quite sure about what we
+                //              should do, have to ask jcj
+                //
+                // We currently support none of the authenticator selection
+                // criteria because we can't ask tokens whether they do support
+                // those features. If flags are set, ignore all tokens for now.
+                //
+                // Technically, this is a ConstraintError because we shouldn't talk
+                // to this authenticator in the first place. But the result is the
+                // same anyway.
+                //if !flags.is_empty() {
+                //    return;
+                //}
+                let options = if args.flags == SignFlags::empty() {
+                    GetAssertionOptions::default()
+                } else {
+                    GetAssertionOptions {
+                        user_validation: Some(
+                            args.flags.contains(SignFlags::REQUIRE_USER_VERIFICATION),
+                        ),
+                        ..GetAssertionOptions::default()
+                    }
+                };
+
+                let get_assertion = GetAssertion::new(
+                    client_data.clone(),
+                    RelyingPartyWrapper::Data(RelyingParty {
+                        id: args.relying_party_id,
+                        name: None,
+                        icon: None,
+                    }),
+                    args.allow_list,
+                    options,
+                    args.pin,
+                );
+
+                let action = QueueAction::SignCtap2 {
+                    timeout,
+                    get_assertion,
+                    status,
+                    callback,
+                };
+                self.tx.send(action)?;
             }
         };
-
-        let get_assertion = GetAssertion::new(
-            client_data.clone(),
-            RelyingParty {
-                id: args.relying_party_id,
-                name: None,
-                icon: None,
-            },
-            args.allow_list,
-            options,
-            args.pin,
-        );
-
-        let action = QueueAction::SignCtap2 {
-            timeout,
-            get_assertion,
-            status,
-            callback,
-        };
-        self.tx.send(action)?;
-
         Ok(())
     }
 

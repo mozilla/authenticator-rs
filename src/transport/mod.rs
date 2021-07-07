@@ -67,7 +67,7 @@ where
             return Err(HIDError::DeviceNotInitialized);
         }
 
-        if self.supports_ctap2() {
+        if self.supports_ctap2() && msg.is_ctap2_request() {
             self.send_cbor(msg)
         } else {
             self.send_apdu(msg)

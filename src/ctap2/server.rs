@@ -1,18 +1,13 @@
-use serde_bytes::ByteBuf;
-#[cfg(test)]
-use serde_cbor::{error, ser};
-use sha2::{Digest, Sha256};
-use std::fmt;
-
+use crate::{errors::AuthenticatorError, AuthenticatorTransports, KeyHandle};
 use serde::de::MapAccess;
 use serde::{
     de::{Error as SerdeError, Visitor},
     ser::{Error as SerError, SerializeMap},
     Deserialize, Deserializer, Serialize, Serializer,
 };
-
-use crate::AuthenticatorTransports;
-use crate::KeyHandle;
+use serde_bytes::ByteBuf;
+use sha2::{Digest, Sha256};
+use std::fmt;
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct RpIdHash(pub [u8; 32]);
@@ -31,10 +26,10 @@ impl AsRef<[u8]> for RpIdHash {
 }
 
 impl RpIdHash {
-    pub fn from(src: &[u8]) -> Result<RpIdHash, ()> {
+    pub fn from(src: &[u8]) -> Result<RpIdHash, AuthenticatorError> {
         let mut payload = [0u8; 32];
         if src.len() != payload.len() {
-            Err(())
+            Err(AuthenticatorError::InvalidRelyingPartyInput)
         } else {
             payload.copy_from_slice(src);
             Ok(RpIdHash(payload))
@@ -56,20 +51,29 @@ pub struct RelyingParty {
     pub icon: Option<String>,
 }
 
-impl RelyingParty {
-    #[cfg(test)]
-    pub fn to_ctap2(&self) -> Result<Vec<u8>, error::Error> {
-        ser::to_vec(self)
-    }
+// Note: This enum is provided to make old CTAP1/U2F API work. This should be deprecated at some point
+#[derive(Debug, Clone)]
+pub enum RelyingPartyWrapper {
+    Data(RelyingParty),
+    // CTAP1 hash can be derived from full object, see RelyingParty::hash below,
+    // but very old backends might still provide application IDs.
+    Hash(RpIdHash),
+}
 
+impl RelyingPartyWrapper {
     pub fn hash(&self) -> RpIdHash {
-        let mut hasher = Sha256::new();
-        hasher.input(&self.id);
+        match *self {
+            RelyingPartyWrapper::Data(ref d) => {
+                let mut hasher = Sha256::new();
+                hasher.input(&d.id);
 
-        let mut output = [0u8; 32];
-        output.copy_from_slice(&hasher.result().as_slice());
+                let mut output = [0u8; 32];
+                output.copy_from_slice(&hasher.result().as_slice());
 
-        RpIdHash(output)
+                RpIdHash(output)
+            }
+            RelyingPartyWrapper::Hash(ref d) => d.clone(),
+        }
     }
 }
 
@@ -83,13 +87,6 @@ pub struct User {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none", rename = "displayName")]
     pub display_name: Option<String>,
-}
-
-#[cfg(test)]
-impl User {
-    pub fn to_ctap2(&self) -> Result<Vec<u8>, error::Error> {
-        ser::to_vec(self)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -366,8 +363,7 @@ mod test {
             icon: None,
         };
 
-        let payload = rp.to_ctap2();
-        let payload = payload.unwrap();
+        let payload = ser::to_vec(&rp).unwrap();
         assert_eq!(
             &payload,
             &[
@@ -393,9 +389,8 @@ mod test {
             display_name: Some(String::from("John P. Smith")),
         };
 
-        let payload = user.to_ctap2();
+        let payload = ser::to_vec(&user).unwrap();
         println!("payload = {:?}", payload);
-        let payload = payload.unwrap();
         assert_eq!(
             payload,
             vec![
@@ -446,9 +441,8 @@ mod test {
             display_name: None,
         };
 
-        let payload = user.to_ctap2();
+        let payload = ser::to_vec(&user).unwrap();
         println!("payload = {:?}", payload);
-        let payload = payload.unwrap();
         assert_eq!(
             payload,
             vec![

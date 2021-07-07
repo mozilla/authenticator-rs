@@ -4,8 +4,8 @@
 
 use crate::consts::PARAMETER_SIZE;
 use crate::ctap2::commands::get_assertion::GetAssertion;
-use crate::ctap2::commands::make_credentials::MakeCredentials;
-use crate::ctap2::commands::{CommandError, PinAuthCommand, StatusCode};
+use crate::ctap2::commands::make_credentials::{MakeCredentials, MakeCredentialsResult};
+use crate::ctap2::commands::{CommandError, PinAuthCommand, Request, StatusCode};
 use crate::errors::{self, AuthenticatorError};
 use crate::statecallback::StateCallback;
 use crate::transport::platform::{device::Device, transaction::Transaction};
@@ -366,16 +366,22 @@ impl StateMachineCtap2 {
             debug!("{:?}", makecred);
             debug!("------------------------------------------------------------------");
             let resp = dev.send_msg(&makecred);
+            if resp.is_ok() {
+                send_status(
+                    &status_mutex,
+                    crate::StatusUpdate::Success {
+                        dev_info: dev.get_device_info(),
+                    },
+                );
+            }
             match resp {
-                Ok((attestation, client_data)) => {
-                    send_status(
-                        &status_mutex,
-                        crate::StatusUpdate::Success {
-                            dev_info: dev.get_device_info(),
-                        },
-                    );
+                Ok(MakeCredentialsResult::CTAP2(attestation, client_data)) => {
                     callback.call(Ok(RegisterResult::CTAP2(attestation, client_data)))
                 }
+                Ok(MakeCredentialsResult::CTAP1(data)) => {
+                    callback.call(Ok(RegisterResult::CTAP1(data, dev.get_device_info())))
+                }
+
                 Err(HIDError::DeviceNotSupported) | Err(HIDError::UnsupportedCommand) => {}
                 Err(HIDError::Command(CommandError::StatusCode(StatusCode::ChannelBusy, _))) => {}
                 Err(e) => {
@@ -444,7 +450,21 @@ impl StateMachineCtap2 {
 
             let resp = dev.send_msg(&getassertion);
             match resp {
-                Ok(resp) => callback.call(Ok(SignResult::CTAP2(resp))),
+                Ok(resp) => {
+                    if getassertion.is_ctap2_request() {
+                        callback.call(Ok(SignResult::CTAP2(resp)))
+                    } else {
+                        let app_id = getassertion.rp.hash().as_ref().to_vec();
+                        let key_handle = getassertion.allow_list[0].id.clone();
+
+                        callback.call(Ok(SignResult::CTAP1(
+                            app_id,
+                            key_handle,
+                            resp.u2f_sign_data(),
+                            dev.get_device_info(),
+                        )))
+                    }
+                }
                 // TODO(baloo): if key_handle is invalid for this device, it
                 //              should reply something like:
                 //              CTAP2_ERR_INVALID_CREDENTIAL
