@@ -3,14 +3,22 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use crate::authenticatorservice::{
-    AuthenticatorService, CtapVersion, RegisterArgsCtap1, SignArgsCtap1,
+    AuthenticatorService, CtapVersion, RegisterArgsCtap1, RegisterArgsCtap2, SignArgsCtap1,
+    SignArgsCtap2,
+};
+use crate::ctap2::attestation::AttestationStatement;
+use crate::ctap2::server::{
+    PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, User,
 };
 use crate::errors;
 use crate::statecallback::StateCallback;
+use crate::Pin;
 use crate::{RegisterResult, SignResult};
 use libc::size_t;
 use rand::{thread_rng, Rng};
 use std::collections::HashMap;
+use std::ffi::CStr;
+use std::os::raw::c_char;
 use std::sync::mpsc::channel;
 use std::thread;
 use std::{ptr, slice};
@@ -33,6 +41,10 @@ const RESBUF_ID_DEVICE_NAME: u8 = 5;
 const RESBUF_ID_FIRMWARE_MAJOR: u8 = 6;
 const RESBUF_ID_FIRMWARE_MINOR: u8 = 7;
 const RESBUF_ID_FIRMWARE_BUILD: u8 = 8;
+const RESBUF_ID_PUBLIC_KEY: u8 = 9;
+const RESBUF_ID_ATTESTATION_STATEMENT_SIGNATURE: u8 = 10;
+const RESBUF_ID_ATTESTATION_STATEMENT_CERTIFICATE: u8 = 11;
+const RESBUF_ID_ATTESTATION_STATEMENT_UNPARSED: u8 = 12;
 
 // Generates a new 64-bit transaction id with collision probability 2^-32.
 fn new_tid() -> u64 {
@@ -382,5 +394,305 @@ pub unsafe extern "C" fn rust_u2f_mgr_cancel(mgr: *mut AuthenticatorService) {
     if !mgr.is_null() {
         // Ignore return value.
         let _ = (*mgr).cancel();
+    }
+}
+
+/// # Safety
+///
+/// The handle returned by this method must be freed by the caller.
+/// The returned handle can be used with all rust_u2f_mgr_*-functions as well
+/// but uses CTAP2 as the underlying protocol. CTAP1 requests will be repackaged
+/// into CTAP2 (if the device supports it)
+#[no_mangle]
+pub extern "C" fn rust_ctap2_mgr_new() -> *mut AuthenticatorService {
+    if let Ok(mut mgr) = AuthenticatorService::new(CtapVersion::CTAP2) {
+        mgr.add_detected_transports();
+        Box::into_raw(Box::new(mgr))
+    } else {
+        ptr::null_mut()
+    }
+}
+
+#[repr(C)]
+pub struct PublicKeyCredentialUserEntity {
+    pub id_ptr: *const u8,
+    pub id_len: usize,
+    pub name: *const c_char,
+    pub display_name: *const c_char, //Option<String>,
+}
+
+/// # Safety
+///
+/// This method should not be called on AuthenticatorService handles after
+/// they've been freed
+/// Note: `KeyHandles` are used as `PublicKeyCredentialDescriptor`s for the exclude_list
+///       to keep the API smaller, as they are essentially the same thing.
+///       `PublicKeyCredentialParameters` in pub_cred_params are represented as i32 with
+///       their COSE value (see: https://www.iana.org/assignments/cose/cose.xhtml#table-algorithms)
+#[no_mangle]
+pub unsafe extern "C" fn rust_ctap2_mgr_register(
+    mgr: *mut AuthenticatorService,
+    timeout: u64,
+    callback: U2FCallback,
+    challenge_ptr: *const u8,
+    challenge_len: usize,
+    relying_party_id: *const c_char,
+    origin_ptr: *const c_char,
+    user: *const PublicKeyCredentialUserEntity,
+    pub_cred_params_ptr: *const i32,
+    pub_cred_params_len: usize,
+    exclude_list: *const U2FKeyHandles,
+    pin_ptr: *const c_char,
+) -> u64 {
+    if mgr.is_null() {
+        return 0;
+    }
+
+    // Check buffers.
+    if challenge_ptr.is_null()
+        || origin_ptr.is_null()
+        || relying_party_id.is_null()
+        || user.is_null()
+        || (*user).id_ptr.is_null()
+        || (*user).name.is_null()
+        || exclude_list.is_null()
+    {
+        return 0;
+    }
+
+    let pub_cred_params = slice::from_raw_parts(pub_cred_params_ptr, pub_cred_params_len)
+        .iter()
+        .map(|x| PublicKeyCredentialParameters::from(*x))
+        .collect();
+    let pin = if pin_ptr.is_null() {
+        None
+    } else {
+        Some(Pin::new(&CStr::from_ptr(pin_ptr).to_string_lossy()))
+    };
+    let user = User {
+        id: from_raw((*user).id_ptr, (*user).id_len),
+        name: CStr::from_ptr((*user).name).to_string_lossy().to_string(), // TODO(MS): Use to_str() and error out on failure?
+        display_name: None,
+        icon: None,
+    };
+    let rp = RelyingParty {
+        id: CStr::from_ptr(relying_party_id)
+            .to_string_lossy()
+            .to_string(),
+        name: None,
+        icon: None,
+    };
+    let origin = CStr::from_ptr(origin_ptr).to_string_lossy().to_string();
+    let challenge = from_raw(challenge_ptr, challenge_len);
+    let exclude_list = (*exclude_list)
+        .clone()
+        .iter()
+        .map(|x| PublicKeyCredentialDescriptor::from(x))
+        .collect();
+
+    let (status_tx, status_rx) = channel::<crate::StatusUpdate>();
+    thread::spawn(move || loop {
+        // Issue https://github.com/mozilla/authenticator-rs/issues/132 will
+        // plumb the status channel through to the actual C API signatures
+        match status_rx.recv() {
+            Ok(_) => {}
+            Err(_recv_error) => return,
+        }
+    });
+
+    let tid = new_tid();
+
+    let state_callback = StateCallback::<crate::Result<RegisterResult>>::new(Box::new(move |rv| {
+        let result = match rv {
+            Ok(RegisterResult::CTAP1(_, _)) => U2FResult::Error(
+                errors::AuthenticatorError::VersionMismatch("rust_u2f_mgr_sign", 2),
+            ),
+            Ok(RegisterResult::CTAP2(attestation_object, _client_data)) => {
+                let mut bufs = HashMap::new();
+                if let Some(cred_data) = attestation_object.auth_data.credential_data {
+                    bufs.insert(
+                        RESBUF_ID_PUBLIC_KEY,
+                        cred_data.credential_public_key.clone(),
+                    );
+
+                    bufs.insert(RESBUF_ID_KEYHANDLE, cred_data.credential_id.clone());
+                }
+                match attestation_object.att_statement {
+                    AttestationStatement::None => { /* TODO(MS): What to do here?*/ }
+                    AttestationStatement::Packed(att) => {
+                        bufs.insert(
+                            RESBUF_ID_ATTESTATION_STATEMENT_SIGNATURE,
+                            att.sig.as_ref().to_vec(),
+                        );
+                        bufs.insert(
+                            RESBUF_ID_ATTESTATION_STATEMENT_CERTIFICATE,
+                            att.attestation_cert
+                                .iter()
+                                .map(|x| x.0.clone())
+                                .flatten()
+                                .collect::<Vec<u8>>(), // TODO(MS): FF can only handle cert-chain of length 1
+                        );
+                    }
+                    AttestationStatement::FidoU2F(att) => {
+                        bufs.insert(
+                            RESBUF_ID_ATTESTATION_STATEMENT_SIGNATURE,
+                            att.sig.as_ref().to_vec(),
+                        );
+                        bufs.insert(
+                            RESBUF_ID_ATTESTATION_STATEMENT_CERTIFICATE,
+                            att.attestation_cert
+                                .iter()
+                                .map(|x| x.0.clone())
+                                .flatten()
+                                .collect::<Vec<u8>>(), // TODO(MS): FF can only handle cert-chain of length 1
+                        );
+                    }
+                    AttestationStatement::Unparsed(att) => {
+                        bufs.insert(RESBUF_ID_ATTESTATION_STATEMENT_UNPARSED, att.clone());
+                    }
+                }
+
+                U2FResult::Success(bufs)
+            }
+            Err(e) => U2FResult::Error(e),
+        };
+
+        callback(tid, Box::into_raw(Box::new(result)));
+    }));
+
+    let ctap_args = RegisterArgsCtap2 {
+        challenge,
+        relying_party: rp,
+        origin,
+        user,
+        pub_cred_params,
+        exclude_list,
+        pin,
+    };
+
+    let res = (*mgr).register(timeout, ctap_args.into(), status_tx, state_callback);
+
+    if res.is_ok() {
+        tid
+    } else {
+        0
+    }
+}
+
+/// # Safety
+///
+/// This method should not be called on AuthenticatorService handles after
+/// they've been freed
+/// Note: `KeyHandles` are used as `PublicKeyCredentialDescriptor`s for the exclude_list
+///       to keep the API smaller, as they are essentially the same thing.
+///       `PublicKeyCredentialParameters` in pub_cred_params are represented as i32 with
+///       their COSE value (see: https://www.iana.org/assignments/cose/cose.xhtml#table-algorithms)
+#[no_mangle]
+pub unsafe extern "C" fn rust_ctap2_mgr_sign(
+    mgr: *mut AuthenticatorService,
+    flags: u64,
+    timeout: u64,
+    callback: U2FCallback,
+    challenge_ptr: *const u8,
+    challenge_len: usize,
+    relying_party_id: *const c_char,
+    origin_ptr: *const c_char,
+    user: *const PublicKeyCredentialUserEntity,
+    allow_list: *const U2FKeyHandles,
+    pin_ptr: *const c_char,
+) -> u64 {
+    if mgr.is_null() {
+        return 0;
+    }
+
+    // Check buffers.
+    if challenge_ptr.is_null()
+        || origin_ptr.is_null()
+        || relying_party_id.is_null()
+        || user.is_null()
+        || (*user).id_ptr.is_null()
+        || (*user).name.is_null()
+        || allow_list.is_null()
+    {
+        return 0;
+    }
+
+    let flags = crate::SignFlags::from_bits_truncate(flags);
+    let pin = if pin_ptr.is_null() {
+        None
+    } else {
+        Some(Pin::new(&CStr::from_ptr(pin_ptr).to_string_lossy()))
+    };
+    let user = User {
+        id: from_raw((*user).id_ptr, (*user).id_len),
+        name: CStr::from_ptr((*user).name).to_string_lossy().to_string(), // TODO(MS): Use to_str() and error out on failure?
+        display_name: None,
+        icon: None,
+    };
+    let rpid = CStr::from_ptr(relying_party_id)
+        .to_string_lossy()
+        .to_string();
+    let origin = CStr::from_ptr(origin_ptr).to_string_lossy().to_string();
+    let challenge = from_raw(challenge_ptr, challenge_len);
+    let allow_list = (*allow_list)
+        .clone()
+        .iter()
+        .map(|x| PublicKeyCredentialDescriptor::from(x))
+        .collect();
+
+    let (status_tx, status_rx) = channel::<crate::StatusUpdate>();
+    thread::spawn(move || loop {
+        // Issue https://github.com/mozilla/authenticator-rs/issues/132 will
+        // plumb the status channel through to the actual C API signatures
+        match status_rx.recv() {
+            Ok(_) => {}
+            Err(_recv_error) => return,
+        }
+    });
+
+    let tid = new_tid();
+    let state_callback = StateCallback::<crate::Result<SignResult>>::new(Box::new(move |rv| {
+        let result = match rv {
+            Ok(SignResult::CTAP1(..)) => U2FResult::Error(
+                errors::AuthenticatorError::VersionMismatch("rust_u2f_mgr_sign", 1),
+            ),
+            Ok(SignResult::CTAP2(assertion_object)) => {
+                let mut bufs = HashMap::new();
+                // bufs.insert(RESBUF_ID_KEYHANDLE, key_handle);
+                bufs.insert(RESBUF_ID_SIGNATURE, assertion_object.u2f_sign_data());
+                // bufs.insert(RESBUF_ID_APPID, assertion_object.0.first().unwrap());
+                // bufs.insert(RESBUF_ID_VENDOR_NAME, dev_info.vendor_name);
+                // bufs.insert(RESBUF_ID_DEVICE_NAME, dev_info.device_name);
+                // bufs.insert(RESBUF_ID_FIRMWARE_MAJOR, vec![dev_info.version_major]);
+                // bufs.insert(RESBUF_ID_FIRMWARE_MINOR, vec![dev_info.version_minor]);
+                // bufs.insert(RESBUF_ID_FIRMWARE_BUILD, vec![dev_info.version_build]);
+                U2FResult::Success(bufs)
+            }
+            Err(e) => U2FResult::Error(e),
+        };
+
+        callback(tid, Box::into_raw(Box::new(result)));
+    }));
+
+    let res = (*mgr).sign(
+        timeout,
+        SignArgsCtap2 {
+            flags,
+            challenge,
+            origin,
+            user,
+            relying_party_id: rpid,
+            allow_list,
+            pin,
+        }
+        .into(),
+        status_tx,
+        state_callback,
+    );
+
+    if res.is_ok() {
+        tid
+    } else {
+        0
     }
 }
