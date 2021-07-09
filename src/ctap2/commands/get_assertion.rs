@@ -330,7 +330,7 @@ impl RequestCtap1 for GetAssertion {
         let assertion = Assertion {
             credentials: None,
             signature,
-            public_key: None,
+            user: None,
             auth_data,
         };
 
@@ -400,10 +400,10 @@ impl RequestCtap2 for GetAssertion {
 
 #[derive(Debug, PartialEq)]
 pub struct Assertion {
-    credentials: Option<serde_cbor::Value>,
+    credentials: Option<PublicKeyCredentialDescriptor>, // Was optional in CTAP2.0, is mandatory in CTAP2.1
     auth_data: AuthenticatorData,
     signature: Vec<u8>,
-    public_key: Option<User>,
+    user: Option<User>,
 }
 
 impl From<GetAssertionResponse> for Assertion {
@@ -412,14 +412,14 @@ impl From<GetAssertionResponse> for Assertion {
             credentials: r.credentials,
             auth_data: r.auth_data,
             signature: r.signature,
-            public_key: r.public_key,
+            user: r.user,
         }
     }
 }
 
 // TODO(baloo): Move this to src/ctap2/mod.rs?
 #[derive(Debug, PartialEq)]
-pub struct AssertionObject(Vec<Assertion>);
+pub struct AssertionObject(pub Vec<Assertion>);
 
 impl AssertionObject {
     pub fn u2f_sign_data(&self) -> Vec<u8> {
@@ -432,10 +432,10 @@ impl AssertionObject {
 }
 
 pub(crate) struct GetAssertionResponse {
-    credentials: Option<serde_cbor::Value>,
+    credentials: Option<PublicKeyCredentialDescriptor>,
     auth_data: AuthenticatorData,
     signature: Vec<u8>,
-    public_key: Option<User>,
+    user: Option<User>,
     number_of_credentials: Option<usize>,
 }
 
@@ -460,7 +460,7 @@ impl<'de> Deserialize<'de> for GetAssertionResponse {
                 let mut credentials = None;
                 let mut auth_data = None;
                 let mut signature = None;
-                let mut public_key = None;
+                let mut user = None;
                 let mut number_of_credentials = None;
 
                 while let Some(key) = map.next_key()? {
@@ -486,10 +486,10 @@ impl<'de> Deserialize<'de> for GetAssertionResponse {
                             signature = Some(signature_bytes);
                         }
                         4 => {
-                            if public_key.is_some() {
-                                return Err(M::Error::duplicate_field("public_key"));
+                            if user.is_some() {
+                                return Err(M::Error::duplicate_field("user"));
                             }
-                            public_key = map.next_value()?;
+                            user = map.next_value()?;
                         }
                         5 => {
                             if number_of_credentials.is_some() {
@@ -508,7 +508,7 @@ impl<'de> Deserialize<'de> for GetAssertionResponse {
                     credentials,
                     auth_data,
                     signature,
-                    public_key,
+                    user,
                     number_of_credentials,
                 })
             }
@@ -658,7 +658,7 @@ pub mod test {
                 0x87, 0x7F, 0x85, 0x78, 0x2D, 0xE1, 0x00, 0x86, 0xA7, 0x83, 0xD1, 0xE7, 0xDF, 0x4E,
                 0x36, 0x39, 0xE7, 0x71, 0xF5, 0xF6, 0xAF, 0xA3, 0x5A, 0xAD, 0x53, 0x73, 0x85, 0x8E,
             ],
-            public_key: None,
+            user: None,
             auth_data: expected_auth_data,
         };
 

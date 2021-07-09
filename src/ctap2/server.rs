@@ -148,6 +148,17 @@ pub struct PublicKeyCredentialParameters {
     pub alg: Alg,
 }
 
+impl From<i32> for PublicKeyCredentialParameters {
+    fn from(arg: i32) -> Self {
+        let alg = match arg {
+            -7 => Alg::ES256,
+            -257 => Alg::RS256,
+            v => Alg::Unknown(v as i64),
+        };
+        PublicKeyCredentialParameters { alg }
+    }
+}
+
 impl Serialize for PublicKeyCredentialParameters {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -245,7 +256,7 @@ impl From<AuthenticatorTransports> for Vec<Transport> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicKeyCredentialDescriptor {
     pub id: Vec<u8>,
     pub transports: Vec<Transport>,
@@ -268,7 +279,6 @@ impl Serialize for PublicKeyCredentialDescriptor {
     }
 }
 
-#[cfg(test)]
 impl<'de> Deserialize<'de> for PublicKeyCredentialDescriptor {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -290,28 +300,25 @@ impl<'de> Deserialize<'de> for PublicKeyCredentialDescriptor {
                 let mut found_type = false;
                 let mut id = None;
                 let mut transports = None;
-
                 while let Some(key) = map.next_key()? {
                     match key {
                         "id" => {
                             if id.is_some() {
                                 return Err(SerdeError::duplicate_field("id"));
                             }
-
-                            id = Some(map.next_value()?);
+                            let id_bytes: ByteBuf = map.next_value()?;
+                            id = Some(id_bytes.into_vec());
                         }
                         "transports" => {
                             if transports.is_some() {
                                 return Err(SerdeError::duplicate_field("transports"));
                             }
-
                             transports = Some(map.next_value()?);
                         }
                         "type" => {
                             if found_type {
                                 return Err(SerdeError::duplicate_field("type"));
                             }
-
                             let v: &str = map.next_value()?;
                             if v != "public-key" {
                                 return Err(SerdeError::custom(format!("invalid value: {}", v)));
@@ -329,7 +336,7 @@ impl<'de> Deserialize<'de> for PublicKeyCredentialDescriptor {
                 }
 
                 let id = id.ok_or(SerdeError::missing_field("id"))?;
-                let transports = transports.ok_or(SerdeError::missing_field("transports"))?;
+                let transports = transports.unwrap_or(Vec::new());
 
                 Ok(PublicKeyCredentialDescriptor { id, transports })
             }
