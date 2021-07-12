@@ -23,8 +23,7 @@ webdriver = ["bytes", "warp", "tokio"]
 # Default: NSS
 crypto_ring = ["ring"]
 crypto_openssl = ["openssl", "openssl-sys"]
-crypto_nss = ["rc_crypto"]
-#crypto_nss = ["nss", "nss_sys", "rc_crypto"]
+crypto_nss = ["nss", "nss_sys", "rc_crypto"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libudev = "^0.2"
@@ -69,11 +68,9 @@ cfg-if = "1.0"
 ring = { version = "0.16", optional = true }
 openssl-sys = { version = "0.9", optional = true}
 openssl = { version = "0.10", optional = true}
-rc_crypto = { git = "https://github.com/msirringhaus/rc_crypto_test", branch="main", version = "0.1.0", optional = true, feature="gecko"}
-#rc_crypto = { path = "../rc_crypto", version = "0.1.0", optional = true, feature="gecko"}
-#rc_crypto = { path = "../application-services/components/support/rc_crypto", version = "0.1.0", optional = true, feature="gecko"}
-#nss = { path = "../application-services/components/support/rc_crypto/nss", version = "0.1.0", optional = true, feature="gecko"}
-#nss_sys = { path = "../application-services/components/support/rc_crypto/nss/nss_sys", version = "0.1.0", optional = true, feature="gecko"}
+rc_crypto = { git = "https://github.com/mozilla/application-services", rev="8a576fbe79199fa8664f64285524017f74ebcc5f", optional = true, feature="gecko"}
+nss = { git = "https://github.com/mozilla/application-services", rev="8a576fbe79199fa8664f64285524017f74ebcc5f", optional = true, feature="gecko"}
+nss_sys = { git = "https://github.com/mozilla/application-services", rev="8a576fbe79199fa8664f64285524017f74ebcc5f", optional = true, feature="gecko"}
 
 [dev-dependencies]
 base64 = "^0.10"
