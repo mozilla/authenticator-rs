@@ -1,6 +1,6 @@
 use super::{ECDHSecret, Key, PublicKey, SignatureAlgorithm};
-use nss::aes::{common_crypt, Operation};
-use nss_sys;
+use rc_crypto::nss::aes::{common_crypt, Operation};
+use rc_crypto::nss::nss_sys;
 use rc_crypto::agreement::{
     Algorithm, Curve, EcKey, Ephemeral, KeyPair, PrivateKey, UnparsedPublicKey, ECDH_P256,
     ECDH_P384,
