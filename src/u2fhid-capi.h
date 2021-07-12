@@ -45,6 +45,7 @@ const uint8_t U2F_ERROR_NOT_ALLOWED = 5;
 //   register() and sign() callbacks. They can be null on failure.
 
 // The `rust_u2f_mgr` opaque type is equivalent to the rust type `U2FManager`
+// TODO(MS): Once CTAP2 support is added, this should probably be renamed.
 struct rust_u2f_manager;
 
 // The `rust_u2f_app_ids` opaque type is equivalent to the rust type `U2FAppIds`
@@ -59,6 +60,9 @@ struct rust_u2f_result;
 
 // The callback passed to register() and sign().
 typedef void (*rust_u2f_callback)(uint64_t, rust_u2f_result*);
+
+/// CTAP2 functions
+rust_u2f_manager* rust_ctap2_mgr_new();
 
 /// U2FManager functions.
 
