@@ -221,12 +221,16 @@ impl RequestCtap1 for MakeCredentials {
         };
 
         let mut register_data = Vec::with_capacity(2 * PARAMETER_SIZE);
-        register_data.extend_from_slice(
-            self.client_data
-                .hash()
-                .map_err(|e| HIDError::Command(CommandError::Json(e)))?
-                .as_ref(),
-        );
+        if self.is_ctap2_request() {
+            register_data.extend_from_slice(
+                self.client_data
+                    .hash()
+                    .map_err(|e| HIDError::Command(CommandError::Json(e)))?
+                    .as_ref(),
+            );
+        } else {
+            register_data.extend_from_slice(self.client_data.challenge.as_ref());
+        }
         register_data.extend_from_slice(self.rp.hash().as_ref());
         let cmd = U2F_REGISTER;
         let apdu = U2FAPDUHeader::serialize(cmd, flags, &register_data)?;

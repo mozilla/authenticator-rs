@@ -29,6 +29,12 @@ use serde_json::{value as json_value, Map};
 use std::fmt;
 use std::io;
 
+#[derive(Debug, PartialEq)]
+pub enum GetAssertionResult {
+    CTAP1(Vec<u8>),
+    CTAP2(AssertionObject),
+}
+
 #[derive(Copy, Clone, Debug, Serialize)]
 #[cfg_attr(test, derive(Deserialize))]
 pub struct GetAssertionOptions {
@@ -176,7 +182,7 @@ impl Serialize for GetAssertion {
     }
 }
 
-impl Request<AssertionObject> for GetAssertion {
+impl Request<GetAssertionResult> for GetAssertion {
     fn is_ctap2_request(&self) -> bool {
         match self.rp {
             RelyingPartyWrapper::Data(_) => true,
@@ -186,7 +192,7 @@ impl Request<AssertionObject> for GetAssertion {
 }
 
 impl RequestCtap1 for GetAssertion {
-    type Output = AssertionObject;
+    type Output = GetAssertionResult;
 
     fn apdu_format<Dev>(&self, dev: &mut Dev) -> Result<Vec<u8>, HIDError>
     where
@@ -268,12 +274,16 @@ impl RequestCtap1 for GetAssertion {
         let mut auth_data =
             Vec::with_capacity(2 * PARAMETER_SIZE + 1 /* key_handle_len */ + key_handle.len());
 
-        auth_data.extend_from_slice(
-            self.client_data
-                .hash()
-                .map_err(|e| HIDError::Command(CommandError::Json(e)))?
-                .as_ref(),
-        );
+        if self.is_ctap2_request() {
+            auth_data.extend_from_slice(
+                self.client_data
+                    .hash()
+                    .map_err(|e| HIDError::Command(CommandError::Json(e)))?
+                    .as_ref(),
+            );
+        } else {
+            auth_data.extend_from_slice(self.client_data.challenge.as_ref());
+        }
         auth_data.extend_from_slice(self.rp.hash().as_ref());
         auth_data.extend_from_slice(&[key_handle.len() as u8]);
         auth_data.extend_from_slice(key_handle.as_ref());
@@ -295,51 +305,55 @@ impl RequestCtap1 for GetAssertion {
             return Err(Retryable::Error(HIDError::DeviceError));
         }
 
-        named!(
-            parse_authentication<(u8, u32)>,
-            do_parse!(user_presence: be_u8 >> counter: be_u32 >> (user_presence, counter))
-        );
+        if self.is_ctap2_request() {
+            named!(
+                parse_authentication<(u8, u32)>,
+                do_parse!(user_presence: be_u8 >> counter: be_u32 >> (user_presence, counter))
+            );
 
-        let (user_presence, counter, signature) = match parse_authentication(input) {
-            Ok((input, (user_presence, counter))) => {
-                let signature = Vec::from(input);
-                Ok((user_presence, counter, signature))
-            }
-            Err(e) => {
-                error!("error while parsing authentication: {:?}", e);
-                Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "unable to parse authentication",
-                ))
-                .map_err(|e| HIDError::IO(None, e))
-                .map_err(Retryable::Error)
-            }
-        }?;
+            let (user_presence, counter, signature) = match parse_authentication(input) {
+                Ok((input, (user_presence, counter))) => {
+                    let signature = Vec::from(input);
+                    Ok((user_presence, counter, signature))
+                }
+                Err(e) => {
+                    error!("error while parsing authentication: {:?}", e);
+                    Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "unable to parse authentication",
+                    ))
+                    .map_err(|e| HIDError::IO(None, e))
+                    .map_err(Retryable::Error)
+                }
+            }?;
 
-        let mut flags = AuthenticatorDataFlags::empty();
-        if user_presence == 1 {
-            flags |= AuthenticatorDataFlags::USER_PRESENT;
+            let mut flags = AuthenticatorDataFlags::empty();
+            if user_presence == 1 {
+                flags |= AuthenticatorDataFlags::USER_PRESENT;
+            }
+            let auth_data = AuthenticatorData {
+                rp_id_hash: self.rp.hash(),
+                flags,
+                counter,
+                credential_data: None,
+                extensions: Vec::new(),
+            };
+            let assertion = Assertion {
+                credentials: None,
+                signature,
+                user: None,
+                auth_data,
+            };
+
+            Ok(GetAssertionResult::CTAP2(AssertionObject(vec![assertion])))
+        } else {
+            Ok(GetAssertionResult::CTAP1(input.to_vec()))
         }
-        let auth_data = AuthenticatorData {
-            rp_id_hash: self.rp.hash(),
-            flags,
-            counter,
-            credential_data: None,
-            extensions: Vec::new(),
-        };
-        let assertion = Assertion {
-            credentials: None,
-            signature,
-            user: None,
-            auth_data,
-        };
-
-        Ok(AssertionObject(vec![assertion]))
     }
 }
 
 impl RequestCtap2 for GetAssertion {
-    type Output = AssertionObject;
+    type Output = GetAssertionResult;
 
     fn command() -> Command {
         Command::GetAssertion
@@ -385,7 +399,7 @@ impl RequestCtap2 for GetAssertion {
                     assertions.push(new_cred.into());
                 }
 
-                Ok(AssertionObject(assertions))
+                Ok(GetAssertionResult::CTAP2(AssertionObject(assertions)))
             } else {
                 let data: Value = from_slice(&input[1..]).map_err(CommandError::Parsing)?;
                 Err(CommandError::StatusCode(status, Some(data))).map_err(HIDError::Command)
@@ -424,7 +438,12 @@ pub struct AssertionObject(pub Vec<Assertion>);
 impl AssertionObject {
     pub fn u2f_sign_data(&self) -> Vec<u8> {
         if let Some(first) = self.0.first() {
-            first.signature.clone()
+            let mut res = Vec::new();
+            res.push(first.auth_data.flags.bits());
+            res.extend(&first.auth_data.counter.to_be_bytes());
+            res.extend(&first.signature);
+            res
+            // first.signature.clone()
         } else {
             Vec::new()
         }
@@ -520,7 +539,7 @@ impl<'de> Deserialize<'de> for GetAssertionResponse {
 
 #[cfg(test)]
 pub mod test {
-    use super::{Assertion, GetAssertion, GetAssertionOptions};
+    use super::{Assertion, GetAssertion, GetAssertionOptions, GetAssertionResult};
     use crate::consts::{
         HIDCmd, SW_CONDITIONS_NOT_SATISFIED, SW_NO_ERROR, U2F_CHECK_IS_REGISTERED,
         U2F_REQUEST_USER_PRESENCE,
@@ -662,7 +681,7 @@ pub mod test {
             auth_data: expected_auth_data,
         };
 
-        let expected = AssertionObject(vec![expected_assertion]);
+        let expected = GetAssertionResult::CTAP2(AssertionObject(vec![expected_assertion]));
 
         assert_eq!(response, expected);
     }

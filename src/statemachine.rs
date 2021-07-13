@@ -3,9 +3,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use crate::consts::PARAMETER_SIZE;
-use crate::ctap2::commands::get_assertion::GetAssertion;
+use crate::ctap2::commands::get_assertion::{GetAssertion, GetAssertionResult};
 use crate::ctap2::commands::make_credentials::{MakeCredentials, MakeCredentialsResult};
-use crate::ctap2::commands::{CommandError, PinAuthCommand, Request, StatusCode};
+use crate::ctap2::commands::{CommandError, PinAuthCommand, StatusCode};
 use crate::errors::{self, AuthenticatorError};
 use crate::statecallback::StateCallback;
 use crate::transport::platform::{device::Device, transaction::Transaction};
@@ -450,21 +450,18 @@ impl StateMachineCtap2 {
 
             let resp = dev.send_msg(&getassertion);
             match resp {
-                Ok(resp) => {
-                    if getassertion.is_ctap2_request() {
-                        callback.call(Ok(SignResult::CTAP2(resp)))
-                    } else {
-                        let app_id = getassertion.rp.hash().as_ref().to_vec();
-                        let key_handle = getassertion.allow_list[0].id.clone();
+                Ok(GetAssertionResult::CTAP1(resp)) => {
+                    let app_id = getassertion.rp.hash().as_ref().to_vec();
+                    let key_handle = getassertion.allow_list[0].id.clone();
 
-                        callback.call(Ok(SignResult::CTAP1(
-                            app_id,
-                            key_handle,
-                            resp.u2f_sign_data(),
-                            dev.get_device_info(),
-                        )))
-                    }
+                    callback.call(Ok(SignResult::CTAP1(
+                        app_id,
+                        key_handle,
+                        resp,
+                        dev.get_device_info(),
+                    )))
                 }
+                Ok(GetAssertionResult::CTAP2(resp)) => callback.call(Ok(SignResult::CTAP2(resp))),
                 // TODO(baloo): if key_handle is invalid for this device, it
                 //              should reply something like:
                 //              CTAP2_ERR_INVALID_CREDENTIAL
