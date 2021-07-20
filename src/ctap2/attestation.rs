@@ -279,6 +279,43 @@ pub enum AttestationStatement {
     Unparsed(Vec<u8>),
 }
 
+// Not all crypto-backends currently provide "crypto::verify()", so we do not implement it yet.
+// Also not sure, if we really need it. Would be a sanity-check only, to verify the signature is valid,
+// before sendig it out.
+// impl AttestationStatement {
+//     pub fn verify(&self, data: &[u8]) -> Result<bool, AuthenticatorError> {
+//         match self {
+//             AttestationStatement::None => Ok(true),
+//             AttestationStatement::Unparsed(_) => Err(AuthenticatorError::Custom(
+//                 "Unparsed attestation object can't be used to verify signature.".to_string(),
+//             )),
+//             AttestationStatement::FidoU2F(att) => {
+//                 let res = crypto::verify(
+//                     crypto::SignatureAlgorithm::ES256,
+//                     &att.attestation_cert[0].as_ref(),
+//                     att.sig.as_ref(),
+//                     data,
+//                 )?;
+//                 Ok(res)
+//             }
+//             AttestationStatement::Packed(att) => {
+//                 if att.alg != Alg::ES256 {
+//                     return Err(AuthenticatorError::Custom(
+//                         "Verification only supported for ES256".to_string(),
+//                     ));
+//                 }
+//                 let res = crypto::verify(
+//                     crypto::SignatureAlgorithm::ES256,
+//                     att.attestation_cert[0].as_ref(),
+//                     att.sig.as_ref(),
+//                     data,
+//                 )?;
+//                 Ok(res)
+//             }
+//         }
+//     }
+// }
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 // See https://www.w3.org/TR/webauthn/#fido-u2f-attestation
 pub struct AttestationStatementFidoU2F {

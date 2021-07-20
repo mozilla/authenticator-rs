@@ -9,8 +9,9 @@ use openssl::error::ErrorStack;
 use openssl::hash::{hash, MessageDigest};
 use openssl::nid::Nid;
 use openssl::pkey::{PKey, Private};
-use openssl::sign::Signer;
+use openssl::sign::{Signer, Verifier};
 use openssl::symm::{Cipher, Crypter, Mode};
+use openssl::x509::X509;
 use serde_bytes::ByteBuf;
 
 /// Errors that can be returned from COSE functions.
@@ -218,4 +219,33 @@ pub(crate) fn authenticate(token: &[u8], input: &[u8]) -> Result<Vec<u8>> {
     signer.update(input)?;
     let hmac = signer.sign_to_vec()?;
     Ok(hmac)
+}
+
+// Currently unsued, because rc_crypto does not expose PKCS12 of NSS, so we can't parse the cert there
+// To use it in statemachine.rs for example, do:
+// if let Ok(cdhash) = client_data.hash() {
+//     let verification_data: Vec<u8> = attestation
+//         .auth_data
+//         .to_vec()
+//         .iter()
+//         .chain(cdhash.as_ref().iter())
+//         .copied()
+//         .collect();
+//     let res = attestation.att_statement.verify(&verification_data);
+//     ...
+// }
+#[allow(dead_code)]
+pub(crate) fn verify(
+    sig_alg: SignatureAlgorithm,
+    pub_key: &[u8],
+    signature: &[u8],
+    data: &[u8],
+) -> Result<bool> {
+    let _alg = to_openssl_name(sig_alg); // TODO(MS): Actually use this to determine the right MessageDigest below
+    let pkey = X509::from_der(&pub_key)?;
+    let pubkey = pkey.public_key()?;
+    let mut verifier = Verifier::new(MessageDigest::sha256(), &pubkey)?;
+    verifier.update(data)?;
+    let res = verifier.verify(signature)?;
+    Ok(res)
 }
