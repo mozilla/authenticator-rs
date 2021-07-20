@@ -143,7 +143,7 @@ fn main() {
         .expect("Problem receiving, unable to continue");
     let (register_data, device_info) = match register_result {
         Ok(RegisterResult::CTAP1(r, d)) => (r, d),
-        Ok(RegisterResult::CTAP2(_, _)) => panic!("Did not request CTAP2, but got CTAP2 results!"),
+        Ok(RegisterResult::CTAP2(..)) => panic!("Did not request CTAP2, but got CTAP2 results!"),
         Err(_) => panic!("Registration failed"),
     };
 

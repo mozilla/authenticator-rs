@@ -273,7 +273,7 @@ pub unsafe extern "C" fn rust_u2f_mgr_register(
                 bufs.insert(RESBUF_ID_FIRMWARE_BUILD, vec![dev_info.version_build]);
                 U2FResult::Success(bufs)
             }
-            Ok(RegisterResult::CTAP2(_, _)) => U2FResult::Error(
+            Ok(RegisterResult::CTAP2(..)) => U2FResult::Error(
                 errors::AuthenticatorError::VersionMismatch("rust_u2f_mgr_register", 1),
             ),
             Err(e) => U2FResult::Error(e),
