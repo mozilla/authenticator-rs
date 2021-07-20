@@ -4,6 +4,7 @@ use serde::ser::SerializeMap;
 use serde::{Serialize, Serializer};
 use serde_json as json;
 use sha2::{Digest, Sha256};
+#[cfg(test)]
 use std::fmt;
 
 /// https://w3c.github.io/webauthn/#dom-collectedclientdata-tokenbinding
@@ -92,25 +93,25 @@ impl Serialize for WebauthnType {
     }
 }
 
-#[derive(Serialize, Clone, PartialEq, Eq)]
-pub struct Challenge(Vec<u8>);
+#[derive(Serialize, Clone, PartialEq, Eq, Debug)]
+pub struct Challenge(String);
 
-impl fmt::Debug for Challenge {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let value = base64::encode_config(&self.0, base64::URL_SAFE_NO_PAD);
-        write!(f, "Challenge({})", value)
+impl Challenge {
+    pub fn new(input: Vec<u8>) -> Self {
+        let value = base64::encode_config(&input, base64::URL_SAFE_NO_PAD);
+        Challenge(value)
     }
 }
 
 impl From<Vec<u8>> for Challenge {
     fn from(v: Vec<u8>) -> Challenge {
-        Challenge(v)
+        Challenge::new(v)
     }
 }
 
 impl AsRef<[u8]> for Challenge {
     fn as_ref(&self) -> &[u8] {
-        self.0.as_ref()
+        self.0.as_bytes()
     }
 }
 
@@ -194,7 +195,6 @@ impl CollectedClientData {
         // See: https://heycam.github.io/webidl/#dfn-dictionary
 
         let data = json::to_vec(&self)?;
-
         let mut hasher = Sha256::new();
         hasher.input(&data);
 
@@ -239,7 +239,7 @@ mod test {
     fn test_collected_client_data() {
         let client_data = CollectedClientData {
             webauthn_type: WebauthnType::Create,
-            challenge: Challenge(vec![0x00, 0x01, 0x02, 0x03]),
+            challenge: Challenge::new(vec![0x00, 0x01, 0x02, 0x03]),
             origin: String::from("example.com"),
             cross_origin: None,
             token_binding: Some(TokenBinding::Present(vec![0x00, 0x01, 0x02, 0x03])),
@@ -249,9 +249,8 @@ mod test {
             client_data.hash().unwrap(),
             ClientDataHash {
                 0: [
-                    0xc1, 0xdd, 0x35, 0x5f, 0x3c, 0x81, 0x69, 0x23, 0xe0, 0x57, 0xca, 0x03, 0x8d,
-                    0xba, 0xad, 0xb8, 0x5f, 0x95, 0x55, 0xcf, 0xc7, 0x62, 0x9b, 0x9d, 0x53, 0x66,
-                    0x97, 0x53, 0x80, 0xd7, 0x69, 0x4f
+                    103, 62, 188, 58, 64, 50, 121, 223, 2, 91, 151, 13, 229, 132, 9, 219, 236, 83,
+                    85, 34, 72, 99, 252, 22, 8, 203, 73, 115, 125, 144, 35, 255
                 ]
             }
         );
