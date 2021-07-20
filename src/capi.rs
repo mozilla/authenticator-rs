@@ -41,10 +41,12 @@ const RESBUF_ID_DEVICE_NAME: u8 = 5;
 const RESBUF_ID_FIRMWARE_MAJOR: u8 = 6;
 const RESBUF_ID_FIRMWARE_MINOR: u8 = 7;
 const RESBUF_ID_FIRMWARE_BUILD: u8 = 8;
-const RESBUF_ID_PUBLIC_KEY: u8 = 9;
+const RESBUF_ID_ATTESTATION_STATEMENT_ALGORITHM: u8 = 9;
 const RESBUF_ID_ATTESTATION_STATEMENT_SIGNATURE: u8 = 10;
 const RESBUF_ID_ATTESTATION_STATEMENT_CERTIFICATE: u8 = 11;
 const RESBUF_ID_ATTESTATION_STATEMENT_UNPARSED: u8 = 12;
+const RESBUF_ID_AUTHENTICATOR_DATA: u8 = 13;
+const RESBUF_ID_CLIENT_DATA: u8 = 14;
 
 // Generates a new 64-bit transaction id with collision probability 2^-32.
 fn new_tid() -> u64 {
@@ -429,14 +431,6 @@ pub extern "C" fn rust_ctap2_mgr_new() -> *mut AuthenticatorService {
     }
 }
 
-#[repr(C)]
-pub struct PublicKeyCredentialUserEntity {
-    pub id_ptr: *const u8,
-    pub id_len: usize,
-    pub name: *const c_char,
-    pub display_name: *const c_char, //Option<String>,
-}
-
 /// # Safety
 ///
 /// This method should not be called on AuthenticatorService handles after
@@ -454,7 +448,9 @@ pub unsafe extern "C" fn rust_ctap2_mgr_register(
     challenge_len: usize,
     relying_party_id: *const c_char,
     origin_ptr: *const c_char,
-    user: *const PublicKeyCredentialUserEntity,
+    user_id_ptr: *const u8,
+    user_id_len: usize,
+    user_name: *const c_char,
     pub_cred_params_ptr: *const i32,
     pub_cred_params_len: usize,
     exclude_list: *const U2FKeyHandles,
@@ -468,9 +464,8 @@ pub unsafe extern "C" fn rust_ctap2_mgr_register(
     if challenge_ptr.is_null()
         || origin_ptr.is_null()
         || relying_party_id.is_null()
-        || user.is_null()
-        || (*user).id_ptr.is_null()
-        || (*user).name.is_null()
+        || user_id_ptr.is_null()
+        || user_name.is_null()
         || exclude_list.is_null()
     {
         return 0;
@@ -486,8 +481,8 @@ pub unsafe extern "C" fn rust_ctap2_mgr_register(
         Some(Pin::new(&CStr::from_ptr(pin_ptr).to_string_lossy()))
     };
     let user = User {
-        id: from_raw((*user).id_ptr, (*user).id_len),
-        name: CStr::from_ptr((*user).name).to_string_lossy().to_string(), // TODO(MS): Use to_str() and error out on failure?
+        id: from_raw(user_id_ptr, user_id_len),
+        name: CStr::from_ptr(user_name).to_string_lossy().to_string(), // TODO(MS): Use to_str() and error out on failure?
         display_name: None,
         icon: None,
     };
@@ -523,19 +518,27 @@ pub unsafe extern "C" fn rust_ctap2_mgr_register(
             Ok(RegisterResult::CTAP1(_, _)) => U2FResult::Error(
                 errors::AuthenticatorError::VersionMismatch("rust_u2f_mgr_sign", 2),
             ),
-            Ok(RegisterResult::CTAP2(attestation_object, _client_data)) => {
+            Ok(RegisterResult::CTAP2(attestation_object, client_data)) => {
                 let mut bufs = HashMap::new();
-                if let Some(cred_data) = attestation_object.auth_data.credential_data {
-                    bufs.insert(
-                        RESBUF_ID_PUBLIC_KEY,
-                        cred_data.credential_public_key.clone(),
-                    );
-
+                if let Some(cred_data) = &attestation_object.auth_data.credential_data {
                     bufs.insert(RESBUF_ID_KEYHANDLE, cred_data.credential_id.clone());
                 }
+
+                let auth_data = attestation_object.auth_data.to_vec(); // TODO(MS)
+                bufs.insert(RESBUF_ID_AUTHENTICATOR_DATA, auth_data);
+
+                let client_data = serde_json::to_vec(&client_data).unwrap(); // TODO(MS)
+                bufs.insert(RESBUF_ID_CLIENT_DATA, client_data);
+
                 match attestation_object.att_statement {
                     AttestationStatement::None => { /* TODO(MS): What to do here?*/ }
                     AttestationStatement::Packed(att) => {
+                        let alg_id: i64 = att.alg.into();
+                        bufs.insert(
+                            RESBUF_ID_ATTESTATION_STATEMENT_ALGORITHM,
+                            alg_id.to_ne_bytes().to_vec(),
+                        );
+
                         bufs.insert(
                             RESBUF_ID_ATTESTATION_STATEMENT_SIGNATURE,
                             att.sig.as_ref().to_vec(),
@@ -613,7 +616,9 @@ pub unsafe extern "C" fn rust_ctap2_mgr_sign(
     challenge_len: usize,
     relying_party_id: *const c_char,
     origin_ptr: *const c_char,
-    user: *const PublicKeyCredentialUserEntity,
+    user_id_ptr: *const u8,
+    user_id_len: usize,
+    user_name: *const c_char,
     allow_list: *const U2FKeyHandles,
     pin_ptr: *const c_char,
 ) -> u64 {
@@ -625,9 +630,8 @@ pub unsafe extern "C" fn rust_ctap2_mgr_sign(
     if challenge_ptr.is_null()
         || origin_ptr.is_null()
         || relying_party_id.is_null()
-        || user.is_null()
-        || (*user).id_ptr.is_null()
-        || (*user).name.is_null()
+        || user_id_ptr.is_null()
+        || user_name.is_null()
         || allow_list.is_null()
     {
         return 0;
@@ -640,8 +644,8 @@ pub unsafe extern "C" fn rust_ctap2_mgr_sign(
         Some(Pin::new(&CStr::from_ptr(pin_ptr).to_string_lossy()))
     };
     let user = User {
-        id: from_raw((*user).id_ptr, (*user).id_len),
-        name: CStr::from_ptr((*user).name).to_string_lossy().to_string(), // TODO(MS): Use to_str() and error out on failure?
+        id: from_raw(user_id_ptr, user_id_len),
+        name: CStr::from_ptr(user_name).to_string_lossy().to_string(), // TODO(MS): Use to_str() and error out on failure?
         display_name: None,
         icon: None,
     };

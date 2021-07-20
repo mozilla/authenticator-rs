@@ -20,6 +20,12 @@ const uint8_t U2F_RESBUF_ID_DEVICE_NAME = 5;
 const uint8_t U2F_RESBUF_ID_FIRMWARE_MAJOR = 6;
 const uint8_t U2F_RESBUF_ID_FIRMWARE_MINOR = 7;
 const uint8_t U2F_RESBUF_ID_FIRMWARE_BUILD = 8;
+const uint8_t CTAP2_RESBUF_ID_ATTESTATION_STATEMENT_ALGORITHM = 9;
+const uint8_t CTAP2_RESBUF_ID_ATTESTATION_STATEMENT_SIGNATURE = 10;
+const uint8_t CTAP2_RESBUF_ID_ATTESTATION_STATEMENT_CERTIFICATE = 11;
+const uint8_t CTAP2_RESBUF_ID_ATTESTATION_STATEMENT_UNPARSED = 12;
+const uint8_t CTAP2_RESBUF_ID_AUTHENTICATOR_DATA = 13;
+const uint8_t CTAP2_RESBUF_ID_CLIENT_DATA = 14;
 
 const uint64_t U2F_FLAG_REQUIRE_RESIDENT_KEY = 1;
 const uint64_t U2F_FLAG_REQUIRE_USER_VERIFICATION = 2;
@@ -111,6 +117,17 @@ bool rust_u2f_resbuf_contains(const rust_u2f_result* res, uint8_t bid);
 bool rust_u2f_resbuf_copy(const rust_u2f_result* res, uint8_t bid,
                           uint8_t* dst);
 /* unsafe */ void rust_u2f_res_free(rust_u2f_result* res);
+
+/// CTAP2 functions.
+uint64_t rust_ctap2_mgr_register(
+    rust_u2f_manager* mgr, uint64_t timeout, rust_u2f_callback,
+    const uint8_t* challenge_ptr, size_t challenge_len,
+    const char* relying_party_id, const char *origin_ptr,
+    const uint8_t *user_id_ptr, size_t user_id_len,
+    const char *user_name, const int32_t *pub_cred_params_ptr,
+    size_t pub_cred_params_len, const rust_u2f_key_handles* exclude_list,
+    const char *pin
+);
 }
 
 #endif  // __U2FHID_CAPI
