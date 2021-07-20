@@ -107,6 +107,7 @@ uint8_t rust_u2f_result_error(const rust_u2f_result* res);
 // Call this before `[..]_copy()` to allocate enough space.
 bool rust_u2f_resbuf_length(const rust_u2f_result* res, uint8_t bid,
                             size_t* len);
+bool rust_u2f_resbuf_contains(const rust_u2f_result* res, uint8_t bid);
 bool rust_u2f_resbuf_copy(const rust_u2f_result* res, uint8_t bid,
                           uint8_t* dst);
 /* unsafe */ void rust_u2f_res_free(rust_u2f_result* res);

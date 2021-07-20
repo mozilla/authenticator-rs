@@ -165,6 +165,22 @@ pub unsafe extern "C" fn rust_u2f_result_error(res: *const U2FResult) -> u8 {
 ///
 /// This method must be used before rust_u2f_resbuf_copy
 #[no_mangle]
+pub unsafe extern "C" fn rust_u2f_resbuf_contains(res: *const U2FResult, bid: u8) -> bool {
+    if res.is_null() {
+        return false;
+    }
+
+    if let U2FResult::Success(ref bufs) = *res {
+        return bufs.contains_key(&bid);
+    }
+
+    false
+}
+
+/// # Safety
+///
+/// This method must be used before rust_u2f_resbuf_copy
+#[no_mangle]
 pub unsafe extern "C" fn rust_u2f_resbuf_length(
     res: *const U2FResult,
     bid: u8,
