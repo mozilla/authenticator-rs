@@ -1,27 +1,20 @@
 use super::server::Alg;
 use super::utils::from_slice_stream;
 use crate::ctap2::server::RpIdHash;
-#[cfg(test)]
-use byteorder::{BigEndian, WriteBytesExt};
 use nom::{
     combinator::rest,
     cond, do_parse, map, map_res, named,
     number::complete::{be_u16, be_u32, be_u8},
     take, Err as NomErr, IResult,
 };
+#[cfg(test)]
+use serde::ser::{SerializeMap, Serializer};
 use serde::{
     de::{Error as SerdeError, MapAccess, Visitor},
     Deserialize, Deserializer, Serialize,
 };
-#[cfg(test)]
-use serde::{
-    ser::{Error as SerError, SerializeMap},
-    Serializer,
-};
 use serde_bytes::ByteBuf;
 use std::fmt;
-#[cfg(test)]
-use std::io::{self, Write};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Extension {}
@@ -215,26 +208,32 @@ impl<'de> Deserialize<'de> for AuthenticatorData {
     }
 }
 
+impl AuthenticatorData {
+    pub fn to_vec(&self) -> Vec<u8> {
+        let mut data = Vec::new();
+        data.extend(&self.rp_id_hash.0);
+        data.extend(&[self.flags.bits()]);
+        data.extend(&self.counter.to_be_bytes());
+
+        // TODO(baloo): need to yield credential_data and extensions, but that dependends on flags,
+        //              should we consider another type system?
+        if let Some(cred) = &self.credential_data {
+            data.extend(&cred.aaguid.0);
+            data.extend(&(cred.credential_id.len() as u16).to_be_bytes());
+            data.extend(&cred.credential_id);
+            data.extend(&cred.credential_public_key);
+        }
+        data
+    }
+}
+
 #[cfg(test)]
 impl Serialize for AuthenticatorData {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let mut data = io::Cursor::new(Vec::new());
-        data.write_all(&self.rp_id_hash.0)
-            .map_err(|e| S::Error::custom(format!("io error: {:?}", e)))?;
-        data.write_all(&[self.flags.bits()])
-            .map_err(|e| S::Error::custom(format!("io error: {:?}", e)))?;
-        data.write_u32::<BigEndian>(self.counter)
-            .map_err(|e| S::Error::custom(format!("io error: {:?}", e)))?;
-
-        // TODO(baloo): need to yield credential_data and extensions, but that dependends on flags,
-        //              should we consider another type system?
-
-        data.set_position(0);
-        let data = data.into_inner();
-        serde_bytes::serialize(&data, serializer)
+        serde_bytes::serialize(&self.to_vec(), serializer)
     }
 }
 
@@ -454,29 +453,36 @@ impl Serialize for AttestationObject {
     where
         S: Serializer,
     {
-        let mut map_len = 2;
-        if self.att_statement != AttestationStatement::None {
-            map_len += 1;
+        if let AttestationStatement::Unparsed(ref v) = self.att_statement {
+            serializer.serialize_bytes(&v)
+        } else {
+            let mut map_len = 2;
+            if self.att_statement != AttestationStatement::None {
+                map_len += 1;
+            }
+
+            let mut map = serializer.serialize_map(Some(map_len))?;
+
+            map.serialize_entry(&2, &self.auth_data)?;
+            match self.att_statement {
+                AttestationStatement::None => {
+                    map.serialize_entry(&1, &"none")?;
+                }
+                AttestationStatement::Packed(ref v) => {
+                    map.serialize_entry(&1, &"packed")?;
+                    map.serialize_entry(&3, v)?;
+                }
+                AttestationStatement::FidoU2F(ref v) => {
+                    map.serialize_entry(&1, &"fido-u2f")?;
+                    map.serialize_entry(&3, v)?;
+                }
+                AttestationStatement::Unparsed(_) => {
+                    unimplemented!(); /* Can't happen. Did this above */
+                }
+            }
+
+            map.end()
         }
-
-        let mut map = serializer.serialize_map(Some(map_len))?;
-
-        map.serialize_entry(&2, &self.auth_data)?;
-
-        match self.att_statement {
-            AttestationStatement::None => {
-                map.serialize_entry(&1, &"none")?;
-            }
-            AttestationStatement::Packed(ref v) => {
-                map.serialize_entry(&1, &"packed")?;
-                map.serialize_entry(&3, v)?;
-            }
-            AttestationStatement::FidoU2F(_) | AttestationStatement::Unparsed(_) => {
-                unimplemented!();
-            }
-        }
-
-        map.end()
     }
 }
 
