@@ -7,6 +7,7 @@ use serde::{
 };
 use serde_bytes::ByteBuf;
 use sha2::{Digest, Sha256};
+use std::convert::Into;
 use std::fmt;
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone)]
@@ -97,6 +98,16 @@ pub enum Alg {
     ES256,
     RS256,
     Unknown(i64),
+}
+
+impl Into<i64> for Alg {
+    fn into(self) -> i64 {
+        match self {
+            Alg::ES256 => -7,
+            Alg::RS256 => -257,
+            Alg::Unknown(x) => x,
+        }
+    }
 }
 
 impl Serialize for Alg {
