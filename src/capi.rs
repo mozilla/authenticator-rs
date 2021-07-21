@@ -524,7 +524,7 @@ pub unsafe extern "C" fn rust_ctap2_mgr_register(
                     bufs.insert(RESBUF_ID_KEYHANDLE, cred_data.credential_id.clone());
                 }
 
-                let auth_data = attestation_object.auth_data.to_vec(); // TODO(MS)
+                let auth_data = attestation_object.auth_data.to_vec();
                 bufs.insert(RESBUF_ID_AUTHENTICATOR_DATA, auth_data);
 
                 let client_data = serde_json::to_vec(&client_data).unwrap(); // TODO(MS)
@@ -609,16 +609,13 @@ pub unsafe extern "C" fn rust_ctap2_mgr_register(
 #[no_mangle]
 pub unsafe extern "C" fn rust_ctap2_mgr_sign(
     mgr: *mut AuthenticatorService,
-    flags: u64,
     timeout: u64,
     callback: U2FCallback,
+    flags: u64,
     challenge_ptr: *const u8,
     challenge_len: usize,
     relying_party_id: *const c_char,
     origin_ptr: *const c_char,
-    user_id_ptr: *const u8,
-    user_id_len: usize,
-    user_name: *const c_char,
     allow_list: *const U2FKeyHandles,
     pin_ptr: *const c_char,
 ) -> u64 {
@@ -630,8 +627,6 @@ pub unsafe extern "C" fn rust_ctap2_mgr_sign(
     if challenge_ptr.is_null()
         || origin_ptr.is_null()
         || relying_party_id.is_null()
-        || user_id_ptr.is_null()
-        || user_name.is_null()
         || allow_list.is_null()
     {
         return 0;
@@ -642,12 +637,6 @@ pub unsafe extern "C" fn rust_ctap2_mgr_sign(
         None
     } else {
         Some(Pin::new(&CStr::from_ptr(pin_ptr).to_string_lossy()))
-    };
-    let user = User {
-        id: from_raw(user_id_ptr, user_id_len),
-        name: CStr::from_ptr(user_name).to_string_lossy().to_string(), // TODO(MS): Use to_str() and error out on failure?
-        display_name: None,
-        icon: None,
     };
     let rpid = CStr::from_ptr(relying_party_id)
         .to_string_lossy()
@@ -700,7 +689,6 @@ pub unsafe extern "C" fn rust_ctap2_mgr_sign(
             flags,
             challenge,
             origin,
-            user,
             relying_party_id: rpid,
             allow_list,
             pin,

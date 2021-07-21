@@ -69,7 +69,6 @@ pub struct SignArgsCtap2 {
     pub flags: crate::SignFlags, // Change to MakeCredentialOptions?
     pub challenge: Vec<u8>,
     pub origin: String,
-    pub user: User,
     pub relying_party_id: String,
     pub allow_list: Vec<PublicKeyCredentialDescriptor>,
     pub pin: Option<Pin>,

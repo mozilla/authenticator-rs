@@ -173,7 +173,6 @@ fn main() {
         flags: SignFlags::empty(),
         challenge: chall_bytes,
         origin,
-        user,
         relying_party_id: "example.com".to_string(),
         allow_list,
         pin: Some(Pin::new("1234")),
