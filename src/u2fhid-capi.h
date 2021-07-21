@@ -128,6 +128,14 @@ uint64_t rust_ctap2_mgr_register(
     size_t pub_cred_params_len, const rust_u2f_key_handles* exclude_list,
     const char *pin
 );
+
+uint64_t rust_ctap2_mgr_sign(
+    rust_u2f_manager* mgr, uint64_t timeout, rust_u2f_callback,
+    uint64_t flags, const uint8_t* challenge_ptr, size_t challenge_len,
+    const char* relying_party_id, const char *origin_ptr,
+    const rust_u2f_key_handles* allow_list,
+    const char *pin
+);
 }
 
 #endif  // __U2FHID_CAPI
