@@ -461,7 +461,9 @@ impl StateMachineCtap2 {
                         dev.get_device_info(),
                     )))
                 }
-                Ok(GetAssertionResult::CTAP2(resp)) => callback.call(Ok(SignResult::CTAP2(resp))),
+                Ok(GetAssertionResult::CTAP2(assertion, client_data)) => {
+                    callback.call(Ok(SignResult::CTAP2(assertion, client_data)))
+                }
                 // TODO(baloo): if key_handle is invalid for this device, it
                 //              should reply something like:
                 //              CTAP2_ERR_INVALID_CREDENTIAL

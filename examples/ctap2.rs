@@ -185,7 +185,7 @@ fn main() {
     let sign_result = sign_rx
         .recv()
         .expect("Problem receiving, unable to continue");
-    if let SignResult::CTAP2(assertion_object) = sign_result.expect("Sign failed") {
+    if let SignResult::CTAP2(assertion_object, _client_data) = sign_result.expect("Sign failed") {
         println!("Assertion Object: {:?}", assertion_object);
         println!("Done.");
     } else {

@@ -84,7 +84,7 @@ pub enum RegisterResult {
 
 pub enum SignResult {
     CTAP1(AppId, Vec<u8>, Vec<u8>, u2ftypes::U2FDeviceInfo),
-    CTAP2(AssertionObject),
+    CTAP2(AssertionObject, CollectedClientData),
 }
 
 pub type Result<T> = std::result::Result<T, errors::AuthenticatorError>;

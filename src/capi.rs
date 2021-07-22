@@ -375,7 +375,7 @@ pub unsafe extern "C" fn rust_u2f_mgr_sign(
                 bufs.insert(RESBUF_ID_FIRMWARE_BUILD, vec![dev_info.version_build]);
                 U2FResult::Success(bufs)
             }
-            Ok(SignResult::CTAP2(_)) => U2FResult::Error(
+            Ok(SignResult::CTAP2(..)) => U2FResult::Error(
                 errors::AuthenticatorError::VersionMismatch("rust_u2f_mgr_sign", 1),
             ),
             Err(e) => U2FResult::Error(e),
@@ -516,7 +516,7 @@ pub unsafe extern "C" fn rust_ctap2_mgr_register(
 
     let state_callback = StateCallback::<crate::Result<RegisterResult>>::new(Box::new(move |rv| {
         let result = match rv {
-            Ok(RegisterResult::CTAP1(_, _)) => U2FResult::Error(
+            Ok(RegisterResult::CTAP1(..)) => U2FResult::Error(
                 errors::AuthenticatorError::VersionMismatch("rust_u2f_mgr_sign", 2),
             ),
             Ok(RegisterResult::CTAP2(attestation_object, client_data)) => {
@@ -645,7 +645,7 @@ pub unsafe extern "C" fn rust_ctap2_mgr_sign(
         .to_string();
     let origin = CStr::from_ptr(origin_ptr).to_string_lossy().to_string();
     let challenge = from_raw(challenge_ptr, challenge_len);
-    let allow_list = (*allow_list)
+    let allow_list: Vec<_> = (*allow_list)
         .clone()
         .iter()
         .map(|x| PublicKeyCredentialDescriptor::from(x))
@@ -661,22 +661,41 @@ pub unsafe extern "C" fn rust_ctap2_mgr_sign(
         }
     });
 
+    let single_key_handle = if allow_list.len() == 1 {
+        Some(allow_list.first().unwrap().id.clone())
+    } else {
+        None
+    };
+
     let tid = new_tid();
     let state_callback = StateCallback::<crate::Result<SignResult>>::new(Box::new(move |rv| {
         let result = match rv {
             Ok(SignResult::CTAP1(..)) => U2FResult::Error(
                 errors::AuthenticatorError::VersionMismatch("rust_u2f_mgr_sign", 1),
             ),
-            Ok(SignResult::CTAP2(assertion_object)) => {
+            Ok(SignResult::CTAP2(assertion_object, client_data)) => {
+                // We can only handle length 1 assertion chains at the moment
+                let assertion = assertion_object.0.first().unwrap(); // TODO(MS)!
                 let mut bufs = HashMap::new();
-                // bufs.insert(RESBUF_ID_KEYHANDLE, key_handle);
-                bufs.insert(RESBUF_ID_SIGNATURE, assertion_object.u2f_sign_data());
-                // bufs.insert(RESBUF_ID_APPID, assertion_object.0.first().unwrap());
-                // bufs.insert(RESBUF_ID_VENDOR_NAME, dev_info.vendor_name);
-                // bufs.insert(RESBUF_ID_DEVICE_NAME, dev_info.device_name);
-                // bufs.insert(RESBUF_ID_FIRMWARE_MAJOR, vec![dev_info.version_major]);
-                // bufs.insert(RESBUF_ID_FIRMWARE_MINOR, vec![dev_info.version_minor]);
-                // bufs.insert(RESBUF_ID_FIRMWARE_BUILD, vec![dev_info.version_build]);
+                bufs.insert(RESBUF_ID_CTAP20_INDICATOR, Vec::new());
+                bufs.insert(RESBUF_ID_SIGNATURE, assertion.signature.clone());
+
+                // Credential data can be omitted by the token, if allow-list has length of 1
+                if let Some(cred_data) = &assertion.auth_data.credential_data {
+                    bufs.insert(RESBUF_ID_KEYHANDLE, cred_data.credential_id.clone());
+                } else if let Some(key_handle) = &single_key_handle {
+                    bufs.insert(RESBUF_ID_KEYHANDLE, key_handle.to_vec());
+                }
+
+                let auth_data = assertion.auth_data.to_vec();
+                bufs.insert(RESBUF_ID_AUTHENTICATOR_DATA, auth_data);
+
+                let client_data = serde_json::to_vec(&client_data).unwrap(); // TODO(MS)
+                bufs.insert(RESBUF_ID_CLIENT_DATA, client_data);
+
+                if let Some(user) = &assertion.user {
+                    bufs.insert(RESBUF_ID_APPID, user.id.clone()); // Misusing AppID for this
+                }
                 U2FResult::Success(bufs)
             }
             Err(e) => U2FResult::Error(e),

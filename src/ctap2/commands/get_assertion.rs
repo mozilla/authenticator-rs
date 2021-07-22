@@ -32,7 +32,7 @@ use std::io;
 #[derive(Debug, PartialEq)]
 pub enum GetAssertionResult {
     CTAP1(Vec<u8>),
-    CTAP2(AssertionObject),
+    CTAP2(AssertionObject, CollectedClientData),
 }
 
 #[derive(Copy, Clone, Debug, Serialize)]
@@ -345,7 +345,10 @@ impl RequestCtap1 for GetAssertion {
                 auth_data,
             };
 
-            Ok(GetAssertionResult::CTAP2(AssertionObject(vec![assertion])))
+            Ok(GetAssertionResult::CTAP2(
+                AssertionObject(vec![assertion]),
+                self.client_data.clone(),
+            ))
         } else {
             Ok(GetAssertionResult::CTAP1(input.to_vec()))
         }
@@ -399,7 +402,10 @@ impl RequestCtap2 for GetAssertion {
                     assertions.push(new_cred.into());
                 }
 
-                Ok(GetAssertionResult::CTAP2(AssertionObject(assertions)))
+                Ok(GetAssertionResult::CTAP2(
+                    AssertionObject(assertions),
+                    self.client_data.clone(),
+                ))
             } else {
                 let data: Value = from_slice(&input[1..]).map_err(CommandError::Parsing)?;
                 Err(CommandError::StatusCode(status, Some(data))).map_err(HIDError::Command)
@@ -414,10 +420,10 @@ impl RequestCtap2 for GetAssertion {
 
 #[derive(Debug, PartialEq)]
 pub struct Assertion {
-    credentials: Option<PublicKeyCredentialDescriptor>, // Was optional in CTAP2.0, is mandatory in CTAP2.1
-    auth_data: AuthenticatorData,
-    signature: Vec<u8>,
-    user: Option<User>,
+    pub credentials: Option<PublicKeyCredentialDescriptor>, // Was optional in CTAP2.0, is mandatory in CTAP2.1
+    pub auth_data: AuthenticatorData,
+    pub signature: Vec<u8>,
+    pub user: Option<User>,
 }
 
 impl From<GetAssertionResponse> for Assertion {
@@ -601,14 +607,15 @@ pub mod test {
 
     #[test]
     fn test_get_assertion_ctap1() {
+        let client_data = CollectedClientData {
+            webauthn_type: WebauthnType::Create,
+            challenge: Challenge::from(vec![0x00, 0x01, 0x02, 0x03]),
+            origin: String::from("example.com"),
+            cross_origin: None,
+            token_binding: Some(TokenBinding::Present(vec![0x00, 0x01, 0x02, 0x03])),
+        };
         let assertion = GetAssertion::new(
-            CollectedClientData {
-                webauthn_type: WebauthnType::Create,
-                challenge: Challenge::from(vec![0x00, 0x01, 0x02, 0x03]),
-                origin: String::from("example.com"),
-                cross_origin: None,
-                token_binding: Some(TokenBinding::Present(vec![0x00, 0x01, 0x02, 0x03])),
-            },
+            client_data.clone(),
             RelyingPartyWrapper::Data(RelyingParty {
                 id: String::from("example.com"),
                 name: Some(String::from("Acme")),
@@ -681,7 +688,8 @@ pub mod test {
             auth_data: expected_auth_data,
         };
 
-        let expected = GetAssertionResult::CTAP2(AssertionObject(vec![expected_assertion]));
+        let expected =
+            GetAssertionResult::CTAP2(AssertionObject(vec![expected_assertion]), client_data);
 
         assert_eq!(response, expected);
     }
