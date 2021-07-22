@@ -393,7 +393,7 @@ impl AuthenticatorTransport for Manager {
                 }
 
                 let client_data = CollectedClientData {
-                    webauthn_type: WebauthnType::Create,
+                    webauthn_type: WebauthnType::Get,
                     challenge: args.challenge.into(),
                     origin: String::new(),
                     cross_origin: None,
@@ -438,7 +438,7 @@ impl AuthenticatorTransport for Manager {
 
             SignArgs::CTAP2(args) => {
                 let client_data = CollectedClientData {
-                    webauthn_type: WebauthnType::Create,
+                    webauthn_type: WebauthnType::Get,
                     challenge: args.challenge.into(),
                     origin: args.origin,
                     cross_origin: None,
