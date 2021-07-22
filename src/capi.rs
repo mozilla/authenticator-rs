@@ -41,12 +41,13 @@ const RESBUF_ID_DEVICE_NAME: u8 = 5;
 const RESBUF_ID_FIRMWARE_MAJOR: u8 = 6;
 const RESBUF_ID_FIRMWARE_MINOR: u8 = 7;
 const RESBUF_ID_FIRMWARE_BUILD: u8 = 8;
-const RESBUF_ID_ATTESTATION_STATEMENT_ALGORITHM: u8 = 9;
-const RESBUF_ID_ATTESTATION_STATEMENT_SIGNATURE: u8 = 10;
-const RESBUF_ID_ATTESTATION_STATEMENT_CERTIFICATE: u8 = 11;
-const RESBUF_ID_ATTESTATION_STATEMENT_UNPARSED: u8 = 12;
-const RESBUF_ID_AUTHENTICATOR_DATA: u8 = 13;
-const RESBUF_ID_CLIENT_DATA: u8 = 14;
+const RESBUF_ID_CTAP20_INDICATOR: u8 = 9;
+const RESBUF_ID_ATTESTATION_STATEMENT_ALGORITHM: u8 = 10;
+const RESBUF_ID_ATTESTATION_STATEMENT_SIGNATURE: u8 = 11;
+const RESBUF_ID_ATTESTATION_STATEMENT_CERTIFICATE: u8 = 12;
+const RESBUF_ID_ATTESTATION_STATEMENT_UNPARSED: u8 = 13;
+const RESBUF_ID_AUTHENTICATOR_DATA: u8 = 14;
+const RESBUF_ID_CLIENT_DATA: u8 = 15;
 
 // Generates a new 64-bit transaction id with collision probability 2^-32.
 fn new_tid() -> u64 {
@@ -520,6 +521,7 @@ pub unsafe extern "C" fn rust_ctap2_mgr_register(
             ),
             Ok(RegisterResult::CTAP2(attestation_object, client_data)) => {
                 let mut bufs = HashMap::new();
+                bufs.insert(RESBUF_ID_CTAP20_INDICATOR, Vec::new());
                 if let Some(cred_data) = &attestation_object.auth_data.credential_data {
                     bufs.insert(RESBUF_ID_KEYHANDLE, cred_data.credential_id.clone());
                 }
