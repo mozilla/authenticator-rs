@@ -118,7 +118,9 @@ pub(crate) trait PinAuthCommand {
             Err(HIDError::Command(CommandError::StatusCode(StatusCode::PinBlocked, _))) => {
                 return Err(HIDError::Command(CommandError::Pin(PinError::PinBlocked)));
             }
-            // TODO(MS): Add "PinRequired"
+            Err(HIDError::Command(CommandError::StatusCode(StatusCode::PinRequired, _))) => {
+                return Err(HIDError::Command(CommandError::Pin(PinError::PinRequired)));
+            }
             // TODO(MS): Add "PinNotSet"
             // TODO(MS): Add "PinPolicyViolated"
             Err(err) => {
