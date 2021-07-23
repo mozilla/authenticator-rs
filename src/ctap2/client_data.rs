@@ -208,10 +208,11 @@ pub struct CollectedClientData {
     pub webauthn_type: WebauthnType,
     pub challenge: Challenge,
     pub origin: Origin,
-    // Should not be skipped but default to False according to https://www.w3.org/TR/webauthn/#collectedclientdata-hash-of-the-serialized-client-data
-    #[serde(rename = "crossOrigin", skip_serializing_if = "Option::is_none")]
-    /*default = "bool::default"*/
-    pub cross_origin: Option<bool>,
+    // It is optional, according to https://www.w3.org/TR/webauthn/#collectedclientdata-hash-of-the-serialized-client-data
+    // But we are serializing it, so we *have to* set crossOrigin (if not given, we have to set it to false)
+    // Thus, on our side, it is not optional. For deserializing, we provide a default (bool's default == False)
+    #[serde(rename = "crossOrigin", default)]
+    pub cross_origin: bool,
     #[serde(rename = "tokenBinding", skip_serializing_if = "Option::is_none")]
     pub token_binding: Option<TokenBinding>,
 }
@@ -329,7 +330,7 @@ mod test {
             webauthn_type: WebauthnType::Create,
             challenge: Challenge::new(vec![0x00, 0x01, 0x02, 0x03]),
             origin: String::from("example.com"),
-            cross_origin: Some(false),
+            cross_origin: false,
             token_binding: Some(TokenBinding::Present("AAECAw".to_string())),
         };
         assert_eq!(parsed, expected);
@@ -339,12 +340,30 @@ mod test {
     }
 
     #[test]
+    fn test_collected_client_data_defaults() {
+        let cross_origin_str = "{\"type\":\"webauthn.create\",\"challenge\":\"AAECAw\",\"origin\":\"example.com\",\"crossOrigin\":false,\"tokenBinding\":{\"status\":\"present\",\"id\":\"AAECAw\"}}";
+        let no_cross_origin_str = "{\"type\":\"webauthn.create\",\"challenge\":\"AAECAw\",\"origin\":\"example.com\",\"tokenBinding\":{\"status\":\"present\",\"id\":\"AAECAw\"}}";
+        let parsed: CollectedClientData = serde_json::from_str(&no_cross_origin_str).unwrap();
+        let expected = CollectedClientData {
+            webauthn_type: WebauthnType::Create,
+            challenge: Challenge::new(vec![0x00, 0x01, 0x02, 0x03]),
+            origin: String::from("example.com"),
+            cross_origin: false,
+            token_binding: Some(TokenBinding::Present("AAECAw".to_string())),
+        };
+        assert_eq!(parsed, expected);
+
+        let back_again = serde_json::to_string(&expected).unwrap();
+        assert_eq!(back_again, cross_origin_str);
+    }
+
+    #[test]
     fn test_collected_client_data() {
         let client_data = CollectedClientData {
             webauthn_type: WebauthnType::Create,
             challenge: Challenge::new(vec![0x00, 0x01, 0x02, 0x03]),
             origin: String::from("example.com"),
-            cross_origin: Some(false),
+            cross_origin: false,
             token_binding: Some(TokenBinding::Present("AAECAw".to_string())),
         };
 

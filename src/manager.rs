@@ -324,7 +324,7 @@ impl AuthenticatorTransport for Manager {
                     webauthn_type: WebauthnType::Create,
                     challenge: args.challenge.into(),
                     origin: args.origin,
-                    cross_origin: None,
+                    cross_origin: false,
                     token_binding: None,
                 };
 
@@ -347,7 +347,7 @@ impl AuthenticatorTransport for Manager {
                     webauthn_type: WebauthnType::Create,
                     challenge: args.challenge.into(),
                     origin: String::new(),
-                    cross_origin: None,
+                    cross_origin: false,
                     token_binding: None,
                 };
 
@@ -396,7 +396,7 @@ impl AuthenticatorTransport for Manager {
                     webauthn_type: WebauthnType::Get,
                     challenge: args.challenge.into(),
                     origin: String::new(),
-                    cross_origin: None,
+                    cross_origin: false,
                     token_binding: None,
                 };
                 let options = if args.flags == SignFlags::empty() {
@@ -441,7 +441,7 @@ impl AuthenticatorTransport for Manager {
                     webauthn_type: WebauthnType::Get,
                     challenge: args.challenge.into(),
                     origin: args.origin,
-                    cross_origin: None,
+                    cross_origin: false,
                     token_binding: None,
                 };
                 // TODO(baloo): This block of code and commend was previously in src/statemanchine.rs

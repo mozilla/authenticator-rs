@@ -611,7 +611,7 @@ pub mod test {
             webauthn_type: WebauthnType::Create,
             challenge: Challenge::from(vec![0x00, 0x01, 0x02, 0x03]),
             origin: String::from("example.com"),
-            cross_origin: Some(false),
+            cross_origin: false,
             token_binding: Some(TokenBinding::Present(String::from("AAECAw"))),
         };
         let assertion = GetAssertion::new(
