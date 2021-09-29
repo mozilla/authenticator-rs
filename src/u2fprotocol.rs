@@ -291,7 +291,11 @@ pub(crate) mod tests {
             fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
                 // Pop a vector from the expected writes, check for quality
                 // against bytes array.
-                assert!(!self.writes.is_empty(), "Ran out of expected write values!");
+                assert!(
+                    !self.writes.is_empty(),
+                    "Ran out of expected write values! Wanted to write {:?}",
+                    bytes
+                );
                 let check = self.writes.remove(0);
                 assert_eq!(check.len(), bytes.len());
                 assert_eq!(&check, bytes);
@@ -316,8 +320,10 @@ pub(crate) mod tests {
 
         impl Drop for TestDevice {
             fn drop(&mut self) {
-                assert!(self.reads.is_empty());
-                assert!(self.writes.is_empty());
+                if !std::thread::panicking() {
+                    assert!(self.reads.is_empty());
+                    assert!(self.writes.is_empty());
+                }
             }
         }
 
