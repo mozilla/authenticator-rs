@@ -102,6 +102,8 @@ fn main() {
         register_tx.send(rv).unwrap();
     }));
 
+    let raw_pin = rpassword::prompt_password_stderr("Enter PIN: ").expect("Failed to read PIN");
+
     let user = User {
         id: "user_id".as_bytes().to_vec(),
         icon: None,
@@ -122,7 +124,7 @@ fn main() {
             PublicKeyCredentialParameters { alg: Alg::ES256 },
             PublicKeyCredentialParameters { alg: Alg::RS256 },
         ],
-        pin: Some(Pin::new("1234")),
+        pin: Some(Pin::new(&raw_pin)),
         exclude_list: vec![PublicKeyCredentialDescriptor {
             id: vec![
                 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
@@ -169,13 +171,15 @@ fn main() {
         allow_list = Vec::new();
     }
 
+    let raw_pin = rpassword::prompt_password_stderr("Enter PIN: ").expect("Failed to read PIN");
+
     let ctap_args = SignArgsCtap2 {
         flags: SignFlags::empty(),
         challenge: chall_bytes,
         origin,
         relying_party_id: "example.com".to_string(),
         allow_list,
-        pin: Some(Pin::new("1234")),
+        pin: Some(Pin::new(&raw_pin)),
     };
 
     if let Err(e) = manager.sign(timeout_ms, ctap_args.into(), status_tx, callback) {
