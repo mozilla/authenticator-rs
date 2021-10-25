@@ -8,6 +8,7 @@ use authenticator::{
         Alg, PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, Transport,
         User,
     },
+    errors::{AuthenticatorError, PinError},
     statecallback::StateCallback,
     Pin, RegisterResult, SignFlags, SignResult, StatusUpdate,
 };
@@ -97,13 +98,6 @@ fn main() {
         }
     });
 
-    let (register_tx, register_rx) = channel();
-    let callback = StateCallback::new(Box::new(move |rv| {
-        register_tx.send(rv).unwrap();
-    }));
-
-    let raw_pin = rpassword::prompt_password_stderr("Enter PIN: ").expect("Failed to read PIN");
-
     let user = User {
         id: "user_id".as_bytes().to_vec(),
         icon: None,
@@ -111,7 +105,7 @@ fn main() {
         display_name: None,
     };
     let origin = "https://example.com".to_string();
-    let ctap_args = RegisterArgsCtap2 {
+    let mut ctap_args = RegisterArgsCtap2 {
         challenge: chall_bytes.clone(),
         relying_party: RelyingParty {
             id: "example.com".to_string(),
@@ -124,7 +118,7 @@ fn main() {
             PublicKeyCredentialParameters { alg: Alg::ES256 },
             PublicKeyCredentialParameters { alg: Alg::RS256 },
         ],
-        pin: Some(Pin::new(&raw_pin)),
+        pin: None,
         exclude_list: vec![PublicKeyCredentialDescriptor {
             id: vec![
                 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
@@ -134,18 +128,63 @@ fn main() {
             transports: vec![Transport::USB, Transport::NFC],
         }],
     };
-    manager
-        .register(timeout_ms, ctap_args.into(), status_tx.clone(), callback)
-        .expect("Couldn't register");
 
-    let register_result = register_rx
-        .recv()
-        .expect("Problem receiving, unable to continue");
-    let (attestation_object, client_data) = match register_result {
-        Ok(RegisterResult::CTAP1(_, _)) => panic!("Requested CTAP2, but got CTAP1 results!"),
-        Ok(RegisterResult::CTAP2(a, c)) => (a, c),
-        Err(e) => panic!("Registration failed: {:?}", e),
-    };
+    let attestation_object;
+    let client_data;
+    loop {
+        let (register_tx, register_rx) = channel();
+        let callback = StateCallback::new(Box::new(move |rv| {
+            register_tx.send(rv).unwrap();
+        }));
+
+        if let Err(e) = manager.register(
+            timeout_ms,
+            ctap_args.clone().into(),
+            status_tx.clone(),
+            callback,
+        ) {
+            panic!("Couldn't register: {:?}", e);
+        };
+
+        let register_result = register_rx
+            .recv()
+            .expect("Problem receiving, unable to continue");
+        match register_result {
+            Ok(RegisterResult::CTAP1(_, _)) => panic!("Requested CTAP2, but got CTAP1 results!"),
+            Ok(RegisterResult::CTAP2(a, c)) => {
+                println!("Ok!");
+                attestation_object = a;
+                client_data = c;
+                break;
+            }
+            Err(AuthenticatorError::PinError(PinError::PinRequired)) => {
+                let raw_pin =
+                    rpassword::prompt_password_stderr("Enter PIN: ").expect("Failed to read PIN");
+                ctap_args.pin = Some(Pin::new(&raw_pin));
+                continue;
+            }
+            Err(AuthenticatorError::PinError(PinError::InvalidPin(attempts))) => {
+                println!(
+                    "Wrong PIN! {}",
+                    attempts.map_or(format!("Try again."), |a| format!(
+                        "You have {} attempts left.",
+                        a
+                    ))
+                );
+                let raw_pin =
+                    rpassword::prompt_password_stderr("Enter PIN: ").expect("Failed to read PIN");
+                ctap_args.pin = Some(Pin::new(&raw_pin));
+                continue;
+            }
+            Err(AuthenticatorError::PinError(PinError::PinAuthBlocked)) => {
+                panic!("Too many failed attempts in one row. Your device has been temporarily blocked. Please unplug it and plug in again.")
+            }
+            Err(AuthenticatorError::PinError(PinError::PinBlocked)) => {
+                panic!("Too many failed attempts. Your device has been blocked. Reset it.")
+            }
+            Err(e) => panic!("Registration failed: {:?}", e),
+        };
+    }
 
     println!("Register result: {:?}", &attestation_object);
     println!("Collected client data: {:?}", &client_data);
@@ -154,12 +193,6 @@ fn main() {
     println!("*********************************************************************");
     println!("Asking a security key to sign now, with the data from the register...");
     println!("*********************************************************************");
-
-    let (sign_tx, sign_rx) = channel();
-
-    let callback = StateCallback::new(Box::new(move |rv| {
-        sign_tx.send(rv).unwrap();
-    }));
 
     let allow_list;
     if let Some(cred_data) = attestation_object.auth_data.credential_data {
@@ -171,28 +204,73 @@ fn main() {
         allow_list = Vec::new();
     }
 
-    let raw_pin = rpassword::prompt_password_stderr("Enter PIN: ").expect("Failed to read PIN");
-
-    let ctap_args = SignArgsCtap2 {
+    let mut ctap_args = SignArgsCtap2 {
         flags: SignFlags::empty(),
         challenge: chall_bytes,
         origin,
         relying_party_id: "example.com".to_string(),
         allow_list,
-        pin: Some(Pin::new(&raw_pin)),
+        pin: None,
     };
 
-    if let Err(e) = manager.sign(timeout_ms, ctap_args.into(), status_tx, callback) {
-        panic!("Couldn't register: {:?}", e);
-    }
+    loop {
+        let (sign_tx, sign_rx) = channel();
 
-    let sign_result = sign_rx
-        .recv()
-        .expect("Problem receiving, unable to continue");
-    if let SignResult::CTAP2(assertion_object, _client_data) = sign_result.expect("Sign failed") {
-        println!("Assertion Object: {:?}", assertion_object);
-        println!("Done.");
-    } else {
-        panic!("Expected sign result to be CTAP2, but got CTAP1");
+        let callback = StateCallback::new(Box::new(move |rv| {
+            sign_tx.send(rv).unwrap();
+        }));
+
+        if let Err(e) = manager.sign(
+            timeout_ms,
+            ctap_args.clone().into(),
+            status_tx.clone(),
+            callback,
+        ) {
+            panic!("Couldn't sign: {:?}", e);
+        }
+
+        let sign_result = sign_rx
+            .recv()
+            .expect("Problem receiving, unable to continue");
+
+        match sign_result {
+            Ok(SignResult::CTAP1(..)) => panic!("Requested CTAP2, but got CTAP1 sign results!"),
+            Ok(SignResult::CTAP2(assertion_object, _client_data)) => {
+                println!("Assertion Object: {:?}", assertion_object);
+                println!("Done.");
+                break;
+            }
+
+            Err(AuthenticatorError::PinError(PinError::PinRequired)) => {
+                let raw_pin =
+                    rpassword::prompt_password_stderr("Enter PIN: ").expect("Failed to read PIN");
+                ctap_args.pin = Some(Pin::new(&raw_pin));
+                continue;
+            }
+
+            Err(AuthenticatorError::PinError(PinError::InvalidPin(attempts))) => {
+                println!(
+                    "Wrong PIN! {}",
+                    attempts.map_or(format!("Try again."), |a| format!(
+                        "You have {} attempts left.",
+                        a
+                    ))
+                );
+                let raw_pin =
+                    rpassword::prompt_password_stderr("Enter PIN: ").expect("Failed to read PIN");
+                ctap_args.pin = Some(Pin::new(&raw_pin));
+                continue;
+            }
+
+            Err(AuthenticatorError::PinError(PinError::PinAuthBlocked)) => {
+                panic!("Too many failed attempts in one row. Your device has been temporarily blocked. Please unplug it and plug in again.")
+            }
+
+            Err(AuthenticatorError::PinError(PinError::PinBlocked)) => {
+                panic!("Too many failed attempts. Your device has been blocked. Reset it.")
+            }
+
+            Err(e) => panic!("Signing failed: {:?}", e),
+        }
     }
 }

@@ -2,8 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use crate::ctap2::commands::{client_pin::PinError, CommandError};
-use crate::transport::errors::HIDError;
+pub use crate::ctap2::commands::{client_pin::PinError, CommandError};
+pub use crate::transport::errors::HIDError;
 use std::fmt;
 use std::io;
 use std::sync::mpsc;
@@ -25,6 +25,7 @@ pub enum AuthenticatorError {
     VersionMismatch(&'static str, u32),
     HIDError(HIDError),
     CryptoError,
+    PinError(PinError),
 }
 
 impl AuthenticatorError {
@@ -33,18 +34,10 @@ impl AuthenticatorError {
             AuthenticatorError::U2FToken(ref err) => *err as u8,
             // TODO: This is somewhat ugly, as we hardcode the error code here, instead of using the
             // const defined in `u2fhid-capi.h`, which we should.
-            AuthenticatorError::HIDError(HIDError::Command(CommandError::Pin(
-                PinError::PinRequired,
-            ))) => 6u8,
-            AuthenticatorError::HIDError(HIDError::Command(CommandError::Pin(
-                PinError::InvalidPin(_),
-            ))) => 7u8,
-            AuthenticatorError::HIDError(HIDError::Command(CommandError::Pin(
-                PinError::PinAuthBlocked,
-            ))) => 8u8,
-            AuthenticatorError::HIDError(HIDError::Command(CommandError::Pin(
-                PinError::PinBlocked,
-            ))) => 9u8,
+            AuthenticatorError::PinError(PinError::PinRequired) => 6u8,
+            AuthenticatorError::PinError(PinError::InvalidPin(_)) => 7u8,
+            AuthenticatorError::PinError(PinError::PinAuthBlocked) => 8u8,
+            AuthenticatorError::PinError(PinError::PinBlocked) => 9u8,
             _ => U2FTokenError::Unknown as u8,
         }
     }
@@ -78,6 +71,7 @@ impl fmt::Display for AuthenticatorError {
             AuthenticatorError::CryptoError => {
                 write!(f, "The cryptography implementation encountered an error")
             }
+            AuthenticatorError::PinError(ref e) => write!(f, "PIN Error: {}", e),
         }
     }
 }
