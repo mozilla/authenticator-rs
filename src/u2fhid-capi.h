@@ -42,6 +42,10 @@ const uint8_t U2F_ERROR_NOT_SUPPORTED = 2;
 const uint8_t U2F_ERROR_INVALID_STATE = 3;
 const uint8_t U2F_ERROR_CONSTRAINT = 4;
 const uint8_t U2F_ERROR_NOT_ALLOWED = 5;
+const uint8_t CTAP_ERROR_PIN_REQUIRED = 6;
+const uint8_t CTAP_ERROR_PIN_INVALID = 7;
+const uint8_t CTAP_ERROR_PIN_AUTH_BLOCKED = 8;
+const uint8_t CTAP_ERROR_PIN_BLOCKED = 9;
 
 // NOTE: Preconditions
 // * All rust_u2f_mgr* pointers must refer to pointers which are returned

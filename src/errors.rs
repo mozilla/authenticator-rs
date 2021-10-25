@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+use crate::ctap2::commands::{client_pin::PinError, CommandError};
 use crate::transport::errors::HIDError;
 use std::fmt;
 use std::io;
@@ -30,6 +31,20 @@ impl AuthenticatorError {
     pub fn as_u2f_errorcode(&self) -> u8 {
         match *self {
             AuthenticatorError::U2FToken(ref err) => *err as u8,
+            // TODO: This is somewhat ugly, as we hardcode the error code here, instead of using the
+            // const defined in `u2fhid-capi.h`, which we should.
+            AuthenticatorError::HIDError(HIDError::Command(CommandError::Pin(
+                PinError::PinRequired,
+            ))) => 6u8,
+            AuthenticatorError::HIDError(HIDError::Command(CommandError::Pin(
+                PinError::InvalidPin(_),
+            ))) => 7u8,
+            AuthenticatorError::HIDError(HIDError::Command(CommandError::Pin(
+                PinError::PinAuthBlocked,
+            ))) => 8u8,
+            AuthenticatorError::HIDError(HIDError::Command(CommandError::Pin(
+                PinError::PinBlocked,
+            ))) => 9u8,
             _ => U2FTokenError::Unknown as u8,
         }
     }
