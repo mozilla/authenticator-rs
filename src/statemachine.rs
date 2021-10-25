@@ -356,12 +356,8 @@ impl StateMachineCtap2 {
             let mut makecred = params.clone();
             match makecred.determine_pin_auth(dev) {
                 Ok(x) => x,
-                Err(HIDError::Command(CommandError::Pin(e))) => {
-                    callback.call(Err(errors::AuthenticatorError::PinError(e)));
-                    return;
-                }
                 Err(e) => {
-                    callback.call(Err(errors::AuthenticatorError::HIDError(e)));
+                    callback.call(Err(e));
                     return;
                 }
             };
@@ -442,12 +438,8 @@ impl StateMachineCtap2 {
             let mut getassertion = params.clone();
             match getassertion.determine_pin_auth(dev) {
                 Ok(x) => x,
-                Err(HIDError::Command(CommandError::Pin(e))) => {
-                    callback.call(Err(errors::AuthenticatorError::PinError(e)));
-                    return;
-                }
                 Err(e) => {
-                    callback.call(Err(errors::AuthenticatorError::HIDError(e)));
+                    callback.call(Err(e));
                     return;
                 }
             };

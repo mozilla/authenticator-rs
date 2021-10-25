@@ -82,6 +82,18 @@ impl From<io::Error> for AuthenticatorError {
     }
 }
 
+impl From<HIDError> for AuthenticatorError {
+    fn from(err: HIDError) -> AuthenticatorError {
+        AuthenticatorError::HIDError(err)
+    }
+}
+
+impl From<CommandError> for AuthenticatorError {
+    fn from(err: CommandError) -> AuthenticatorError {
+        AuthenticatorError::HIDError(HIDError::Command(err))
+    }
+}
+
 impl<T> From<mpsc::SendError<T>> for AuthenticatorError {
     fn from(err: mpsc::SendError<T>) -> AuthenticatorError {
         AuthenticatorError::InternalError(err.to_string())

@@ -4,6 +4,7 @@ use crate::ctap2::commands::client_pin::{
     GetKeyAgreement, GetPinToken, GetRetries, Pin, PinAuth, PinError,
 };
 use crate::ctap2::commands::get_info::GetInfo;
+use crate::errors::AuthenticatorError;
 use crate::transport::errors::{ApduErrorStatus, HIDError};
 use crate::transport::FidoDevice;
 use serde_cbor::{error::Error as CborError, Value};
@@ -90,7 +91,7 @@ pub(crate) trait PinAuthCommand {
     fn pin_auth(&self) -> &Option<PinAuth>;
     fn set_pin_auth(&mut self, pin_auth: Option<PinAuth>);
     fn client_data(&self) -> &CollectedClientData;
-    fn determine_pin_auth<D: FidoDevice>(&mut self, dev: &mut D) -> Result<(), HIDError> {
+    fn determine_pin_auth<D: FidoDevice>(&mut self, dev: &mut D) -> Result<(), AuthenticatorError> {
         if !dev.supports_ctap2() {
             self.set_pin_auth(None);
             return Ok(());
@@ -99,27 +100,35 @@ pub(crate) trait PinAuthCommand {
         let client_data_hash = self
             .client_data()
             .hash()
-            .map_err(|e| HIDError::Command(CommandError::Json(e)))?;
+            .map_err(|e| AuthenticatorError::HIDError(HIDError::Command(CommandError::Json(e))))?;
         let pin_auth = match calculate_pin_auth(dev, &client_data_hash, &self.pin()) {
             Ok(pin_auth) => pin_auth,
-            Err(HIDError::Command(CommandError::StatusCode(StatusCode::PinInvalid, _))) => {
+            Err(AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
+                StatusCode::PinInvalid,
+                _,
+            )))) => {
                 // If the given PIN was wrong, determine no. of left retries
                 let cmd = GetRetries::new();
                 let retries = dev.send_cbor(&cmd).ok(); // If we got retries, wrap it in Some, otherwise ignore err
-                return Err(HIDError::Command(CommandError::Pin(PinError::InvalidPin(
-                    retries,
-                ))));
+                return Err(AuthenticatorError::PinError(PinError::InvalidPin(retries)));
             }
-            Err(HIDError::Command(CommandError::StatusCode(StatusCode::PinAuthBlocked, _))) => {
-                return Err(HIDError::Command(CommandError::Pin(
-                    PinError::PinAuthBlocked,
-                )));
+            Err(AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
+                StatusCode::PinAuthBlocked,
+                _,
+            )))) => {
+                return Err(AuthenticatorError::PinError(PinError::PinAuthBlocked));
             }
-            Err(HIDError::Command(CommandError::StatusCode(StatusCode::PinBlocked, _))) => {
-                return Err(HIDError::Command(CommandError::Pin(PinError::PinBlocked)));
+            Err(AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
+                StatusCode::PinBlocked,
+                _,
+            )))) => {
+                return Err(AuthenticatorError::PinError(PinError::PinBlocked));
             }
-            Err(HIDError::Command(CommandError::StatusCode(StatusCode::PinRequired, _))) => {
-                return Err(HIDError::Command(CommandError::Pin(PinError::PinRequired)));
+            Err(AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
+                StatusCode::PinRequired,
+                _,
+            )))) => {
+                return Err(AuthenticatorError::PinError(PinError::PinRequired));
             }
             // TODO(MS): Add "PinNotSet"
             // TODO(MS): Add "PinPolicyViolated"
@@ -371,7 +380,6 @@ pub enum CommandError {
     Json(json::Error),
     Crypto(crypto::CryptoError),
     UnsupportedPinProtocol,
-    Pin(PinError),
 }
 
 impl fmt::Display for CommandError {
@@ -396,7 +404,6 @@ impl fmt::Display for CommandError {
             CommandError::UnsupportedPinProtocol => {
                 write!(f, "CommandError: Pin protocol is not supported")
             }
-            CommandError::Pin(ref p) => write!(f, "CommandError: Pin error: {}", p),
         }
     }
 }
@@ -407,7 +414,7 @@ pub(crate) fn calculate_pin_auth<Dev>(
     dev: &mut Dev,
     client_data_hash: &ClientDataHash,
     pin: &Option<Pin>,
-) -> Result<Option<PinAuth>, HIDError>
+) -> Result<Option<PinAuth>, AuthenticatorError>
 where
     Dev: FidoDevice,
 {
@@ -427,7 +434,10 @@ where
     let pin_auth = if info.options.client_pin == Some(true) {
         let pin = pin
             .as_ref()
-            .ok_or(CommandError::Pin(PinError::PinRequired))?;
+            .ok_or(HIDError::Command(CommandError::StatusCode(
+                StatusCode::PinRequired,
+                None,
+            )))?;
 
         let shared_secret = if let Some(shared_secret) = dev.get_shared_secret().cloned() {
             shared_secret
@@ -445,7 +455,7 @@ where
         Some(
             pin_token
                 .auth(&client_data_hash)
-                .map_err(CommandError::Pin)?,
+                .map_err(AuthenticatorError::PinError)?,
         )
     } else {
         None
