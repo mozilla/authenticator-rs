@@ -79,9 +79,7 @@ impl Device {
 
 impl fmt::Debug for Device {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Device")
-            .field("cid", &self.cid)
-            .finish()
+        f.debug_struct("Device").field("cid", &self.cid).finish()
     }
 }
 
@@ -173,11 +171,11 @@ impl U2FDevice for Device {
 }
 
 impl HIDDevice for Device {
-    type BuildParameters = IOHIDDeviceRef;
+    type BuildParameters = (IOHIDDeviceRef, Receiver<Vec<u8>>);
     type Id = [u8; 4];
 
-    fn new(path: Self::BuildParameters) -> Result<Self, HIDError> {
-        unimplemented!();
+    fn new(dev_ids: Self::BuildParameters) -> Result<Self, HIDError> {
+        Device::new(dev_ids).map_err(|_| HIDError::DeviceNotInitialized)
     }
 
     fn initialized(&self) -> bool {
@@ -185,7 +183,7 @@ impl HIDDevice for Device {
     }
 
     fn id(&self) -> Self::Id {
-        unimplemented!();
+        self.cid
     }
 
     fn get_shared_secret(&self) -> Option<&ECDHSecret> {
