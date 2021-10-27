@@ -38,7 +38,7 @@ pub struct MakeCredentialsOptions {
     #[serde(rename = "rk", skip_serializing_if = "Option::is_none")]
     pub resident_key: Option<bool>,
     #[serde(rename = "uv", skip_serializing_if = "Option::is_none")]
-    pub user_validation: Option<bool>,
+    pub user_verification: Option<bool>,
     // TODO(MS): ctap2.1 supports user_presence, but ctap2.0 does not and tokens will error out
     //           Commands need a version-flag to know what to de/serialize and what to ignore.
 }
@@ -47,24 +47,24 @@ impl Default for MakeCredentialsOptions {
     fn default() -> Self {
         Self {
             resident_key: None,
-            user_validation: Some(true),
+            user_verification: Some(true),
         }
     }
 }
 
 impl MakeCredentialsOptions {
     pub(crate) fn has_some(&self) -> bool {
-        self.resident_key.is_some() || self.user_validation.is_some()
+        self.resident_key.is_some() || self.user_verification.is_some()
     }
 }
 
-pub(crate) trait UserValidation {
-    fn ask_user_validation(&self) -> bool;
+pub(crate) trait UserVerification {
+    fn ask_user_verification(&self) -> bool;
 }
 
-impl UserValidation for MakeCredentialsOptions {
-    fn ask_user_validation(&self) -> bool {
-        if let Some(e) = self.user_validation {
+impl UserVerification for MakeCredentialsOptions {
+    fn ask_user_verification(&self) -> bool {
+        if let Some(e) = self.user_verification {
             e
         } else {
             false
@@ -214,7 +214,7 @@ impl RequestCtap1 for MakeCredentials {
         //  * Options must not include "rk" set to true.
         //  * Options must not include "uv" set to true.
 
-        let flags = if self.options.ask_user_validation() {
+        let flags = if self.options.ask_user_verification() {
             U2F_REQUEST_USER_PRESENCE
         } else {
             0
@@ -414,7 +414,7 @@ pub mod test {
             Vec::new(),
             MakeCredentialsOptions {
                 resident_key: Some(true),
-                user_validation: None,
+                user_verification: None,
             },
             None,
         );
@@ -548,7 +548,7 @@ pub mod test {
             Vec::new(),
             MakeCredentialsOptions {
                 resident_key: Some(true),
-                user_validation: None,
+                user_verification: None,
             },
             None,
         );

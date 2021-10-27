@@ -336,7 +336,7 @@ impl AuthenticatorTransport for Manager {
                     args.exclude_list,
                     MakeCredentialsOptions {
                         resident_key: None,
-                        user_validation: None,
+                        user_verification: None,
                     },
                     args.pin,
                     // pin_auth will be filled in Statemachine, once we have a device
@@ -359,7 +359,7 @@ impl AuthenticatorTransport for Manager {
                     vec![], // TODO(MS): Implement excludeList. See spec.
                     MakeCredentialsOptions {
                         resident_key: None,
-                        user_validation: None,
+                        user_verification: None,
                     },
                     None,
                 )
@@ -403,7 +403,7 @@ impl AuthenticatorTransport for Manager {
                     GetAssertionOptions::default()
                 } else {
                     GetAssertionOptions {
-                        user_validation: Some(
+                        user_verification: Some(
                             args.flags.contains(SignFlags::REQUIRE_USER_VERIFICATION),
                         ),
                         ..GetAssertionOptions::default()
@@ -462,7 +462,7 @@ impl AuthenticatorTransport for Manager {
                     GetAssertionOptions::default()
                 } else {
                     GetAssertionOptions {
-                        user_validation: Some(
+                        user_verification: Some(
                             args.flags.contains(SignFlags::REQUIRE_USER_VERIFICATION),
                         ),
                         ..GetAssertionOptions::default()

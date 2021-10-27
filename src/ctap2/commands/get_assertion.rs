@@ -9,7 +9,7 @@ use crate::ctap2::attestation::{AuthenticatorData, AuthenticatorDataFlags};
 use crate::ctap2::client_data::CollectedClientData;
 use crate::ctap2::commands::client_pin::{Pin, PinAuth};
 use crate::ctap2::commands::get_next_assertion::GetNextAssertion;
-use crate::ctap2::commands::make_credentials::UserValidation;
+use crate::ctap2::commands::make_credentials::UserVerification;
 use crate::ctap2::server::{PublicKeyCredentialDescriptor, RelyingPartyWrapper, User};
 use crate::transport::errors::{ApduErrorStatus, HIDError};
 use crate::transport::FidoDevice;
@@ -39,7 +39,7 @@ pub enum GetAssertionResult {
 #[cfg_attr(test, derive(Deserialize))]
 pub struct GetAssertionOptions {
     #[serde(rename = "uv", skip_serializing_if = "Option::is_none")]
-    pub user_validation: Option<bool>,
+    pub user_verification: Option<bool>,
     #[serde(rename = "up", skip_serializing_if = "Option::is_none")]
     pub user_presence: Option<bool>,
 }
@@ -48,20 +48,20 @@ impl Default for GetAssertionOptions {
     fn default() -> Self {
         Self {
             user_presence: Some(true),
-            user_validation: None,
+            user_verification: None,
         }
     }
 }
 
 impl GetAssertionOptions {
     pub(crate) fn has_some(&self) -> bool {
-        self.user_presence.is_some() || self.user_validation.is_some()
+        self.user_presence.is_some() || self.user_verification.is_some()
     }
 }
 
-impl UserValidation for GetAssertionOptions {
-    fn ask_user_validation(&self) -> bool {
-        if let Some(e) = self.user_validation {
+impl UserVerification for GetAssertionOptions {
+    fn ask_user_verification(&self) -> bool {
+        if let Some(e) = self.user_verification {
             e
         } else {
             false
@@ -592,7 +592,7 @@ pub mod test {
             }],
             GetAssertionOptions {
                 user_presence: Some(true),
-                user_validation: None,
+                user_verification: None,
             },
             None,
         );
@@ -793,7 +793,7 @@ pub mod test {
             }],
             GetAssertionOptions {
                 user_presence: Some(true),
-                user_validation: None,
+                user_verification: None,
             },
             None,
         );
