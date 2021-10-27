@@ -2,10 +2,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+use crate::transport::hid::HIDDevice;
+use crate::transport::{AuthenticatorInfo, ECDHSecret, HIDError};
 use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
 use std::io;
 use std::io::{Read, Write};
+use std::path::PathBuf;
 
+#[derive(Debug)]
 pub struct Device {}
 
 impl Device {
@@ -61,5 +65,38 @@ impl U2FDevice for Device {
 
     fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {
         panic!("not implemented")
+    }
+}
+
+impl HIDDevice for Device {
+    type BuildParameters = PathBuf;
+    type Id = PathBuf;
+
+    fn new(parameters: Self::BuildParameters) -> Result<Self, HIDError> {
+        unimplemented!();
+    }
+
+    fn initialized(&self) -> bool {
+        unimplemented!();
+    }
+
+    fn id(&self) -> Self::Id {
+        unimplemented!()
+    }
+
+    fn get_authenticator_info(&self) -> Option<&AuthenticatorInfo> {
+        unimplemented!()
+    }
+
+    fn set_authenticator_info(&mut self, authenticator_info: AuthenticatorInfo) {
+        unimplemented!()
+    }
+
+    fn set_shared_secret(&mut self, secret: ECDHSecret) {
+        unimplemented!()
+    }
+
+    fn get_shared_secret(&self) -> Option<&ECDHSecret> {
+        unimplemented!()
     }
 }
