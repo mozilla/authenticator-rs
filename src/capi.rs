@@ -7,6 +7,7 @@ use crate::authenticatorservice::{
     SignArgsCtap2,
 };
 use crate::ctap2::attestation::AttestationStatement;
+use crate::ctap2::commands::make_credentials::MakeCredentialsOptions;
 use crate::ctap2::server::{
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, User,
 };
@@ -432,10 +433,35 @@ pub extern "C" fn rust_ctap2_mgr_new() -> *mut AuthenticatorService {
     }
 }
 
+#[repr(C)]
+pub struct RegisterArgsUser {
+    id_ptr: *const u8,
+    id_len: usize,
+    name: *const c_char,
+}
+
+#[repr(C)]
+pub struct RegisterArgsChallenge {
+    ptr: *const u8,
+    len: usize,
+}
+
+#[repr(C)]
+pub struct RegisterArgsPubCred {
+    ptr: *const i32,
+    len: usize,
+}
+
+#[repr(C)]
+pub struct RegisterArgsOptions {
+    resident_key: bool,
+    user_verification: bool,
+}
 /// # Safety
 ///
 /// This method should not be called on AuthenticatorService handles after
 /// they've been freed
+/// All input is copied and it is the callers responsibility to free appropriately.
 /// Note: `KeyHandles` are used as `PublicKeyCredentialDescriptor`s for the exclude_list
 ///       to keep the API smaller, as they are essentially the same thing.
 ///       `PublicKeyCredentialParameters` in pub_cred_params are represented as i32 with
@@ -445,16 +471,13 @@ pub unsafe extern "C" fn rust_ctap2_mgr_register(
     mgr: *mut AuthenticatorService,
     timeout: u64,
     callback: U2FCallback,
-    challenge_ptr: *const u8,
-    challenge_len: usize,
+    challenge: RegisterArgsChallenge,
     relying_party_id: *const c_char,
     origin_ptr: *const c_char,
-    user_id_ptr: *const u8,
-    user_id_len: usize,
-    user_name: *const c_char,
-    pub_cred_params_ptr: *const i32,
-    pub_cred_params_len: usize,
+    user: RegisterArgsUser,
+    pub_cred_params: RegisterArgsPubCred,
     exclude_list: *const U2FKeyHandles,
+    options: RegisterArgsOptions,
     pin_ptr: *const c_char,
 ) -> u64 {
     if mgr.is_null() {
@@ -462,17 +485,17 @@ pub unsafe extern "C" fn rust_ctap2_mgr_register(
     }
 
     // Check buffers.
-    if challenge_ptr.is_null()
+    if challenge.ptr.is_null()
         || origin_ptr.is_null()
         || relying_party_id.is_null()
-        || user_id_ptr.is_null()
-        || user_name.is_null()
+        || user.id_ptr.is_null()
+        || user.name.is_null()
         || exclude_list.is_null()
     {
         return 0;
     }
 
-    let pub_cred_params = slice::from_raw_parts(pub_cred_params_ptr, pub_cred_params_len)
+    let pub_cred_params = slice::from_raw_parts(pub_cred_params.ptr, pub_cred_params.len)
         .iter()
         .map(|x| PublicKeyCredentialParameters::from(*x))
         .collect();
@@ -482,8 +505,8 @@ pub unsafe extern "C" fn rust_ctap2_mgr_register(
         Some(Pin::new(&CStr::from_ptr(pin_ptr).to_string_lossy()))
     };
     let user = User {
-        id: from_raw(user_id_ptr, user_id_len),
-        name: CStr::from_ptr(user_name).to_string_lossy().to_string(), // TODO(MS): Use to_str() and error out on failure?
+        id: from_raw(user.id_ptr, user.id_len),
+        name: CStr::from_ptr(user.name).to_string_lossy().to_string(), // TODO(MS): Use to_str() and error out on failure?
         display_name: None,
         icon: None,
     };
@@ -495,7 +518,7 @@ pub unsafe extern "C" fn rust_ctap2_mgr_register(
         icon: None,
     };
     let origin = CStr::from_ptr(origin_ptr).to_string_lossy().to_string();
-    let challenge = from_raw(challenge_ptr, challenge_len);
+    let challenge = from_raw(challenge.ptr, challenge.len);
     let exclude_list = (*exclude_list)
         .clone()
         .iter()
@@ -588,6 +611,10 @@ pub unsafe extern "C" fn rust_ctap2_mgr_register(
         user,
         pub_cred_params,
         exclude_list,
+        options: MakeCredentialsOptions {
+            resident_key: options.resident_key.then(|| true),
+            user_verification: options.user_verification.then(|| true),
+        },
         pin,
     };
 

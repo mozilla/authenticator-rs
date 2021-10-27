@@ -11,6 +11,27 @@
 
 extern "C" {
 
+typedef struct {
+    const uint8_t *id_ptr;
+    size_t id_len;
+    const char *name;
+} RegisterArgsUser;
+
+typedef struct {
+    const uint8_t *ptr;
+    size_t len;
+} RegisterArgsChallenge;
+
+typedef struct {
+    const int32_t *ptr;
+    size_t len;
+} RegisterArgsPubCred;
+
+typedef struct {
+    bool resident_key;
+    bool user_verification;
+} RegisterArgsOptions;
+
 const uint8_t U2F_RESBUF_ID_REGISTRATION = 0;
 const uint8_t U2F_RESBUF_ID_KEYHANDLE = 1;
 const uint8_t U2F_RESBUF_ID_SIGNATURE = 2;
@@ -126,11 +147,10 @@ bool rust_u2f_resbuf_copy(const rust_u2f_result* res, uint8_t bid,
 /// CTAP2 functions.
 uint64_t rust_ctap2_mgr_register(
     rust_u2f_manager* mgr, uint64_t timeout, rust_u2f_callback,
-    const uint8_t* challenge_ptr, size_t challenge_len,
+    RegisterArgsChallenge challenge,
     const char* relying_party_id, const char *origin_ptr,
-    const uint8_t *user_id_ptr, size_t user_id_len,
-    const char *user_name, const int32_t *pub_cred_params_ptr,
-    size_t pub_cred_params_len, const rust_u2f_key_handles* exclude_list,
+    RegisterArgsUser user, RegisterArgsPubCred pub_cred_params,
+    const rust_u2f_key_handles* exclude_list, RegisterArgsOptions options,
     const char *pin
 );
 

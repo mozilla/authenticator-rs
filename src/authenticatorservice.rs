@@ -4,6 +4,7 @@
 
 use crate::consts::PARAMETER_SIZE;
 use crate::ctap2::commands::client_pin::Pin;
+pub use crate::ctap2::commands::make_credentials::MakeCredentialsOptions;
 use crate::ctap2::server::{
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, User,
 };
@@ -35,6 +36,7 @@ pub struct RegisterArgsCtap2 {
     pub user: User,
     pub pub_cred_params: Vec<PublicKeyCredentialParameters>,
     pub exclude_list: Vec<PublicKeyCredentialDescriptor>,
+    pub options: MakeCredentialsOptions,
     pub pin: Option<Pin>,
 }
 

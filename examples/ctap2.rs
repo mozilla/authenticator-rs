@@ -3,7 +3,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use authenticator::{
-    authenticatorservice::{AuthenticatorService, CtapVersion, RegisterArgsCtap2, SignArgsCtap2},
+    authenticatorservice::{
+        AuthenticatorService, CtapVersion, MakeCredentialsOptions, RegisterArgsCtap2, SignArgsCtap2,
+    },
     ctap2::server::{
         Alg, PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, Transport,
         User,
@@ -118,7 +120,6 @@ fn main() {
             PublicKeyCredentialParameters { alg: Alg::ES256 },
             PublicKeyCredentialParameters { alg: Alg::RS256 },
         ],
-        pin: None,
         exclude_list: vec![PublicKeyCredentialDescriptor {
             id: vec![
                 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
@@ -127,6 +128,8 @@ fn main() {
             ],
             transports: vec![Transport::USB, Transport::NFC],
         }],
+        options: MakeCredentialsOptions::default(),
+        pin: None,
     };
 
     let attestation_object;

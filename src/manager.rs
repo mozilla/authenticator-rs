@@ -334,10 +334,7 @@ impl AuthenticatorTransport for Manager {
                     Some(args.user),
                     args.pub_cred_params,
                     args.exclude_list,
-                    MakeCredentialsOptions {
-                        resident_key: None,
-                        user_verification: None,
-                    },
+                    args.options,
                     args.pin,
                     // pin_auth will be filled in Statemachine, once we have a device
                 )
