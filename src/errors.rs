@@ -2,10 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use crate::capi::{
-    CTAP_ERROR_PIN_AUTH_BLOCKED, CTAP_ERROR_PIN_BLOCKED, CTAP_ERROR_PIN_INVALID,
-    CTAP_ERROR_PIN_REQUIRED,
-};
 pub use crate::ctap2::commands::{client_pin::PinError, CommandError};
 pub use crate::transport::errors::HIDError;
 use std::fmt;
@@ -38,10 +34,10 @@ impl AuthenticatorError {
             AuthenticatorError::U2FToken(ref err) => *err as u8,
             // TODO: This is somewhat ugly, as we hardcode the error code here, instead of using the
             // const defined in `u2fhid-capi.h`, which we should.
-            AuthenticatorError::PinError(PinError::PinRequired) => CTAP_ERROR_PIN_REQUIRED,
-            AuthenticatorError::PinError(PinError::InvalidPin(_)) => CTAP_ERROR_PIN_INVALID,
-            AuthenticatorError::PinError(PinError::PinAuthBlocked) => CTAP_ERROR_PIN_AUTH_BLOCKED,
-            AuthenticatorError::PinError(PinError::PinBlocked) => CTAP_ERROR_PIN_BLOCKED,
+            AuthenticatorError::PinError(PinError::PinRequired) => 6u8,
+            AuthenticatorError::PinError(PinError::InvalidPin(_)) => 7u8,
+            AuthenticatorError::PinError(PinError::PinAuthBlocked) => 8u8,
+            AuthenticatorError::PinError(PinError::PinBlocked) => 9u8,
             _ => U2FTokenError::Unknown as u8,
         }
     }

@@ -32,44 +32,22 @@ pub enum U2FResult {
     Error(errors::AuthenticatorError),
 }
 
-/// To make "SOMETHING: u8 = 5" usable by Rust and C (add the name to u2fhid-capi.h)
-/// This avoids having duplicate definitions, decreasing the chance of using different
-/// numbers for the same thing in C and Rust.
-/// This is just a convenience macro for not having 3 lines per value.
-macro_rules! expose {
-    ($e:ident: $t:ty = $v:expr) => {
-        #[no_mangle]
-        #[used] // So it is not optimized out
-        pub static $e: $t = $v;
-    };
-}
-
-expose!(U2F_RESBUF_ID_REGISTRATION: u8 = 0);
-expose!(U2F_RESBUF_ID_KEYHANDLE: u8 = 1);
-expose!(U2F_RESBUF_ID_SIGNATURE: u8 = 2);
-expose!(U2F_RESBUF_ID_APPID: u8 = 3);
-expose!(U2F_RESBUF_ID_VENDOR_NAME: u8 = 4);
-expose!(U2F_RESBUF_ID_DEVICE_NAME: u8 = 5);
-expose!(U2F_RESBUF_ID_FIRMWARE_MAJOR: u8 = 6);
-expose!(U2F_RESBUF_ID_FIRMWARE_MINOR: u8 = 7);
-expose!(U2F_RESBUF_ID_FIRMWARE_BUILD: u8 = 8);
-expose!(CTAP2_RESBUF_ID_CTAP20_INDICATOR: u8 = 9);
-expose!(CTAP2_RESBUF_ID_ATTESTATION_STATEMENT_ALGORITHM: u8 = 10);
-expose!(CTAP2_RESBUF_ID_ATTESTATION_STATEMENT_SIGNATURE: u8 = 11);
-expose!(CTAP2_RESBUF_ID_ATTESTATION_STATEMENT_CERTIFICATE: u8 = 12);
-expose!(CTAP2_RESBUF_ID_ATTESTATION_STATEMENT_UNPARSED: u8 = 13);
-expose!(CTAP2_RESBUF_ID_AUTHENTICATOR_DATA: u8 = 14);
-expose!(CTAP2_RESBUF_ID_CLIENT_DATA: u8 = 15);
-
-expose!(U2F_ERROR_UKNOWN: u8 = 1);
-expose!(U2F_ERROR_NOT_SUPPORTED: u8 = 2);
-expose!(U2F_ERROR_INVALID_STATE: u8 = 3);
-expose!(U2F_ERROR_CONSTRAINT: u8 = 4);
-expose!(U2F_ERROR_NOT_ALLOWED: u8 = 5);
-expose!(CTAP_ERROR_PIN_REQUIRED: u8 = 6);
-expose!(CTAP_ERROR_PIN_INVALID: u8 = 7);
-expose!(CTAP_ERROR_PIN_AUTH_BLOCKED: u8 = 8);
-expose!(CTAP_ERROR_PIN_BLOCKED: u8 = 9);
+const RESBUF_ID_REGISTRATION: u8 = 0;
+const RESBUF_ID_KEYHANDLE: u8 = 1;
+const RESBUF_ID_SIGNATURE: u8 = 2;
+const RESBUF_ID_APPID: u8 = 3;
+const RESBUF_ID_VENDOR_NAME: u8 = 4;
+const RESBUF_ID_DEVICE_NAME: u8 = 5;
+const RESBUF_ID_FIRMWARE_MAJOR: u8 = 6;
+const RESBUF_ID_FIRMWARE_MINOR: u8 = 7;
+const RESBUF_ID_FIRMWARE_BUILD: u8 = 8;
+const RESBUF_ID_CTAP20_INDICATOR: u8 = 9;
+const RESBUF_ID_ATTESTATION_STATEMENT_ALGORITHM: u8 = 10;
+const RESBUF_ID_ATTESTATION_STATEMENT_SIGNATURE: u8 = 11;
+const RESBUF_ID_ATTESTATION_STATEMENT_CERTIFICATE: u8 = 12;
+const RESBUF_ID_ATTESTATION_STATEMENT_UNPARSED: u8 = 13;
+const RESBUF_ID_AUTHENTICATOR_DATA: u8 = 14;
+const RESBUF_ID_CLIENT_DATA: u8 = 15;
 
 // Generates a new 64-bit transaction id with collision probability 2^-32.
 fn new_tid() -> u64 {
@@ -306,12 +284,12 @@ pub unsafe extern "C" fn rust_u2f_mgr_register(
         let result = match rv {
             Ok(RegisterResult::CTAP1(registration, dev_info)) => {
                 let mut bufs = HashMap::new();
-                bufs.insert(U2F_RESBUF_ID_REGISTRATION, registration);
-                bufs.insert(U2F_RESBUF_ID_VENDOR_NAME, dev_info.vendor_name);
-                bufs.insert(U2F_RESBUF_ID_DEVICE_NAME, dev_info.device_name);
-                bufs.insert(U2F_RESBUF_ID_FIRMWARE_MAJOR, vec![dev_info.version_major]);
-                bufs.insert(U2F_RESBUF_ID_FIRMWARE_MINOR, vec![dev_info.version_minor]);
-                bufs.insert(U2F_RESBUF_ID_FIRMWARE_BUILD, vec![dev_info.version_build]);
+                bufs.insert(RESBUF_ID_REGISTRATION, registration);
+                bufs.insert(RESBUF_ID_VENDOR_NAME, dev_info.vendor_name);
+                bufs.insert(RESBUF_ID_DEVICE_NAME, dev_info.device_name);
+                bufs.insert(RESBUF_ID_FIRMWARE_MAJOR, vec![dev_info.version_major]);
+                bufs.insert(RESBUF_ID_FIRMWARE_MINOR, vec![dev_info.version_minor]);
+                bufs.insert(RESBUF_ID_FIRMWARE_BUILD, vec![dev_info.version_build]);
                 U2FResult::Success(bufs)
             }
             Ok(RegisterResult::CTAP2(..)) => U2FResult::Error(
@@ -387,14 +365,14 @@ pub unsafe extern "C" fn rust_u2f_mgr_sign(
         let result = match rv {
             Ok(SignResult::CTAP1(app_id, key_handle, signature, dev_info)) => {
                 let mut bufs = HashMap::new();
-                bufs.insert(U2F_RESBUF_ID_KEYHANDLE, key_handle);
-                bufs.insert(U2F_RESBUF_ID_SIGNATURE, signature);
-                bufs.insert(U2F_RESBUF_ID_APPID, app_id);
-                bufs.insert(U2F_RESBUF_ID_VENDOR_NAME, dev_info.vendor_name);
-                bufs.insert(U2F_RESBUF_ID_DEVICE_NAME, dev_info.device_name);
-                bufs.insert(U2F_RESBUF_ID_FIRMWARE_MAJOR, vec![dev_info.version_major]);
-                bufs.insert(U2F_RESBUF_ID_FIRMWARE_MINOR, vec![dev_info.version_minor]);
-                bufs.insert(U2F_RESBUF_ID_FIRMWARE_BUILD, vec![dev_info.version_build]);
+                bufs.insert(RESBUF_ID_KEYHANDLE, key_handle);
+                bufs.insert(RESBUF_ID_SIGNATURE, signature);
+                bufs.insert(RESBUF_ID_APPID, app_id);
+                bufs.insert(RESBUF_ID_VENDOR_NAME, dev_info.vendor_name);
+                bufs.insert(RESBUF_ID_DEVICE_NAME, dev_info.device_name);
+                bufs.insert(RESBUF_ID_FIRMWARE_MAJOR, vec![dev_info.version_major]);
+                bufs.insert(RESBUF_ID_FIRMWARE_MINOR, vec![dev_info.version_minor]);
+                bufs.insert(RESBUF_ID_FIRMWARE_BUILD, vec![dev_info.version_build]);
                 U2FResult::Success(bufs)
             }
             Ok(SignResult::CTAP2(..)) => U2FResult::Error(
@@ -543,32 +521,32 @@ pub unsafe extern "C" fn rust_ctap2_mgr_register(
             ),
             Ok(RegisterResult::CTAP2(attestation_object, client_data)) => {
                 let mut bufs = HashMap::new();
-                bufs.insert(CTAP2_RESBUF_ID_CTAP20_INDICATOR, Vec::new());
+                bufs.insert(RESBUF_ID_CTAP20_INDICATOR, Vec::new());
                 if let Some(cred_data) = &attestation_object.auth_data.credential_data {
-                    bufs.insert(U2F_RESBUF_ID_KEYHANDLE, cred_data.credential_id.clone());
+                    bufs.insert(RESBUF_ID_KEYHANDLE, cred_data.credential_id.clone());
                 }
 
                 let auth_data = attestation_object.auth_data.to_vec();
-                bufs.insert(CTAP2_RESBUF_ID_AUTHENTICATOR_DATA, auth_data);
+                bufs.insert(RESBUF_ID_AUTHENTICATOR_DATA, auth_data);
 
                 let client_data = serde_json::to_vec(&client_data).unwrap(); // TODO(MS)
-                bufs.insert(CTAP2_RESBUF_ID_CLIENT_DATA, client_data);
+                bufs.insert(RESBUF_ID_CLIENT_DATA, client_data);
 
                 match attestation_object.att_statement {
                     AttestationStatement::None => { /* TODO(MS): What to do here?*/ }
                     AttestationStatement::Packed(att) => {
                         let alg_id: i64 = att.alg.into();
                         bufs.insert(
-                            CTAP2_RESBUF_ID_ATTESTATION_STATEMENT_ALGORITHM,
+                            RESBUF_ID_ATTESTATION_STATEMENT_ALGORITHM,
                             alg_id.to_ne_bytes().to_vec(),
                         );
 
                         bufs.insert(
-                            CTAP2_RESBUF_ID_ATTESTATION_STATEMENT_SIGNATURE,
+                            RESBUF_ID_ATTESTATION_STATEMENT_SIGNATURE,
                             att.sig.as_ref().to_vec(),
                         );
                         bufs.insert(
-                            CTAP2_RESBUF_ID_ATTESTATION_STATEMENT_CERTIFICATE,
+                            RESBUF_ID_ATTESTATION_STATEMENT_CERTIFICATE,
                             att.attestation_cert
                                 .iter()
                                 .map(|x| x.0.clone())
@@ -578,11 +556,11 @@ pub unsafe extern "C" fn rust_ctap2_mgr_register(
                     }
                     AttestationStatement::FidoU2F(att) => {
                         bufs.insert(
-                            CTAP2_RESBUF_ID_ATTESTATION_STATEMENT_SIGNATURE,
+                            RESBUF_ID_ATTESTATION_STATEMENT_SIGNATURE,
                             att.sig.as_ref().to_vec(),
                         );
                         bufs.insert(
-                            CTAP2_RESBUF_ID_ATTESTATION_STATEMENT_CERTIFICATE,
+                            RESBUF_ID_ATTESTATION_STATEMENT_CERTIFICATE,
                             att.attestation_cert
                                 .iter()
                                 .map(|x| x.0.clone())
@@ -591,7 +569,7 @@ pub unsafe extern "C" fn rust_ctap2_mgr_register(
                         );
                     }
                     AttestationStatement::Unparsed(att) => {
-                        bufs.insert(CTAP2_RESBUF_ID_ATTESTATION_STATEMENT_UNPARSED, att.clone());
+                        bufs.insert(RESBUF_ID_ATTESTATION_STATEMENT_UNPARSED, att.clone());
                     }
                 }
 
@@ -699,24 +677,24 @@ pub unsafe extern "C" fn rust_ctap2_mgr_sign(
                 // We can only handle length 1 assertion chains at the moment
                 let assertion = assertion_object.0.first().unwrap(); // TODO(MS)!
                 let mut bufs = HashMap::new();
-                bufs.insert(CTAP2_RESBUF_ID_CTAP20_INDICATOR, Vec::new());
-                bufs.insert(U2F_RESBUF_ID_SIGNATURE, assertion.signature.clone());
+                bufs.insert(RESBUF_ID_CTAP20_INDICATOR, Vec::new());
+                bufs.insert(RESBUF_ID_SIGNATURE, assertion.signature.clone());
 
                 // Credential data can be omitted by the token, if allow-list has length of 1
                 if let Some(cred_data) = &assertion.auth_data.credential_data {
-                    bufs.insert(U2F_RESBUF_ID_KEYHANDLE, cred_data.credential_id.clone());
+                    bufs.insert(RESBUF_ID_KEYHANDLE, cred_data.credential_id.clone());
                 } else if let Some(key_handle) = &single_key_handle {
-                    bufs.insert(U2F_RESBUF_ID_KEYHANDLE, key_handle.to_vec());
+                    bufs.insert(RESBUF_ID_KEYHANDLE, key_handle.to_vec());
                 }
 
                 let auth_data = assertion.auth_data.to_vec();
-                bufs.insert(CTAP2_RESBUF_ID_AUTHENTICATOR_DATA, auth_data);
+                bufs.insert(RESBUF_ID_AUTHENTICATOR_DATA, auth_data);
 
                 let client_data = serde_json::to_vec(&client_data).unwrap(); // TODO(MS)
-                bufs.insert(CTAP2_RESBUF_ID_CLIENT_DATA, client_data);
+                bufs.insert(RESBUF_ID_CLIENT_DATA, client_data);
 
                 if let Some(user) = &assertion.user {
-                    bufs.insert(U2F_RESBUF_ID_APPID, user.id.clone()); // Misusing AppID for this
+                    bufs.insert(RESBUF_ID_APPID, user.id.clone()); // Misusing AppID for this
                 }
                 U2FResult::Success(bufs)
             }
