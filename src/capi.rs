@@ -7,6 +7,7 @@ use crate::authenticatorservice::{
     SignArgsCtap2,
 };
 use crate::ctap2::attestation::AttestationStatement;
+use crate::ctap2::commands::get_assertion::GetAssertionOptions;
 use crate::ctap2::commands::make_credentials::MakeCredentialsOptions;
 use crate::ctap2::server::{
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, User,
@@ -434,28 +435,29 @@ pub extern "C" fn rust_ctap2_mgr_new() -> *mut AuthenticatorService {
 }
 
 #[repr(C)]
-pub struct RegisterArgsUser {
+pub struct AuthenticatorArgsUser {
     id_ptr: *const u8,
     id_len: usize,
     name: *const c_char,
 }
 
 #[repr(C)]
-pub struct RegisterArgsChallenge {
+pub struct AuthenticatorArgsChallenge {
     ptr: *const u8,
     len: usize,
 }
 
 #[repr(C)]
-pub struct RegisterArgsPubCred {
+pub struct AuthenticatorArgsPubCred {
     ptr: *const i32,
     len: usize,
 }
 
 #[repr(C)]
-pub struct RegisterArgsOptions {
+pub struct AuthenticatorArgsOptions {
     resident_key: bool,
     user_verification: bool,
+    user_presence: bool,
 }
 /// # Safety
 ///
@@ -471,13 +473,13 @@ pub unsafe extern "C" fn rust_ctap2_mgr_register(
     mgr: *mut AuthenticatorService,
     timeout: u64,
     callback: U2FCallback,
-    challenge: RegisterArgsChallenge,
+    challenge: AuthenticatorArgsChallenge,
     relying_party_id: *const c_char,
     origin_ptr: *const c_char,
-    user: RegisterArgsUser,
-    pub_cred_params: RegisterArgsPubCred,
+    user: AuthenticatorArgsUser,
+    pub_cred_params: AuthenticatorArgsPubCred,
     exclude_list: *const U2FKeyHandles,
-    options: RegisterArgsOptions,
+    options: AuthenticatorArgsOptions,
     pin_ptr: *const c_char,
 ) -> u64 {
     if mgr.is_null() {
@@ -640,12 +642,11 @@ pub unsafe extern "C" fn rust_ctap2_mgr_sign(
     mgr: *mut AuthenticatorService,
     timeout: u64,
     callback: U2FCallback,
-    flags: u64,
-    challenge_ptr: *const u8,
-    challenge_len: usize,
+    challenge: AuthenticatorArgsChallenge,
     relying_party_id: *const c_char,
     origin_ptr: *const c_char,
     allow_list: *const U2FKeyHandles,
+    options: AuthenticatorArgsOptions,
     pin_ptr: *const c_char,
 ) -> u64 {
     if mgr.is_null() {
@@ -653,7 +654,7 @@ pub unsafe extern "C" fn rust_ctap2_mgr_sign(
     }
 
     // Check buffers.
-    if challenge_ptr.is_null()
+    if challenge.ptr.is_null()
         || origin_ptr.is_null()
         || relying_party_id.is_null()
         || allow_list.is_null()
@@ -661,7 +662,6 @@ pub unsafe extern "C" fn rust_ctap2_mgr_sign(
         return 0;
     }
 
-    let flags = crate::SignFlags::from_bits_truncate(flags);
     let pin = if pin_ptr.is_null() {
         None
     } else {
@@ -671,7 +671,7 @@ pub unsafe extern "C" fn rust_ctap2_mgr_sign(
         .to_string_lossy()
         .to_string();
     let origin = CStr::from_ptr(origin_ptr).to_string_lossy().to_string();
-    let challenge = from_raw(challenge_ptr, challenge_len);
+    let challenge = from_raw(challenge.ptr, challenge.len);
     let allow_list: Vec<_> = (*allow_list)
         .clone()
         .iter()
@@ -730,21 +730,19 @@ pub unsafe extern "C" fn rust_ctap2_mgr_sign(
 
         callback(tid, Box::into_raw(Box::new(result)));
     }));
-
-    let res = (*mgr).sign(
-        timeout,
-        SignArgsCtap2 {
-            flags,
-            challenge,
-            origin,
-            relying_party_id: rpid,
-            allow_list,
-            pin,
-        }
-        .into(),
-        status_tx,
-        state_callback,
-    );
+    let ctap_args = SignArgsCtap2 {
+        challenge,
+        origin,
+        relying_party_id: rpid,
+        allow_list,
+        options: GetAssertionOptions {
+            user_presence: options.user_presence.then(|| true),
+            user_verification: options.user_verification.then(|| true),
+        },
+        pin,
+    };
+    println!("{:?}", ctap_args);
+    let res = (*mgr).sign(timeout, ctap_args.into(), status_tx, state_callback);
 
     if res.is_ok() {
         tid

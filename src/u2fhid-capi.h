@@ -15,22 +15,23 @@ typedef struct {
     const uint8_t *id_ptr;
     size_t id_len;
     const char *name;
-} RegisterArgsUser;
+} AuthenticatorArgsUser;
 
 typedef struct {
     const uint8_t *ptr;
     size_t len;
-} RegisterArgsChallenge;
+} AuthenticatorArgsChallenge;
 
 typedef struct {
     const int32_t *ptr;
     size_t len;
-} RegisterArgsPubCred;
+} AuthenticatorArgsPubCred;
 
 typedef struct {
     bool resident_key;
     bool user_verification;
-} RegisterArgsOptions;
+    bool user_presence;
+} AuthenticatorArgsOptions;
 
 const uint8_t U2F_RESBUF_ID_REGISTRATION = 0;
 const uint8_t U2F_RESBUF_ID_KEYHANDLE = 1;
@@ -147,18 +148,18 @@ bool rust_u2f_resbuf_copy(const rust_u2f_result* res, uint8_t bid,
 /// CTAP2 functions.
 uint64_t rust_ctap2_mgr_register(
     rust_u2f_manager* mgr, uint64_t timeout, rust_u2f_callback,
-    RegisterArgsChallenge challenge,
+    AuthenticatorArgsChallenge challenge,
     const char* relying_party_id, const char *origin_ptr,
-    RegisterArgsUser user, RegisterArgsPubCred pub_cred_params,
-    const rust_u2f_key_handles* exclude_list, RegisterArgsOptions options,
+    AuthenticatorArgsUser user, AuthenticatorArgsPubCred pub_cred_params,
+    const rust_u2f_key_handles* exclude_list, AuthenticatorArgsOptions options,
     const char *pin
 );
 
 uint64_t rust_ctap2_mgr_sign(
     rust_u2f_manager* mgr, uint64_t timeout, rust_u2f_callback,
-    uint64_t flags, const uint8_t* challenge_ptr, size_t challenge_len,
+    AuthenticatorArgsChallenge challenge,
     const char* relying_party_id, const char *origin_ptr,
-    const rust_u2f_key_handles* allow_list,
+    const rust_u2f_key_handles* allow_list, AuthenticatorArgsOptions options,
     const char *pin
 );
 }

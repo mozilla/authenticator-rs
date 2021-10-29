@@ -319,7 +319,7 @@ impl AuthenticatorTransport for Manager {
         callback: StateCallback<crate::Result<crate::RegisterResult>>,
     ) -> Result<(), AuthenticatorError> {
         let make_credentials = match ctap_args {
-            RegisterArgs::CTAP2(args) => {
+            RegisterArgs::CTAP2(mut args) => {
                 let client_data = CollectedClientData {
                     webauthn_type: WebauthnType::Create,
                     challenge: args.challenge.into(),
@@ -327,6 +327,11 @@ impl AuthenticatorTransport for Manager {
                     cross_origin: false,
                     token_binding: None,
                 };
+
+                // Do not set user_verification, if pin is provided
+                if args.pin.is_some() {
+                    args.options.user_verification = None;
+                }
 
                 MakeCredentials::new(
                     client_data,
@@ -433,7 +438,7 @@ impl AuthenticatorTransport for Manager {
                 }
             }
 
-            SignArgs::CTAP2(args) => {
+            SignArgs::CTAP2(mut args) => {
                 let client_data = CollectedClientData {
                     webauthn_type: WebauthnType::Get,
                     challenge: args.challenge.into(),
@@ -441,30 +446,11 @@ impl AuthenticatorTransport for Manager {
                     cross_origin: false,
                     token_binding: None,
                 };
-                // TODO(baloo): This block of code and commend was previously in src/statemanchine.rs
-                //              I moved this logic here, and I'm not quite sure about what we
-                //              should do, have to ask jcj
-                //
-                // We currently support none of the authenticator selection
-                // criteria because we can't ask tokens whether they do support
-                // those features. If flags are set, ignore all tokens for now.
-                //
-                // Technically, this is a ConstraintError because we shouldn't talk
-                // to this authenticator in the first place. But the result is the
-                // same anyway.
-                //if !flags.is_empty() {
-                //    return;
-                //}
-                let options = if args.flags == SignFlags::empty() {
-                    GetAssertionOptions::default()
-                } else {
-                    GetAssertionOptions {
-                        user_verification: Some(
-                            args.flags.contains(SignFlags::REQUIRE_USER_VERIFICATION),
-                        ),
-                        ..GetAssertionOptions::default()
-                    }
-                };
+
+                // Do not set user_verification, if pin is provided
+                if args.pin.is_some() {
+                    args.options.user_verification = None;
+                }
 
                 let get_assertion = GetAssertion::new(
                     client_data.clone(),
@@ -474,7 +460,7 @@ impl AuthenticatorTransport for Manager {
                         icon: None,
                     }),
                     args.allow_list,
-                    options,
+                    args.options,
                     args.pin,
                 );
 

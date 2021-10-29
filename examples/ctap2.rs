@@ -4,7 +4,8 @@
 
 use authenticator::{
     authenticatorservice::{
-        AuthenticatorService, CtapVersion, MakeCredentialsOptions, RegisterArgsCtap2, SignArgsCtap2,
+        AuthenticatorService, CtapVersion, GetAssertionOptions, MakeCredentialsOptions,
+        RegisterArgsCtap2, SignArgsCtap2,
     },
     ctap2::server::{
         Alg, PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, Transport,
@@ -12,7 +13,7 @@ use authenticator::{
     },
     errors::{AuthenticatorError, PinError},
     statecallback::StateCallback,
-    Pin, RegisterResult, SignFlags, SignResult, StatusUpdate,
+    Pin, RegisterResult, SignResult, StatusUpdate,
 };
 use getopts::Options;
 use sha2::{Digest, Sha256};
@@ -208,11 +209,11 @@ fn main() {
     }
 
     let mut ctap_args = SignArgsCtap2 {
-        flags: SignFlags::empty(),
         challenge: chall_bytes,
         origin,
         relying_party_id: "example.com".to_string(),
         allow_list,
+        options: GetAssertionOptions::default(),
         pin: None,
     };
 

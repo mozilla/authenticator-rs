@@ -4,6 +4,7 @@
 
 use crate::consts::PARAMETER_SIZE;
 use crate::ctap2::commands::client_pin::Pin;
+pub use crate::ctap2::commands::get_assertion::GetAssertionOptions;
 pub use crate::ctap2::commands::make_credentials::MakeCredentialsOptions;
 use crate::ctap2::server::{
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, User,
@@ -68,11 +69,11 @@ pub struct SignArgsCtap1 {
 
 #[derive(Debug, Clone)]
 pub struct SignArgsCtap2 {
-    pub flags: crate::SignFlags, // Change to MakeCredentialOptions?
     pub challenge: Vec<u8>,
     pub origin: String,
     pub relying_party_id: String,
     pub allow_list: Vec<PublicKeyCredentialDescriptor>,
+    pub options: GetAssertionOptions,
     pub pin: Option<Pin>,
     // Todo: Extensions
 }
