@@ -85,7 +85,7 @@ pub struct User {
     pub id: Vec<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>, // This has been removed from Webauthn-2
-    pub name: String,
+    pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "displayName")]
     pub display_name: Option<String>,
 }

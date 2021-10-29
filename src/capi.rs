@@ -508,7 +508,7 @@ pub unsafe extern "C" fn rust_ctap2_mgr_register(
     };
     let user = User {
         id: from_raw(user.id_ptr, user.id_len),
-        name: CStr::from_ptr(user.name).to_string_lossy().to_string(), // TODO(MS): Use to_str() and error out on failure?
+        name: Some(CStr::from_ptr(user.name).to_string_lossy().to_string()), // TODO(MS): Use to_str() and error out on failure?
         display_name: None,
         icon: None,
     };

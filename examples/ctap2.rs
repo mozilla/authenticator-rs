@@ -104,7 +104,7 @@ fn main() {
     let user = User {
         id: "user_id".as_bytes().to_vec(),
         icon: None,
-        name: "A. User".to_string(),
+        name: Some("A. User".to_string()),
         display_name: None,
     };
     let origin = "https://example.com".to_string();
