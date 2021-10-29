@@ -708,10 +708,13 @@ pub unsafe extern "C" fn rust_ctap2_mgr_sign(
                 bufs.insert(RESBUF_ID_SIGNATURE, assertion.signature.clone());
 
                 // Credential data can be omitted by the token, if allow-list has length of 1
-                if let Some(cred_data) = &assertion.auth_data.credential_data {
+                if let Some(cred_data) = &assertion.credentials {
                     bufs.insert(RESBUF_ID_KEYHANDLE, cred_data.credential_id.clone());
                 } else if let Some(key_handle) = &single_key_handle {
                     bufs.insert(RESBUF_ID_KEYHANDLE, key_handle.to_vec());
+                } else if let Some(cred_data) = &assertion.auth_data.credential_data {
+                    // Fallback
+                    bufs.insert(RESBUF_ID_KEYHANDLE, cred_data.id.clone());
                 }
 
                 let auth_data = assertion.auth_data.to_vec();
