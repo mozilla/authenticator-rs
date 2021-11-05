@@ -37,11 +37,11 @@ impl RequestCtap2 for GetNextAssertion {
         debug!("response status code: {:?}", status);
         if input.len() > 1 {
             if status.is_ok() {
-                let assertion = from_slice(&input[1..]).map_err(CommandError::Parsing)?;
+                let assertion = from_slice(&input[1..]).map_err(CommandError::Deserializing)?;
                 // TODO(baloo): check assertion response does not have numberOfCredentials
                 Ok(assertion)
             } else {
-                let data: Value = from_slice(&input[1..]).map_err(CommandError::Parsing)?;
+                let data: Value = from_slice(&input[1..]).map_err(CommandError::Deserializing)?;
                 Err(CommandError::StatusCode(status, Some(data))).map_err(HIDError::Command)
             }
         } else if status.is_ok() {

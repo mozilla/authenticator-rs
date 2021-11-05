@@ -367,7 +367,7 @@ impl RequestCtap2 for GetAssertion {
     where
         Dev: FidoDevice + io::Read + io::Write + fmt::Debug,
     {
-        Ok(ser::to_vec(&self).map_err(CommandError::Serialization)?)
+        Ok(ser::to_vec(&self).map_err(CommandError::Serializing)?)
     }
 
     fn handle_response_ctap2<Dev>(
@@ -391,7 +391,7 @@ impl RequestCtap2 for GetAssertion {
         if input.len() > 1 {
             if status.is_ok() {
                 let assertion: GetAssertionResponse =
-                    from_slice(&input[1..]).map_err(CommandError::Parsing)?;
+                    from_slice(&input[1..]).map_err(CommandError::Deserializing)?;
                 let number_of_credentials = assertion.number_of_credentials.unwrap_or(1);
                 let mut assertions = Vec::with_capacity(number_of_credentials);
                 assertions.push(assertion.into());
@@ -408,7 +408,7 @@ impl RequestCtap2 for GetAssertion {
                     self.client_data.clone(),
                 ))
             } else {
-                let data: Value = from_slice(&input[1..]).map_err(CommandError::Parsing)?;
+                let data: Value = from_slice(&input[1..]).map_err(CommandError::Deserializing)?;
                 Err(CommandError::StatusCode(status, Some(data))).map_err(HIDError::Command)
             }
         } else if status.is_ok() {

@@ -54,7 +54,7 @@ impl RequestCtap2 for GetInfo {
                     from_slice(&input[1..]).map_err(CommandError::Deserializing)?;
                 Ok(authenticator_info)
             } else {
-                let data: Value = from_slice(&input[1..]).map_err(CommandError::Parsing)?;
+                let data: Value = from_slice(&input[1..]).map_err(CommandError::Deserializing)?;
                 Err(HIDError::Command(CommandError::StatusCode(
                     status,
                     Some(data),
