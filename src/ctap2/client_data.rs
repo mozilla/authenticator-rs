@@ -174,7 +174,7 @@ impl<'de> Deserialize<'de> for ClientDataHash {
             {
                 let mut out = [0u8; 32];
                 if out.len() != v.len() {
-                    return Err(E::custom("unexpected byte len"));
+                    return Err(E::invalid_length(v.len(), &"32"));
                 }
                 out.copy_from_slice(v);
                 Ok(ClientDataHash(out))

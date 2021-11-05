@@ -89,11 +89,10 @@ impl<'de> Deserialize<'de> for AAGuid {
             where
                 E: SerdeError,
             {
-                if v.len() != 16 {
-                    return Err(E::custom("expecting 16 bytes data"));
-                }
-
                 let mut buf = [0u8; 16];
+                if v.len() != buf.len() {
+                    return Err(E::invalid_length(v.len(), &"16"));
+                }
 
                 buf.copy_from_slice(v);
 
@@ -203,7 +202,12 @@ impl<'de> Deserialize<'de> for AuthenticatorData {
                 parse_ad(v)
                     .map(|(_input, value)| value)
                     .map_err(|e| match e {
-                        NomErr::Incomplete(len) => E::custom(format!("need {:?} more bytes", len)),
+                        NomErr::Incomplete(nom::Needed::Size(len)) => {
+                            E::invalid_length(v.len(), &format!("{}", v.len() + len).as_ref())
+                        }
+                        NomErr::Incomplete(nom::Needed::Unknown) => {
+                            E::invalid_length(v.len(), &"unknown") // We don't know the expected value
+                        }
                         // TODO(baloo): is that enough? should we be more
                         //              specific on the error type?
                         e => E::custom(e.to_string()),
