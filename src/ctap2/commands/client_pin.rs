@@ -190,11 +190,11 @@ impl ClientPINSubCommand for GetKeyAgreement {
     }
 
     fn parse_response_payload(&self, input: &[u8]) -> Result<Self::Output, CommandError> {
-        let value: Value = from_slice(input).map_err(CommandError::Parsing)?;
+        let value: Value = from_slice(input).map_err(CommandError::Deserializing)?;
         debug!("GetKeyAgreement::parse_response_payload {:?}", value);
 
         let get_pin_response: ClientPinResponse =
-            from_slice(input).map_err(CommandError::Parsing)?;
+            from_slice(input).map_err(CommandError::Deserializing)?;
         if let Some(key_agreement) = get_pin_response.key_agreement {
             Ok(KeyAgreement(key_agreement))
         } else {
@@ -248,11 +248,11 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinToken<'sc, 'pin> {
     }
 
     fn parse_response_payload(&self, input: &[u8]) -> Result<Self::Output, CommandError> {
-        let value: Value = from_slice(input).map_err(CommandError::Parsing)?;
+        let value: Value = from_slice(input).map_err(CommandError::Deserializing)?;
         debug!("GetKeyAgreement::parse_response_payload {:?}", value);
 
         let get_pin_response: ClientPinResponse =
-            from_slice(input).map_err(CommandError::Parsing)?;
+            from_slice(input).map_err(CommandError::Deserializing)?;
         if let Some(encrypted_pin_token) = get_pin_response.pin_token {
             let iv = [0u8; 16];
             let pin_token = self
@@ -282,7 +282,7 @@ where
         Dev: U2FDevice,
     {
         let client_pin = self.as_client_pin()?;
-        let output = to_vec(&client_pin).map_err(CommandError::Serialization)?;
+        let output = to_vec(&client_pin).map_err(CommandError::Serializing)?;
         trace!("client subcommmand: {:#04X?}", &output);
 
         Ok(output)
@@ -308,7 +308,7 @@ where
                 <T as ClientPINSubCommand>::parse_response_payload(self, &input[1..])
                     .map_err(HIDError::Command)
             } else {
-                let data: Value = from_slice(&input[1..]).map_err(CommandError::Parsing)?;
+                let data: Value = from_slice(&input[1..]).map_err(CommandError::Deserializing)?;
                 Err(CommandError::StatusCode(status, Some(data))).map_err(HIDError::Command)
             }
         } else if status.is_ok() {

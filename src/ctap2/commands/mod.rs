@@ -325,8 +325,7 @@ pub enum CommandError {
     InputTooSmall,
     MissingRequiredField(&'static str),
     Deserializing(CborError),
-    Serialization(CborError),
-    Parsing(CborError),
+    Serializing(CborError),
     StatusCode(StatusCode, Option<Value>),
     Json(json::Error),
     Crypto(crypto::CryptoError),
@@ -344,10 +343,9 @@ impl fmt::Display for CommandError {
             CommandError::Deserializing(ref e) => {
                 write!(f, "CommandError: Error while parsing: {}", e)
             }
-            CommandError::Serialization(ref e) => {
+            CommandError::Serializing(ref e) => {
                 write!(f, "CommandError: Error while serializing: {}", e)
             }
-            CommandError::Parsing(ref e) => write!(f, "CommandError: Error while parsing: {}", e),
             CommandError::StatusCode(ref code, ref value) => {
                 write!(f, "CommandError: Unexpected code: {:?} ({:?})", code, value)
             }

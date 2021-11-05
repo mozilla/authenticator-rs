@@ -225,7 +225,7 @@ impl RequestCtap1 for MakeCredentials {
         //         error!("error while parsing cert = {:?}", e);
         //         let err = io::Error::new(io::ErrorKind::Other, "Failed to parse x509 certificate");
         //         let err = error::Error::from(err);
-        //         let err = CommandError::Parsing(err);
+        //         let err = CommandError::Deserializing(err);
         //         let err = HIDError::Command(err);
         //         Retryable::Error(err)
         //     })
@@ -273,7 +273,7 @@ impl RequestCtap2 for MakeCredentials {
         Dev: U2FDevice + io::Read + io::Write + fmt::Debug,
     {
         // TODO(MS): Add GetInfo-request here and others (See CommandDevice::new)
-        Ok(ser::to_vec(&self).map_err(CommandError::Serialization)?)
+        Ok(ser::to_vec(&self).map_err(CommandError::Serializing)?)
     }
 
     fn handle_response_ctap2<Dev>(
@@ -292,11 +292,11 @@ impl RequestCtap2 for MakeCredentials {
         debug!("response status code: {:?}", status);
         if input.len() > 1 {
             if status.is_ok() {
-                let attestation = from_slice(&input[1..]).map_err(CommandError::Parsing)?;
+                let attestation = from_slice(&input[1..]).map_err(CommandError::Deserializing)?;
                 let client_data = self.client_data.clone();
                 Ok((attestation, client_data))
             } else {
-                let data: Value = from_slice(&input[1..]).map_err(CommandError::Parsing)?;
+                let data: Value = from_slice(&input[1..]).map_err(CommandError::Deserializing)?;
                 Err(HIDError::Command(CommandError::StatusCode(
                     status,
                     Some(data),
