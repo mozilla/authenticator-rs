@@ -715,7 +715,7 @@ pub mod test {
                     0x30, 0x82, 0x01, 0x93, 0x30, 0x82,
                 ],
                 icon: Some("https://pics.example.com/00/p/aBjjjpqPb.png".to_string()),
-                name: "johnpsmith@example.com".to_string(),
+                name: Some("johnpsmith@example.com".to_string()),
                 display_name: Some("John P. Smith".to_string()),
             }),
             auth_data: expected_auth_data,

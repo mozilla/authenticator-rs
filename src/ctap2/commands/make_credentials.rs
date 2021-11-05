@@ -404,7 +404,7 @@ pub mod test {
                 )
                 .unwrap(),
                 icon: Some("https://pics.example.com/00/p/aBjjjpqPb.png".to_string()),
-                name: String::from("johnpsmith@example.com"),
+                name: Some(String::from("johnpsmith@example.com")),
                 display_name: Some(String::from("John P. Smith")),
             }),
             vec![
@@ -538,7 +538,7 @@ pub mod test {
                 )
                 .unwrap(),
                 icon: Some("https://pics.example.com/00/p/aBjjjpqPb.png".to_string()),
-                name: String::from("johnpsmith@example.com"),
+                name: Some(String::from("johnpsmith@example.com")),
                 display_name: Some(String::from("John P. Smith")),
             }),
             vec![

@@ -403,7 +403,7 @@ mod test {
                 0x01, 0x93, 0x30, 0x82,
             ],
             icon: Some(String::from("https://pics.example.com/00/p/aBjjjpqPb.png")),
-            name: String::from("johnpsmith@example.com"),
+            name: Some(String::from("johnpsmith@example.com")),
             display_name: Some(String::from("John P. Smith")),
         };
 
@@ -455,7 +455,7 @@ mod test {
                 0x01, 0x93, 0x30, 0x82,
             ],
             icon: None,
-            name: String::from("johnpsmith@example.com"),
+            name: Some(String::from("johnpsmith@example.com")),
             display_name: None,
         };
 
