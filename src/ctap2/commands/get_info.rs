@@ -118,7 +118,7 @@ impl RequestCtap2 for GetInfo {
         Dev: U2FDevice,
     {
         if input.is_empty() {
-            return Err(CommandError::InputTooSmall).map_err(HIDError::Command);
+            return Err(CommandError::InputTooSmall.into());
         }
 
         let status: StatusCode = input[0].into();
@@ -131,13 +131,10 @@ impl RequestCtap2 for GetInfo {
                 Ok(authenticator_info)
             } else {
                 let data: Value = from_slice(&input[1..]).map_err(CommandError::Deserializing)?;
-                Err(HIDError::Command(CommandError::StatusCode(
-                    status,
-                    Some(data),
-                )))
+                Err(CommandError::StatusCode(status, Some(data)).into())
             }
         } else {
-            Err(CommandError::InputTooSmall).map_err(HIDError::Command)
+            Err(CommandError::InputTooSmall.into())
         }
     }
 }
