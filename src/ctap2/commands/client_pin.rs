@@ -337,7 +337,7 @@ where
         trace!("Client pin subcomand response:{:#04X?}", &input);
 
         if input.is_empty() {
-            return Err(CommandError::InputTooSmall).map_err(HIDError::Command);
+            return Err(CommandError::InputTooSmall.into());
         }
         let status: StatusCode = input[0].into();
         debug!("response status code: {:?}", status);
@@ -347,12 +347,12 @@ where
                     .map_err(HIDError::Command)
             } else {
                 let data: Value = from_slice(&input[1..]).map_err(CommandError::Deserializing)?;
-                Err(CommandError::StatusCode(status, Some(data))).map_err(HIDError::Command)
+                Err(CommandError::StatusCode(status, Some(data)).into())
             }
         } else if status.is_ok() {
-            Err(CommandError::InputTooSmall).map_err(HIDError::Command)
+            Err(CommandError::InputTooSmall.into())
         } else {
-            Err(CommandError::StatusCode(status, None)).map_err(HIDError::Command)
+            Err(CommandError::StatusCode(status, None).into())
         }
     }
 }
