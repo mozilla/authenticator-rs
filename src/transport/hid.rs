@@ -2,6 +2,7 @@ use crate::consts::{HIDCmd, CID_BROADCAST};
 use crate::ctap2::commands::get_info::{AuthenticatorInfo, GetInfo};
 use crate::ctap2::commands::get_version::GetVersion;
 use crate::ctap2::commands::{RequestCtap1, RequestCtap2, Retryable};
+use crate::ctap2::crypto::ECDHSecret;
 use crate::transport::{
     errors::{ApduErrorStatus, HIDError},
     FidoDevice, Nonce,
@@ -35,6 +36,8 @@ where
 
     fn get_authenticator_info(&self) -> Option<&AuthenticatorInfo>;
     fn set_authenticator_info(&mut self, authenticator_info: AuthenticatorInfo);
+    fn set_shared_secret(&mut self, secret: ECDHSecret);
+    fn get_shared_secret(&self) -> Option<&ECDHSecret>;
 
     fn initialize(&mut self, noncecmd: Nonce) -> Result<(), HIDError>
     where
@@ -140,8 +143,7 @@ where
             }
             (cmd, data)
         };
-
-        trace!("u2f_read({:?}) cmd={:?}: {:#04X?}", self.id(), cmd, &&data);
+        trace!("u2f_read({:?}) cmd={:?}: {:#04X?}", self.id(), cmd, &data);
         Ok((cmd, data))
     }
 }
@@ -247,5 +249,13 @@ where
 
     fn get_authenticator_info(&self) -> Option<&AuthenticatorInfo> {
         <Self as HIDDevice>::get_authenticator_info(self)
+    }
+
+    fn set_shared_secret(&mut self, shared_secret: ECDHSecret) {
+        <Self as HIDDevice>::set_shared_secret(self, shared_secret)
+    }
+
+    fn get_shared_secret(&self) -> Option<&ECDHSecret> {
+        <Self as HIDDevice>::get_shared_secret(self)
     }
 }

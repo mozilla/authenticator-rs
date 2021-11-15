@@ -1,11 +1,11 @@
-use super::{Command, CommandError, RequestCtap2};
+use super::{Command, CommandError, RequestCtap2, StatusCode};
 use crate::transport::errors::HIDError;
 use crate::u2ftypes::U2FDevice;
 use serde::{
     de::{Error as SError, MapAccess, Visitor},
     Deserialize, Deserializer, Serialize,
 };
-use serde_cbor::de::from_slice;
+use serde_cbor::{de::from_slice, Value};
 use std::fmt;
 
 #[derive(Serialize, PartialEq, Eq, Clone)]
@@ -118,14 +118,23 @@ impl RequestCtap2 for GetInfo {
         Dev: U2FDevice,
     {
         if input.is_empty() {
-            return Err(CommandError::InputTooSmall).map_err(HIDError::Command);
+            return Err(CommandError::InputTooSmall.into());
         }
+
+        let status: StatusCode = input[0].into();
+
         if input.len() > 1 {
-            trace!("parsing authenticator info data: {:#04X?}", &input);
-            let authenticator_info = from_slice(&input).map_err(CommandError::Deserializing)?;
-            Ok(authenticator_info)
+            if status.is_ok() {
+                trace!("parsing authenticator info data: {:#04X?}", &input);
+                let authenticator_info =
+                    from_slice(&input[1..]).map_err(CommandError::Deserializing)?;
+                Ok(authenticator_info)
+            } else {
+                let data: Value = from_slice(&input[1..]).map_err(CommandError::Deserializing)?;
+                Err(CommandError::StatusCode(status, Some(data)).into())
+            }
         } else {
-            Err(CommandError::InputTooSmall).map_err(HIDError::Command)
+            Err(CommandError::InputTooSmall.into())
         }
     }
 }
@@ -365,13 +374,14 @@ pub mod tests {
 
         // ctap2 response
         let mut msg = cid.to_vec();
-        msg.extend(vec![HIDCmd::Cbor.into(), 0x00, 0x59]); // cmd + bcnt
-        msg.extend(&AUTHENTICATOR_INFO_PAYLOAD[0..(IN_HID_RPT_SIZE - 7)]);
+        msg.extend(vec![HIDCmd::Cbor.into(), 0x00, 0x5A]); // cmd + bcnt
+        msg.extend(vec![0]); // Status code: Success
+        msg.extend(&AUTHENTICATOR_INFO_PAYLOAD[0..(IN_HID_RPT_SIZE - 8)]);
         device.add_read(&msg, 0);
         // Continuation package
         let mut msg = cid.to_vec();
         msg.extend(vec![0x00]); // SEQ
-        msg.extend(&AUTHENTICATOR_INFO_PAYLOAD[(IN_HID_RPT_SIZE - 7)..]);
+        msg.extend(&AUTHENTICATOR_INFO_PAYLOAD[(IN_HID_RPT_SIZE - 8)..]);
         device.add_read(&msg, 0);
         device
             .init(Nonce::Use(nonce))

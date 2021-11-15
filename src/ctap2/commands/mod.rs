@@ -1,13 +1,22 @@
+use super::crypto;
+use crate::ctap2::client_data::ClientDataHash;
+use crate::ctap2::commands::client_pin::{GetKeyAgreement, GetPinToken, Pin, PinAuth, PinError};
+use crate::ctap2::commands::get_info::GetInfo;
 use crate::transport::errors::{ApduErrorStatus, HIDError};
 use crate::transport::FidoDevice;
-use serde_cbor::error::Error as SerdeError;
+use serde_cbor::{error::Error as CborError, Value};
+use serde_json as json;
 use std::error::Error as StdErrorT;
 use std::fmt;
 use std::io::{Read, Write};
 
+pub(crate) mod client_pin;
+pub(crate) mod get_assertion;
 #[allow(dead_code)] // TODO(MS): Remove me asap
 pub(crate) mod get_info;
+pub(crate) mod get_next_assertion;
 pub(crate) mod get_version;
+pub(crate) mod make_credentials;
 
 pub(crate) trait Request<T>
 where
@@ -20,6 +29,7 @@ where
 /// Retryable wraps an error type and may ask manager to retry sending a
 /// command, this is useful for ctap1 where token will reply with "condition not
 /// sufficient" because user needs to press the button.
+#[derive(Debug)]
 pub(crate) enum Retryable<T> {
     Retry,
     Error(T),
@@ -314,7 +324,13 @@ impl Into<u8> for StatusCode {
 pub enum CommandError {
     InputTooSmall,
     MissingRequiredField(&'static str),
-    Deserializing(SerdeError),
+    Deserializing(CborError),
+    Serializing(CborError),
+    StatusCode(StatusCode, Option<Value>),
+    Json(json::Error),
+    Crypto(crypto::CryptoError),
+    UnsupportedPinProtocol,
+    Pin(PinError),
 }
 
 impl fmt::Display for CommandError {
@@ -327,17 +343,82 @@ impl fmt::Display for CommandError {
             CommandError::Deserializing(ref e) => {
                 write!(f, "CommandError: Error while parsing: {}", e)
             }
+            CommandError::Serializing(ref e) => {
+                write!(f, "CommandError: Error while serializing: {}", e)
+            }
+            CommandError::StatusCode(ref code, ref value) => {
+                write!(f, "CommandError: Unexpected code: {:?} ({:?})", code, value)
+            }
+            CommandError::Json(ref e) => write!(f, "CommandError: Json serializing error: {}", e),
+            CommandError::Crypto(ref e) => write!(f, "CommandError: Crypto error: {:?}", e),
+            CommandError::UnsupportedPinProtocol => {
+                write!(f, "CommandError: Pin protocol is not supported")
+            }
+            CommandError::Pin(ref p) => write!(f, "CommandError: Pin error: {}", p),
         }
     }
 }
 
 impl StdErrorT for CommandError {}
 
+pub(crate) fn calculate_pin_auth<Dev, Cmd>(
+    dev: &mut Dev,
+    client_data_hash: &ClientDataHash,
+    pin: &Option<Pin>,
+) -> Result<Option<PinAuth>, HIDError>
+where
+    Dev: FidoDevice,
+{
+    let info = if let Some(authenticator_info) = dev.get_authenticator_info().cloned() {
+        authenticator_info
+    } else {
+        let info_command = GetInfo::default();
+        let info = dev.send_cbor(&info_command)?;
+        debug!("infos: {:?}", info);
+
+        dev.set_authenticator_info(info.clone());
+        info
+    };
+
+    let pin_auth = if info.options.client_pin == Some(true) {
+        let pin = pin
+            .as_ref()
+            .ok_or(HIDError::Command(CommandError::StatusCode(
+                StatusCode::PinRequired,
+                None,
+            )))?;
+
+        let shared_secret = if let Some(shared_secret) = dev.get_shared_secret().cloned() {
+            shared_secret
+        } else {
+            let pin_command = GetKeyAgreement::new(&info)?;
+            let device_key_agreement = dev.send_cbor(&pin_command)?;
+            let shared_secret = device_key_agreement.shared_secret()?;
+            dev.set_shared_secret(shared_secret.clone());
+            shared_secret
+        };
+
+        let pin_command = GetPinToken::new(&info, &shared_secret, &pin)?;
+        let pin_token = dev.send_cbor(&pin_command)?;
+
+        Some(
+            pin_token
+                .auth(&client_data_hash)
+                .map_err(CommandError::Pin)?,
+        )
+    } else {
+        None
+    };
+
+    Ok(pin_auth)
+}
+
 #[cfg(test)]
 pub mod tests {
     use super::*;
     use crate::consts::CID_BROADCAST;
     use crate::ctap2::commands::get_info::AuthenticatorInfo;
+    use crate::ctap2::crypto::ECDHSecret;
     use crate::transport::hid::HIDDevice;
     use crate::u2fprotocol::tests::platform::TestDevice;
     use crate::u2ftypes::U2FDevice;
@@ -352,6 +433,13 @@ pub mod tests {
 
         fn set_authenticator_info(&mut self, authenticator_info: AuthenticatorInfo) {
             self.authenticator_info = Some(authenticator_info);
+        }
+
+        fn set_shared_secret(&mut self, _: ECDHSecret) {
+            // Nothing
+        }
+        fn get_shared_secret(&self) -> std::option::Option<&ECDHSecret> {
+            None
         }
 
         fn new(_: Self::BuildParameters) -> Result<Self, HIDError>
