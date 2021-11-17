@@ -11,28 +11,6 @@
 
 extern "C" {
 
-typedef struct {
-    const uint8_t *id_ptr;
-    size_t id_len;
-    const char *name;
-} AuthenticatorArgsUser;
-
-typedef struct {
-    const uint8_t *ptr;
-    size_t len;
-} AuthenticatorArgsChallenge;
-
-typedef struct {
-    const int32_t *ptr;
-    size_t len;
-} AuthenticatorArgsPubCred;
-
-typedef struct {
-    bool resident_key;
-    bool user_verification;
-    bool user_presence;
-} AuthenticatorArgsOptions;
-
 const uint8_t U2F_RESBUF_ID_REGISTRATION = 0;
 const uint8_t U2F_RESBUF_ID_KEYHANDLE = 1;
 const uint8_t U2F_RESBUF_ID_SIGNATURE = 2;
@@ -42,13 +20,6 @@ const uint8_t U2F_RESBUF_ID_DEVICE_NAME = 5;
 const uint8_t U2F_RESBUF_ID_FIRMWARE_MAJOR = 6;
 const uint8_t U2F_RESBUF_ID_FIRMWARE_MINOR = 7;
 const uint8_t U2F_RESBUF_ID_FIRMWARE_BUILD = 8;
-const uint8_t CTAP2_RESBUF_ID_CTAP20_INDICATOR = 9;
-const uint8_t CTAP2_RESBUF_ID_ATTESTATION_STATEMENT_ALGORITHM = 10;
-const uint8_t CTAP2_RESBUF_ID_ATTESTATION_STATEMENT_SIGNATURE = 11;
-const uint8_t CTAP2_RESBUF_ID_ATTESTATION_STATEMENT_CERTIFICATE = 12;
-const uint8_t CTAP2_RESBUF_ID_ATTESTATION_STATEMENT_UNPARSED = 13;
-const uint8_t CTAP2_RESBUF_ID_AUTHENTICATOR_DATA = 14;
-const uint8_t CTAP2_RESBUF_ID_CLIENT_DATA = 15;
 
 const uint64_t U2F_FLAG_REQUIRE_RESIDENT_KEY = 1;
 const uint64_t U2F_FLAG_REQUIRE_USER_VERIFICATION = 2;
@@ -79,7 +50,7 @@ const uint8_t CTAP_ERROR_PIN_BLOCKED = 9;
 
 // The `rust_u2f_mgr` opaque type is equivalent to the rust type `U2FManager`
 // TODO(MS): Once CTAP2 support is added, this should probably be renamed.
-struct rust_u2f_manager;
+struct rust_ctap_manager;
 
 // The `rust_u2f_app_ids` opaque type is equivalent to the rust type `U2FAppIds`
 struct rust_u2f_app_ids;
@@ -94,15 +65,12 @@ struct rust_u2f_result;
 // The callback passed to register() and sign().
 typedef void (*rust_u2f_callback)(uint64_t, rust_u2f_result*);
 
-/// CTAP2 functions
-rust_u2f_manager* rust_ctap2_mgr_new();
-
 /// U2FManager functions.
 
-rust_u2f_manager* rust_u2f_mgr_new();
-/* unsafe */ void rust_u2f_mgr_free(rust_u2f_manager* mgr);
+rust_ctap_manager* rust_u2f_mgr_new();
+/* unsafe */ void rust_u2f_mgr_free(rust_ctap_manager* mgr);
 
-uint64_t rust_u2f_mgr_register(rust_u2f_manager* mgr, uint64_t flags,
+uint64_t rust_u2f_mgr_register(rust_ctap_manager* mgr, uint64_t flags,
                                uint64_t timeout, rust_u2f_callback,
                                const uint8_t* challenge_ptr,
                                size_t challenge_len,
@@ -110,13 +78,13 @@ uint64_t rust_u2f_mgr_register(rust_u2f_manager* mgr, uint64_t flags,
                                size_t application_len,
                                const rust_u2f_key_handles* khs);
 
-uint64_t rust_u2f_mgr_sign(rust_u2f_manager* mgr, uint64_t flags,
+uint64_t rust_u2f_mgr_sign(rust_ctap_manager* mgr, uint64_t flags,
                            uint64_t timeout, rust_u2f_callback,
                            const uint8_t* challenge_ptr, size_t challenge_len,
                            const rust_u2f_app_ids* app_ids,
                            const rust_u2f_key_handles* khs);
 
-void rust_u2f_mgr_cancel(rust_u2f_manager* mgr);
+void rust_u2f_mgr_cancel(rust_ctap_manager* mgr);
 
 /// U2FAppIds functions.
 
@@ -145,23 +113,6 @@ bool rust_u2f_resbuf_copy(const rust_u2f_result* res, uint8_t bid,
                           uint8_t* dst);
 /* unsafe */ void rust_u2f_res_free(rust_u2f_result* res);
 
-/// CTAP2 functions.
-uint64_t rust_ctap2_mgr_register(
-    rust_u2f_manager* mgr, uint64_t timeout, rust_u2f_callback,
-    AuthenticatorArgsChallenge challenge,
-    const char* relying_party_id, const char *origin_ptr,
-    AuthenticatorArgsUser user, AuthenticatorArgsPubCred pub_cred_params,
-    const rust_u2f_key_handles* exclude_list, AuthenticatorArgsOptions options,
-    const char *pin
-);
-
-uint64_t rust_ctap2_mgr_sign(
-    rust_u2f_manager* mgr, uint64_t timeout, rust_u2f_callback,
-    AuthenticatorArgsChallenge challenge,
-    const char* relying_party_id, const char *origin_ptr,
-    const rust_u2f_key_handles* allow_list, AuthenticatorArgsOptions options,
-    const char *pin
-);
 }
 
 #endif  // __U2FHID_CAPI

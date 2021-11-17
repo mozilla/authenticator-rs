@@ -7,7 +7,6 @@ use nom::{
     number::complete::{be_u16, be_u32, be_u8},
     take, Err as NomErr, IResult,
 };
-#[cfg(test)]
 use serde::ser::{SerializeMap, Serializer};
 use serde::{
     de::{Error as SerdeError, MapAccess, Visitor},
@@ -231,7 +230,6 @@ impl AuthenticatorData {
     }
 }
 
-#[cfg(test)]
 impl Serialize for AuthenticatorData {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -252,7 +250,7 @@ impl AsRef<[u8]> for AttestationCertificate {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq)]
-pub struct Signature(pub(crate) ByteBuf);
+pub struct Signature(#[serde(with = "serde_bytes")] pub(crate) ByteBuf);
 
 impl fmt::Debug for Signature {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -451,42 +449,40 @@ impl<'de> Deserialize<'de> for AttestationObject {
     }
 }
 
-#[cfg(test)]
 impl Serialize for AttestationObject {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        if let AttestationStatement::Unparsed(ref v) = self.att_statement {
-            serializer.serialize_bytes(&v)
-        } else {
-            let mut map_len = 2;
-            if self.att_statement != AttestationStatement::None {
-                map_len += 1;
-            }
-
-            let mut map = serializer.serialize_map(Some(map_len))?;
-
-            map.serialize_entry(&2, &self.auth_data)?;
-            match self.att_statement {
-                AttestationStatement::None => {
-                    map.serialize_entry(&1, &"none")?;
-                }
-                AttestationStatement::Packed(ref v) => {
-                    map.serialize_entry(&1, &"packed")?;
-                    map.serialize_entry(&3, v)?;
-                }
-                AttestationStatement::FidoU2F(ref v) => {
-                    map.serialize_entry(&1, &"fido-u2f")?;
-                    map.serialize_entry(&3, v)?;
-                }
-                AttestationStatement::Unparsed(_) => {
-                    unimplemented!(); /* Can't happen. Did this above */
-                }
-            }
-
-            map.end()
+        // serializer.serialize_bytes(&v)
+        let mut map_len = 2;
+        if self.att_statement != AttestationStatement::None {
+            map_len += 1;
         }
+
+        let mut map = serializer.serialize_map(Some(map_len))?;
+
+        map.serialize_entry(&2, &self.auth_data)?;
+        match self.att_statement {
+            AttestationStatement::None => {
+                map.serialize_entry(&1, &"none")?;
+            }
+            AttestationStatement::Packed(ref v) => {
+                map.serialize_entry(&1, &"packed")?;
+                map.serialize_entry(&3, v)?;
+            }
+            AttestationStatement::FidoU2F(ref v) => {
+                map.serialize_entry(&1, &"fido-u2f")?;
+                map.serialize_entry(&3, v)?;
+            }
+            AttestationStatement::Unparsed(ref v) => {
+                // Unparsed is currently only used in the fido1.0/u2f-case
+                map.serialize_entry(&1, &"fido-u2f")?;
+                map.serialize_entry(&3, v)?;
+            }
+        }
+
+        map.end()
     }
 }
 
