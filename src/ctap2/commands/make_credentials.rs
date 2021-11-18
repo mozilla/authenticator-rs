@@ -283,7 +283,10 @@ impl RequestCtap1 for MakeCredentials {
 
             let auth_data = AuthenticatorData {
                 rp_id_hash: self.rp.hash(),
-                flags: AuthenticatorDataFlags::empty(),
+                // https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html#u2f-authenticatorMakeCredential-interoperability
+                // "Let flags be a byte whose zeroth bit (bit 0, UP) is set, and whose sixth bit
+                // (bit 6, AT) is set, and all other bits are zero (bit zero is the least significant bit)"
+                flags: AuthenticatorDataFlags::USER_PRESENT | AuthenticatorDataFlags::ATTESTED,
                 counter: 0,
                 credential_data: Some(AttestedCredentialData {
                     aaguid: AAGuid::default(),
@@ -580,7 +583,7 @@ pub mod test {
                     0x12, 0x55, 0x86, 0xCE, 0x19, 0x47,
                 ])
                 .unwrap(),
-                flags: AuthenticatorDataFlags::empty(),
+                flags: AuthenticatorDataFlags::USER_PRESENT | AuthenticatorDataFlags::ATTESTED,
                 counter: 0,
                 credential_data: Some(AttestedCredentialData {
                     aaguid: AAGuid::default(),

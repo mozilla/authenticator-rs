@@ -5,19 +5,12 @@
 use crate::authenticatorservice::{
     AuthenticatorService, CtapVersion, RegisterArgsCtap1, SignArgsCtap1,
 };
-
-
-
-
 use crate::errors;
 use crate::statecallback::StateCallback;
-
 use crate::{RegisterResult, SignResult};
 use libc::size_t;
 use rand::{thread_rng, Rng};
 use std::collections::HashMap;
-
-
 use std::sync::mpsc::channel;
 use std::thread;
 use std::{ptr, slice};
