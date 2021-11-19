@@ -3,10 +3,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use crate::authenticatorservice::{
-    AuthenticatorService, CtapVersion, RegisterArgsCtap1, RegisterArgsCtap2, SignArgsCtap1,
-    SignArgsCtap2,
+    AuthenticatorService, CtapVersion, RegisterArgsCtap2, SignArgsCtap2,
 };
-use crate::ctap2::attestation::{self, AttestationStatement};
+use crate::ctap2::attestation::AttestationStatement;
 use crate::ctap2::commands::get_assertion::{Assertion, AssertionObject, GetAssertionOptions};
 use crate::ctap2::commands::make_credentials::MakeCredentialsOptions;
 use crate::ctap2::commands::CommandError;
@@ -20,10 +19,8 @@ use crate::{RegisterResult, SignResult};
 use libc::size_t;
 use rand::{thread_rng, Rng};
 use serde_cbor;
-use std::collections::HashMap;
-use std::ffi::{CStr, CString, NulError};
+use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
-use std::ptr::null;
 use std::sync::mpsc::channel;
 use std::thread;
 use std::{ptr, slice};
@@ -339,7 +336,7 @@ pub unsafe extern "C" fn rust_ctap2_mgr_sign(
     });
 
     let single_key_handle = if allow_list.len() == 1 {
-        Some(allow_list.first().unwrap().id.clone())
+        Some(allow_list.first().unwrap().clone())
     } else {
         None
     };
@@ -351,7 +348,12 @@ pub unsafe extern "C" fn rust_ctap2_mgr_sign(
                 "rust_ctap2_mgr_register",
                 2,
             )),
-            Ok(SignResult::CTAP2(assertion_object, client_data)) => {
+            Ok(SignResult::CTAP2(mut assertion_object, client_data)) => {
+                // The token can omit sending back credentials, if the allow_list had only one
+                // entry. Thus we re-add that here now for all found assertions before handing it out.
+                assertion_object.0.iter_mut().for_each(|x| {
+                    x.credentials = x.credentials.clone().or(single_key_handle.clone());
+                });
                 rewrap_sign_result(assertion_object, client_data)
             }
             Err(e) => Err(e),
@@ -414,7 +416,7 @@ pub unsafe extern "C" fn rust_ctap2_sign_result_error(res: *const Ctap2SignResul
 #[no_mangle]
 pub unsafe extern "C" fn rust_ctap2_register_res_free(res: *mut Ctap2RegisterResult) {
     if !res.is_null() {
-        Box::from_raw(res);
+        let _ = Box::from_raw(res);
     }
 }
 
@@ -425,7 +427,7 @@ pub unsafe extern "C" fn rust_ctap2_register_res_free(res: *mut Ctap2RegisterRes
 #[no_mangle]
 pub unsafe extern "C" fn rust_ctap2_sign_res_free(res: *mut Ctap2SignResult) {
     if !res.is_null() {
-        Box::from_raw(res);
+        let _ = Box::from_raw(res);
     }
 }
 
