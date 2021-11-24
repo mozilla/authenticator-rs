@@ -243,7 +243,7 @@ impl RequestCtap1 for GetAssertion {
             ) -> Result<Self::Output, Retryable<HIDError>> {
                 match status {
                     Ok(_) | Err(ApduErrorStatus::ConditionsNotSatisfied) => Ok(()),
-                    _ => Err(Retryable::Error(HIDError::DeviceError)),
+                    Err(e) => Err(Retryable::Error(HIDError::ApduStatus(e))),
                 }
             }
         }
@@ -302,8 +302,8 @@ impl RequestCtap1 for GetAssertion {
         if Err(ApduErrorStatus::ConditionsNotSatisfied) == status {
             return Err(Retryable::Retry);
         }
-        if status.is_err() {
-            return Err(Retryable::Error(HIDError::DeviceError));
+        if let Err(err) = status {
+            return Err(Retryable::Error(HIDError::ApduStatus(err)));
         }
 
         if self.is_ctap2_request() {

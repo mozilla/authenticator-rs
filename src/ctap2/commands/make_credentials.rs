@@ -246,6 +246,9 @@ impl RequestCtap1 for MakeCredentials {
         if Err(ApduErrorStatus::ConditionsNotSatisfied) == status {
             return Err(Retryable::Retry);
         }
+        if let Err(err) = status {
+            return Err(Retryable::Error(HIDError::ApduStatus(err)));
+        }
 
         if self.is_ctap2_request() {
             named!(
