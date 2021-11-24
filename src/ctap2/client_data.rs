@@ -179,7 +179,7 @@ impl<'de> Deserialize<'de> for WebauthnType {
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
-pub struct Challenge(String);
+pub struct Challenge(pub String);
 
 impl Challenge {
     pub fn new(input: Vec<u8>) -> Self {

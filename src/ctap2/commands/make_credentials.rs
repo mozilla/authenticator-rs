@@ -230,7 +230,10 @@ impl RequestCtap1 for MakeCredentials {
                     .as_ref(),
             );
         } else {
-            register_data.extend_from_slice(self.client_data.challenge.as_ref());
+            let decoded =
+                base64::decode_config(&self.client_data.challenge.0, base64::URL_SAFE_NO_PAD)
+                    .map_err(|_| HIDError::DeviceError)?; // We encoded it, so this should never fail
+            register_data.extend_from_slice(&decoded);
         }
         register_data.extend_from_slice(self.rp.hash().as_ref());
         let cmd = U2F_REGISTER;

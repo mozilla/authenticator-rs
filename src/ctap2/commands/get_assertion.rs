@@ -283,7 +283,10 @@ impl RequestCtap1 for GetAssertion {
                     .as_ref(),
             );
         } else {
-            auth_data.extend_from_slice(self.client_data.challenge.as_ref());
+            let decoded =
+                base64::decode_config(&self.client_data.challenge.0, base64::URL_SAFE_NO_PAD)
+                    .map_err(|_| HIDError::DeviceError)?; // We encoded it, so this should never fail
+            auth_data.extend_from_slice(&decoded);
         }
         auth_data.extend_from_slice(self.rp.hash().as_ref());
         auth_data.extend_from_slice(&[key_handle.len() as u8]);
