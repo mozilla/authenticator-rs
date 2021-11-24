@@ -5,7 +5,7 @@
 use crate::consts::PARAMETER_SIZE;
 use crate::ctap2::commands::get_assertion::{GetAssertion, GetAssertionResult};
 use crate::ctap2::commands::make_credentials::{MakeCredentials, MakeCredentialsResult};
-use crate::ctap2::commands::{CommandError, PinAuthCommand, StatusCode};
+use crate::ctap2::commands::{CommandError, PinAuthCommand, Request, StatusCode};
 use crate::errors::{self, AuthenticatorError};
 use crate::statecallback::StateCallback;
 use crate::transport::platform::{device::Device, transaction::Transaction};
@@ -354,14 +354,15 @@ impl StateMachineCtap2 {
             // TODO(MS): This is wasteful, but the current setup with read only-functions doesn't allow me
             //           to modify "params" directly.
             let mut makecred = params.clone();
-            match makecred.determine_pin_auth(dev) {
-                Ok(x) => x,
-                Err(e) => {
-                    callback.call(Err(e));
-                    return;
-                }
-            };
-
+            if params.is_ctap2_request() {
+                match makecred.determine_pin_auth(dev) {
+                    Ok(x) => x,
+                    Err(e) => {
+                        callback.call(Err(e));
+                        return;
+                    }
+                };
+            }
             debug!("------------------------------------------------------------------");
             debug!("{:?}", makecred);
             debug!("------------------------------------------------------------------");
