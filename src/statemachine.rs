@@ -437,13 +437,15 @@ impl StateMachineCtap2 {
             // TODO(MS): This is wasteful, but the current setup with read only-functions doesn't allow me
             //           to modify "params" directly.
             let mut getassertion = params.clone();
-            match getassertion.determine_pin_auth(dev) {
-                Ok(x) => x,
-                Err(e) => {
-                    callback.call(Err(e));
-                    return;
-                }
-            };
+            if params.is_ctap2_request() {
+                match getassertion.determine_pin_auth(dev) {
+                    Ok(x) => x,
+                    Err(e) => {
+                        callback.call(Err(e));
+                        return;
+                    }
+                };
+            }
 
             debug!("------------------------------------------------------------------");
             debug!("{:?}", getassertion);
