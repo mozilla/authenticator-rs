@@ -1,4 +1,7 @@
-use super::{ECDHSecret, Key, PublicKey, SignatureAlgorithm};
+use super::{
+    /*Signature,*/ COSEAlgorithm, COSEEC2Key, /*PlainText*/ COSEKey, COSEKeyType,
+    /*CypherText,*/ ECDHSecret, ECDSACurve,
+};
 use ring::agreement::{
     agree_ephemeral, Algorithm, EphemeralPrivateKey, UnparsedPublicKey, ECDH_P256, ECDH_P384,
 };
@@ -26,20 +29,23 @@ authenticate(key, message) → signature
     Computes a MAC of the given message.
 */
 
-fn to_ring_curve(curve: SignatureAlgorithm) -> &'static Algorithm {
-    match curve {
-        SignatureAlgorithm::ES256 => &ECDH_P256,
-        SignatureAlgorithm::ES384 => &ECDH_P384,
-        // SignatureAlgorithm::X25519 => ECDH_X25519,
-        _ => unimplemented!(),
-    }
-}
+pub type Result<T> = std::result::Result<T, BackendError>;
 
 #[derive(Debug, PartialEq)]
 pub enum BackendError {
     AgreementError,
     UnspecifiedRingError,
     KeyRejected,
+    UnsupportedKeyType,
+    UnsupportedCurve(ECDSACurve),
+}
+
+fn to_ring_curve(curve: ECDSACurve) -> Result<&'static Algorithm> {
+    match curve {
+        ECDSACurve::SECP256R1 => Ok(&ECDH_P256),
+        ECDSACurve::SECP384R1 => Ok(&ECDH_P384),
+        x => Err(BackendError::UnsupportedCurve(x)),
+    }
 }
 
 impl From<ring::error::Unspecified> for BackendError {
@@ -54,16 +60,14 @@ impl From<ring::error::KeyRejected> for BackendError {
     }
 }
 
-pub type Result<T> = std::result::Result<T, BackendError>;
-
-pub(crate) fn parse_key(curve: SignatureAlgorithm, x: &[u8], y: &[u8]) -> Result<PublicKey> {
+pub(crate) fn parse_key(curve: ECDSACurve, x: &[u8], y: &[u8]) -> Result<Vec<u8>> {
     compile_error!(
         "Ring-backend is not yet implemented. Compile with `--features crypto_openssl` for now."
     )
 }
 
 // TODO(MS): Maybe remove ByteBuf and return Vec<u8>'s instead for a cleaner interface
-pub(crate) fn serialize_key<T: Key>(key: &T) -> Result<(ByteBuf, ByteBuf)> {
+pub(crate) fn serialize_key(curve: ECDSACurve, key: &[u8]) -> Result<(ByteBuf, ByteBuf)> {
     compile_error!(
         "Ring-backend is not yet implemented. Compile with `--features crypto_openssl` for now."
     )
@@ -78,38 +82,65 @@ pub(crate) fn initialize() {
 
 /// Generates an encapsulation for the authenticator’s public key and returns the message
 /// to transmit and the shared secret.
-pub(crate) fn encapsulate<T: Key>(key: &T) -> Result<ECDHSecret> {
-    let rng = SystemRandom::new();
-    let peer_public_key_alg = to_ring_curve(key.curve());
-    let private_key = EphemeralPrivateKey::generate(peer_public_key_alg, &rng)?;
-    let my_public_key = private_key.compute_public_key()?;
-    let my_public_key = PublicKey {
-        curve: key.curve(),
-        bytes: Vec::from(my_public_key.as_ref()),
-    };
-    let peer_public_key = UnparsedPublicKey::new(peer_public_key_alg, &key.key());
+pub(crate) fn encapsulate(key: &COSEKey) -> Result<ECDHSecret> {
+    if let COSEKeyType::EC2(ec2key) = &key.key {
+        // let curve_name = to_openssl_name(ec2key.curve)?;
+        // let group = EcGroup::from_curve_name(curve_name)?;
+        // let my_key = EcKey::generate(&group)?;
 
-    let shared_secret = agree_ephemeral(private_key, &peer_public_key, (), |key_material| {
-        let digest = digest::digest(&digest::SHA256, key_material);
-        Ok(Vec::from(digest.as_ref()))
-    })
-    .map_err(|_| BackendError::AgreementError)?;
+        // encapsulate_helper(&ec2key, key.alg, group, my_key)
+        let rng = SystemRandom::new();
+        let peer_public_key_alg = to_ring_curve(ec2key.curve)?;
+        let private_key = EphemeralPrivateKey::generate(peer_public_key_alg, &rng)?;
+        let my_public_key = private_key.compute_public_key()?;
+        let (x, y) = serialize_key(ec2key.curve, my_public_key.as_ref())?;
+        let my_public_key = COSEKey {
+            alg: key.alg,
+            key: COSEKeyType::EC2(COSEEC2Key {
+                curve: ec2key.curve,
+                x: x.to_vec(),
+                y: y.to_vec(),
+            }),
+        };
 
-    Ok(ECDHSecret {
-        curve: key.curve(),
-        remote: PublicKey {
-            curve: key.curve(),
-            bytes: key.key().to_vec(),
-        },
-        my: my_public_key,
-        shared_secret,
-    })
+        let key_bytes = parse_key(ec2key.curve, &ec2key.x, &ec2key.y)?;
+        let peer_public_key = UnparsedPublicKey::new(peer_public_key_alg, &key_bytes);
+
+        let shared_secret = agree_ephemeral(private_key, &peer_public_key, (), |key_material| {
+            let digest = digest::digest(&digest::SHA256, key_material);
+            Ok(Vec::from(digest.as_ref()))
+        })
+        .map_err(|_| BackendError::AgreementError)?;
+
+        Ok(ECDHSecret {
+            remote: COSEKey {
+                alg: key.alg,
+                key: COSEKeyType::EC2(ec2key.clone()),
+            },
+            my: my_public_key,
+            shared_secret,
+        })
+    } else {
+        Err(BackendError::UnsupportedKeyType)
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn test_encapsulate(
+    key: &COSEEC2Key,
+    alg: COSEAlgorithm,
+    my_pub_key: &[u8],
+    my_priv_key: &[u8],
+) -> Result<ECDHSecret> {
+    compile_error!(
+        "Ring-backend is not yet implemented. Compile with `--features crypto_openssl` for now."
+    )
 }
 
 /// Encrypts a plaintext to produce a ciphertext, which may be longer than the plaintext.
 /// The plaintext is restricted to being a multiple of the AES block size (16 bytes) in length.
-pub(crate) fn encrypt<T: Key>(
-    key: &T,
+pub(crate) fn encrypt(
+    key: &[u8],
     plain_text: &[u8], /*PlainText*/
 ) -> Result<Vec<u8> /*CypherText*/> {
     // Ring doesn't support AES-CBC yet
@@ -119,8 +150,8 @@ pub(crate) fn encrypt<T: Key>(
 }
 
 /// Decrypts a ciphertext and returns the plaintext.
-pub(crate) fn decrypt<T: Key>(
-    key: &T,
+pub(crate) fn decrypt(
+    key: &[u8],
     cypher_text: &[u8], /*CypherText*/
 ) -> Result<Vec<u8> /*PlainText*/> {
     // Ring doesn't support AES-CBC yet

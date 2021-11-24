@@ -1,6 +1,6 @@
 use super::{get_info::AuthenticatorInfo, Command, CommandError, RequestCtap2, StatusCode};
 use crate::crypto::{
-    authenticate, decrypt, encapsulate, encrypt, BackendError, CryptoError, ECDHSecret, PublicKey,
+    authenticate, decrypt, encapsulate, encrypt, BackendError, COSEKey, CryptoError, ECDHSecret,
 };
 use crate::ctap2::client_data::ClientDataHash;
 use crate::transport::errors::HIDError;
@@ -34,7 +34,7 @@ pub enum PINSubcommand {
 pub struct ClientPIN {
     pin_protocol: Option<u8>,
     subcommand: PINSubcommand,
-    key_agreement: Option<PublicKey>,
+    key_agreement: Option<COSEKey>,
     pin_auth: Option<[u8; 16]>,
     new_pin_enc: Option<ByteBuf>,
     pin_hash_enc: Option<ByteBuf>,
@@ -107,7 +107,7 @@ pub trait ClientPINSubCommand {
 }
 
 struct ClientPinResponse {
-    key_agreement: Option<PublicKey>,
+    key_agreement: Option<COSEKey>,
     pin_token: Option<EncryptedPinToken>,
     /// Number of PIN attempts remaining before lockout.
     retries: Option<u8>,
@@ -241,8 +241,8 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinToken<'sc, 'pin> {
     fn as_client_pin(&self) -> Result<ClientPIN, CommandError> {
         let input = self.pin.for_pin_token();
         trace!("pin_hash = {:#04X?}", &input.as_ref());
-        let pin_hash_enc =
-            encrypt(self.shared_secret, input.as_ref()).map_err(|e| CryptoError::Backend(e))?;
+        let pin_hash_enc = encrypt(self.shared_secret.shared_secret(), input.as_ref())
+            .map_err(|e| CryptoError::Backend(e))?;
         trace!("pin_hash_enc = {:#04X?}", &pin_hash_enc);
 
         Ok(ClientPIN {
@@ -262,8 +262,11 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinToken<'sc, 'pin> {
             from_slice(input).map_err(CommandError::Deserializing)?;
         match get_pin_response.pin_token {
             Some(encrypted_pin_token) => {
-                let pin_token = decrypt(self.shared_secret, encrypted_pin_token.as_ref())
-                    .map_err(|e| CryptoError::Backend(e))?;
+                let pin_token = decrypt(
+                    self.shared_secret.shared_secret(),
+                    encrypted_pin_token.as_ref(),
+                )
+                .map_err(|e| CryptoError::Backend(e))?;
                 let pin_token = PinToken(pin_token);
                 Ok(pin_token)
             }
@@ -358,7 +361,7 @@ where
 }
 
 #[derive(Debug)]
-pub struct KeyAgreement(PublicKey);
+pub struct KeyAgreement(COSEKey);
 
 impl KeyAgreement {
     pub fn shared_secret(&self) -> Result<ECDHSecret, CommandError> {

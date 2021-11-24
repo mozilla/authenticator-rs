@@ -5,12 +5,13 @@
 use crate::authenticatorservice::AuthenticatorTransport;
 use crate::authenticatorservice::{RegisterArgs, RegisterArgsCtap1, SignArgs};
 use crate::consts::PARAMETER_SIZE;
+use crate::crypto::COSEAlgorithm;
 use crate::ctap2::client_data::{CollectedClientData, WebauthnType};
 use crate::ctap2::commands::get_assertion::{GetAssertion, GetAssertionOptions};
 use crate::ctap2::commands::make_credentials::MakeCredentials;
 use crate::ctap2::commands::make_credentials::MakeCredentialsOptions;
 use crate::ctap2::server::{
-    Alg, PublicKeyCredentialParameters, RelyingParty, RelyingPartyWrapper, RpIdHash,
+    PublicKeyCredentialParameters, RelyingParty, RelyingPartyWrapper, RpIdHash,
 };
 use crate::errors::*;
 use crate::statecallback::StateCallback;
@@ -357,7 +358,9 @@ impl AuthenticatorTransport for Manager {
                     client_data,
                     RelyingPartyWrapper::Hash(RpIdHash::from(&args.application)?),
                     None,
-                    vec![PublicKeyCredentialParameters { alg: Alg::ES256 }],
+                    vec![PublicKeyCredentialParameters {
+                        alg: COSEAlgorithm::ES256,
+                    }],
                     vec![], // TODO(MS): Implement excludeList. See spec.
                     MakeCredentialsOptions {
                         resident_key: None,

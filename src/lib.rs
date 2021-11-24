@@ -41,12 +41,16 @@ pub use ctap2::client_data::CollectedClientData;
 pub use ctap2::commands::client_pin::Pin;
 pub use ctap2::AssertionObject;
 
+mod ctap2_capi;
+pub use crate::ctap2_capi::*;
+
 pub mod errors;
 pub mod statecallback;
 mod transport;
 mod virtualdevices;
 
 mod crypto;
+pub use crypto::COSEAlgorithm;
 
 // Keep this in sync with the constants in u2fhid-capi.h.
 bitflags! {

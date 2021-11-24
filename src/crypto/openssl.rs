@@ -1,10 +1,12 @@
 use super::{
-    /*CypherText,*/ ECDHSecret, Key, /*PlainText*/ PublicKey,
-    /*Signature,*/ SignatureAlgorithm,
+    /*Signature,*/ COSEAlgorithm, COSEEC2Key, /*PlainText*/ COSEKey, COSEKeyType,
+    /*CypherText,*/ ECDHSecret, ECDSACurve,
 };
 use openssl::bn::{BigNum, BigNumContext};
 use openssl::derive::Deriver;
-use openssl::ec::{EcGroup, EcKey, EcPoint, PointConversionForm};
+#[cfg(test)]
+use openssl::ec::PointConversionForm;
+use openssl::ec::{EcGroup, EcKey, EcPoint};
 use openssl::error::ErrorStack;
 use openssl::hash::{hash, MessageDigest};
 use openssl::nid::Nid;
@@ -18,11 +20,19 @@ use serde_bytes::ByteBuf;
 #[derive(Debug)]
 pub enum BackendError {
     OpenSSL(ErrorStack),
+    UnsupportedCurve(ECDSACurve),
+    UnsupportedKeyType,
 }
 
 impl From<ErrorStack> for BackendError {
     fn from(e: ErrorStack) -> Self {
         BackendError::OpenSSL(e)
+    }
+}
+
+impl From<&ErrorStack> for BackendError {
+    fn from(e: &ErrorStack) -> Self {
+        BackendError::OpenSSL(e.clone())
     }
 }
 
@@ -47,19 +57,17 @@ authenticate(key, message) → signature
     Computes a MAC of the given message.
 */
 
-fn to_openssl_name(curve: SignatureAlgorithm) -> Nid {
+fn to_openssl_name(curve: ECDSACurve) -> Result<Nid> {
     match curve {
-        // SignatureAlgorithm::ES256 => Nid::ECDSA_WITH_SHA256, // TODO(MS): Is this correct?
-        SignatureAlgorithm::ES256 => Nid::X9_62_PRIME256V1, // TODO(MS): Is this correct?
-        SignatureAlgorithm::PS256 => Nid::X9_62_PRIME256V1,
-        SignatureAlgorithm::ES384 => Nid::SECP384R1,
-        // SignatureAlgorithm::X25519 => "x25519",
-        _ => unimplemented!(),
+        ECDSACurve::SECP256R1 => Ok(Nid::X9_62_PRIME256V1),
+        ECDSACurve::SECP384R1 => Ok(Nid::SECP384R1),
+        ECDSACurve::SECP521R1 => Ok(Nid::SECP521R1),
+        x => Err(BackendError::UnsupportedCurve(x)),
     }
 }
 
-fn affine_coordinates(curve: SignatureAlgorithm, bytes: &[u8]) -> Result<(ByteBuf, ByteBuf)> {
-    let name = to_openssl_name(curve);
+fn affine_coordinates(curve: ECDSACurve, bytes: &[u8]) -> Result<(ByteBuf, ByteBuf)> {
+    let name = to_openssl_name(curve)?;
     let group = EcGroup::from_curve_name(name)?;
 
     let mut ctx = BigNumContext::new()?;
@@ -75,12 +83,13 @@ fn affine_coordinates(curve: SignatureAlgorithm, bytes: &[u8]) -> Result<(ByteBu
 }
 
 // TODO(MS): Maybe remove ByteBuf and return Vec<u8>'s instead for a cleaner interface
-pub(crate) fn serialize_key<T: Key>(key: &T) -> Result<(ByteBuf, ByteBuf)> {
-    affine_coordinates(key.curve(), key.key())
+pub(crate) fn serialize_key(curve: ECDSACurve, key: &[u8]) -> Result<(ByteBuf, ByteBuf)> {
+    affine_coordinates(curve, key)
 }
 
-pub(crate) fn parse_key(curve: SignatureAlgorithm, x: &[u8], y: &[u8]) -> Result<PublicKey> {
-    let name = to_openssl_name(curve);
+#[cfg(test)]
+pub(crate) fn parse_key(curve: ECDSACurve, x: &[u8], y: &[u8]) -> Result<Vec<u8>> {
+    let name = to_openssl_name(curve)?;
     let group = EcGroup::from_curve_name(name)?;
 
     let mut ctx = BigNumContext::new()?;
@@ -91,10 +100,7 @@ pub(crate) fn parse_key(curve: SignatureAlgorithm, x: &[u8], y: &[u8]) -> Result
     // TODO(baloo): what is uncompressed?!
     let pub_key = key.public_key();
 
-    Ok(PublicKey {
-        curve,
-        bytes: pub_key.to_bytes(&group, PointConversionForm::UNCOMPRESSED, &mut ctx)?,
-    })
+    Ok(pub_key.to_bytes(&group, PointConversionForm::UNCOMPRESSED, &mut ctx)?)
 }
 
 /// This is run by the platform when starting a series of transactions with a specific authenticator.
@@ -104,30 +110,47 @@ pub(crate) fn parse_key(curve: SignatureAlgorithm, x: &[u8], y: &[u8]) -> Result
 
 /// Generates an encapsulation for the authenticator’s public key and returns the message
 /// to transmit and the shared secret.
-pub(crate) fn encapsulate<T: Key>(key: &T) -> Result<ECDHSecret> {
-    let curve_name = to_openssl_name(key.curve());
-    let group = EcGroup::from_curve_name(curve_name)?;
-    let my_key = EcKey::generate(&group)?;
+pub(crate) fn encapsulate(key: &COSEKey) -> Result<ECDHSecret> {
+    if let COSEKeyType::EC2(ec2key) = &key.key {
+        let curve_name = to_openssl_name(ec2key.curve)?;
+        let group = EcGroup::from_curve_name(curve_name)?;
+        let my_key = EcKey::generate(&group)?;
 
-    encapsulate_helper(key, group, my_key)
+        encapsulate_helper(&ec2key, key.alg, group, my_key)
+    } else {
+        Err(BackendError::UnsupportedKeyType)
+    }
 }
 
-pub(crate) fn encapsulate_helper<T: Key>(
-    key: &T,
+pub(crate) fn encapsulate_helper(
+    key: &COSEEC2Key,
+    alg: COSEAlgorithm,
     group: EcGroup,
     my_key: EcKey<Private>,
 ) -> Result<ECDHSecret> {
     let mut ctx = BigNumContext::new()?;
-    let my_public_key = PublicKey {
-        curve: key.curve(),
-        bytes: my_key
-            .public_key()
-            .to_bytes(&group, PointConversionForm::UNCOMPRESSED, &mut ctx)?
-            .clone(),
+    let mut x = BigNum::new()?;
+    let mut y = BigNum::new()?;
+
+    my_key
+        .public_key()
+        .affine_coordinates_gfp(&group, &mut x, &mut y, &mut ctx)?;
+
+    let my_public_key = COSEKey {
+        alg,
+        key: COSEKeyType::EC2(COSEEC2Key {
+            curve: key.curve.clone(),
+            x: x.to_vec(),
+            y: y.to_vec(),
+        }),
     };
 
-    let point = EcPoint::from_bytes(&group, &key.key(), &mut ctx)?;
-    let peer_public_key = PKey::from_ec_key(EcKey::from_public_key(&group, &point)?)?;
+    // let point = EcPoint::from_bytes(&group, &key.key, &mut ctx)?;
+    let peer_public_key = PKey::from_ec_key(EcKey::from_public_key_affine_coordinates(
+        &group,
+        BigNum::from_slice(&key.x).as_ref()?,
+        BigNum::from_slice(&key.y).as_ref()?,
+    )?)?;
 
     let my_ec_key = PKey::from_ec_key(my_key)?;
     let mut deriver = Deriver::new(my_ec_key.as_ref())?;
@@ -138,10 +161,9 @@ pub(crate) fn encapsulate_helper<T: Key>(
     let digest = hash(MessageDigest::sha256(), &shared_sec)?;
 
     Ok(ECDHSecret {
-        curve: key.curve(),
-        remote: PublicKey {
-            curve: key.curve(),
-            bytes: key.key().to_vec(),
+        remote: COSEKey {
+            alg,
+            key: COSEKeyType::EC2(key.clone()),
         },
         my: my_public_key,
         shared_secret: digest.as_ref().to_vec(),
@@ -149,12 +171,13 @@ pub(crate) fn encapsulate_helper<T: Key>(
 }
 
 #[cfg(test)]
-pub(crate) fn test_encapsulate<T: Key>(
-    key: &T,
+pub(crate) fn test_encapsulate(
+    key: &COSEEC2Key,
+    alg: COSEAlgorithm,
     my_pub_key: &[u8],
     my_priv_key: &[u8],
 ) -> Result<ECDHSecret> {
-    let curve_name = to_openssl_name(key.curve());
+    let curve_name = to_openssl_name(key.curve)?;
     let group = EcGroup::from_curve_name(curve_name)?;
 
     let mut ctx = BigNumContext::new()?;
@@ -162,13 +185,13 @@ pub(crate) fn test_encapsulate<T: Key>(
     let my_priv_bignum = BigNum::from_slice(my_priv_key)?;
     let my_key = EcKey::from_private_components(&group, &my_priv_bignum, &my_pub_point)?;
 
-    encapsulate_helper(key, group, my_key)
+    encapsulate_helper(key, alg, group, my_key)
 }
 
 /// Encrypts a plaintext to produce a ciphertext, which may be longer than the plaintext.
 /// The plaintext is restricted to being a multiple of the AES block size (16 bytes) in length.
-pub(crate) fn encrypt<T: Key>(
-    key: &T,
+pub(crate) fn encrypt(
+    key: &[u8],
     plain_text: &[u8], /*PlainText*/
 ) -> Result<Vec<u8> /*CypherText*/> {
     let cipher = Cipher::aes_256_cbc();
@@ -178,7 +201,7 @@ pub(crate) fn encrypt<T: Key>(
     cypher_text.resize(plain_text.len() * 2, 0);
     // Spec says explicitly IV=0
     let iv = [0u8; 16];
-    let mut encrypter = Crypter::new(cipher, Mode::Encrypt, key.key(), Some(&iv))?;
+    let mut encrypter = Crypter::new(cipher, Mode::Encrypt, key, Some(&iv))?;
     encrypter.pad(false);
     let mut out_size = 0;
     out_size += encrypter.update(plain_text, cypher_text.as_mut_slice())?;
@@ -188,8 +211,8 @@ pub(crate) fn encrypt<T: Key>(
 }
 
 /// Decrypts a ciphertext and returns the plaintext.
-pub(crate) fn decrypt<T: Key>(
-    key: &T,
+pub(crate) fn decrypt(
+    key: &[u8],
     cypher_text: &[u8], /*CypherText*/
 ) -> Result<Vec<u8> /*PlainText*/> {
     let cipher = Cipher::aes_256_cbc();
@@ -199,7 +222,7 @@ pub(crate) fn decrypt<T: Key>(
     plain_text.resize(cypher_text.len() * 2, 0);
     // Spec says explicitly IV=0
     let iv = [0u8; 16];
-    let mut encrypter = Crypter::new(cipher, Mode::Decrypt, key.key(), Some(&iv))?;
+    let mut encrypter = Crypter::new(cipher, Mode::Decrypt, key, Some(&iv))?;
     encrypter.pad(false);
     let mut out_size = 0;
     out_size += encrypter.update(cypher_text, plain_text.as_mut_slice())?;
@@ -236,12 +259,12 @@ pub(crate) fn authenticate(token: &[u8], input: &[u8]) -> Result<Vec<u8>> {
 // }
 #[allow(dead_code)]
 pub(crate) fn verify(
-    sig_alg: SignatureAlgorithm,
+    sig_alg: ECDSACurve,
     pub_key: &[u8],
     signature: &[u8],
     data: &[u8],
 ) -> Result<bool> {
-    let _alg = to_openssl_name(sig_alg); // TODO(MS): Actually use this to determine the right MessageDigest below
+    let _alg = to_openssl_name(sig_alg)?; // TODO(MS): Actually use this to determine the right MessageDigest below
     let pkey = X509::from_der(&pub_key)?;
     let pubkey = pkey.public_key()?;
     let mut verifier = Verifier::new(MessageDigest::sha256(), &pubkey)?;

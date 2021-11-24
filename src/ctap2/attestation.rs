@@ -1,18 +1,20 @@
-use super::server::Alg;
 use super::utils::from_slice_stream;
+use crate::crypto::COSEAlgorithm;
+use crate::ctap2::commands::CommandError;
 use crate::ctap2::server::RpIdHash;
+use crate::{crypto::COSEKey, errors::AuthenticatorError};
 use nom::{
-    combinator::rest,
     cond, do_parse, map, map_res, named,
     number::complete::{be_u16, be_u32, be_u8},
     take, Err as NomErr, IResult,
 };
-use serde::ser::{SerializeMap, Serializer};
+use serde::ser::{Error as SerError, SerializeMap, Serializer};
 use serde::{
     de::{Error as SerdeError, MapAccess, Visitor},
     Deserialize, Deserializer, Serialize,
 };
 use serde_bytes::ByteBuf;
+use serde_cbor;
 use std::fmt;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -100,9 +102,7 @@ impl<'de> Deserialize<'de> for AAGuid {
 pub struct AttestedCredentialData {
     pub aaguid: AAGuid,
     pub credential_id: Vec<u8>,
-    // TODO(MS): unimplemented!
-    // pub credential_public_key: crate::ctap2::commands::client_pin::PublicKey,
-    pub credential_public_key: Vec<u8>,
+    pub credential_public_key: COSEKey,
 }
 
 fn serde_to_nom<'a, Output>(input: &'a [u8]) -> IResult<&'a [u8], Output>
@@ -122,12 +122,11 @@ named!(
         aaguid: map_res!(take!(16), AAGuid::from)
             >> cred_len: be_u16
             >> credential_id: map!(take!(cred_len), Vec::from)
-            >> credential_public_key: rest
-            // >> credential_public_key: serde_to_nom
+            >> credential_public_key: serde_to_nom
             >> (AttestedCredentialData {
                 aaguid,
                 credential_id,
-                credential_public_key: credential_public_key.to_vec(),
+                credential_public_key: credential_public_key,
             })
     )
 );
@@ -212,7 +211,7 @@ impl<'de> Deserialize<'de> for AuthenticatorData {
 }
 
 impl AuthenticatorData {
-    pub fn to_vec(&self) -> Vec<u8> {
+    pub fn to_vec(&self) -> Result<Vec<u8>, AuthenticatorError> {
         let mut data = Vec::new();
         data.extend(&self.rp_id_hash.0);
         data.extend(&[self.flags.bits()]);
@@ -224,18 +223,12 @@ impl AuthenticatorData {
             data.extend(&cred.aaguid.0);
             data.extend(&(cred.credential_id.len() as u16).to_be_bytes());
             data.extend(&cred.credential_id);
-            data.extend(&cred.credential_public_key);
+            data.extend(
+                &serde_cbor::to_vec(&cred.credential_public_key)
+                    .map_err(CommandError::Serializing)?,
+            );
         }
-        data
-    }
-}
-
-impl Serialize for AuthenticatorData {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serde_bytes::serialize(&self.to_vec(), serializer)
+        Ok(data)
     }
 }
 
@@ -341,7 +334,7 @@ impl AttestationStatementFidoU2F {
 // TODO(baloo): there is a couple other options than x5c:
 //              https://www.w3.org/TR/webauthn/#packed-attestation
 pub struct AttestationStatementPacked {
-    pub alg: Alg,
+    pub alg: COSEAlgorithm,
     pub sig: Signature,
 
     #[serde(rename = "x5c")]
@@ -462,7 +455,13 @@ impl Serialize for AttestationObject {
 
         let mut map = serializer.serialize_map(Some(map_len))?;
 
-        map.serialize_entry(&2, &self.auth_data)?;
+        map.serialize_entry(
+            &2,
+            &self
+                .auth_data
+                .to_vec()
+                .map_err(|_| SerError::custom("Failed to serialize auth_data"))?,
+        )?;
         match self.att_statement {
             AttestationStatement::None => {
                 map.serialize_entry(&1, &"none")?;

@@ -19,6 +19,7 @@ use crate::{RegisterResult, SignResult};
 use libc::size_t;
 use rand::{thread_rng, Rng};
 use serde_cbor;
+use std::convert::TryFrom;
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::sync::mpsc::channel;
@@ -204,10 +205,16 @@ pub unsafe extern "C" fn rust_ctap2_mgr_register(
         return 0;
     }
 
-    let pub_cred_params = slice::from_raw_parts(pub_cred_params.ptr, pub_cred_params.len)
+    let pub_cred_params = match slice::from_raw_parts(pub_cred_params.ptr, pub_cred_params.len)
         .iter()
-        .map(|x| PublicKeyCredentialParameters::from(*x))
-        .collect();
+        .map(|x| PublicKeyCredentialParameters::try_from(*x))
+        .collect()
+    {
+        Ok(x) => x,
+        Err(_) => {
+            return 0;
+        }
+    };
     let pin = if pin_ptr.is_null() {
         None
     } else {
@@ -529,7 +536,7 @@ fn register_result_item_len(attestation: &AttestationObject, item_idx: u8) -> Op
             AttestationStatement::FidoU2F(x) => serde_cbor::to_vec(&x).ok().map(|x| x.len()),
             AttestationStatement::Unparsed(x) => Some(x.len()),
         },
-        REGISTER_RESULT_AUTH_DATA => Some(attestation.auth_data.to_vec().len()),
+        REGISTER_RESULT_AUTH_DATA => attestation.auth_data.to_vec().ok().map(|x| x.len()),
         _ => None,
     }
 }
@@ -586,7 +593,7 @@ unsafe fn register_result_item_copy(
             AttestationStatement::Unparsed(x) => Some(x.as_slice()),
         },
         REGISTER_RESULT_AUTH_DATA => {
-            tmp_val = Some(attestation.auth_data.to_vec());
+            tmp_val = attestation.auth_data.to_vec().ok();
             tmp_val.as_ref().map(|x| x.as_ref())
         }
         _ => None,
@@ -669,7 +676,7 @@ fn sign_result_item_len(assertion: &Assertion, item_idx: u8) -> Option<usize> {
     match item_idx {
         SIGN_RESULT_PUBKEY_CRED_ID => assertion.credentials.as_ref().map(|x| x.id.len()),
         // This is inefficent! Converting twice here. Once for len, once for copy
-        SIGN_RESULT_AUTH_DATA => Some(assertion.auth_data.to_vec().len()),
+        SIGN_RESULT_AUTH_DATA => assertion.auth_data.to_vec().ok().map(|x| x.len()),
         SIGN_RESULT_SIGNATURE => Some(assertion.signature.len()),
         SIGN_RESULT_USER_ID => assertion.user.as_ref().map(|u| u.id.len()),
         SIGN_RESULT_USER_NAME => assertion
@@ -754,7 +761,7 @@ unsafe fn sign_result_item_copy(assertion: &Assertion, item_idx: u8, dst: *mut u
         SIGN_RESULT_PUBKEY_CRED_ID => assertion.credentials.as_ref().map(|x| x.id.as_ref()),
         // This is inefficent! Converting twice here. Once for len, once for copy
         SIGN_RESULT_AUTH_DATA => {
-            tmp_val = Some(assertion.auth_data.to_vec());
+            tmp_val = assertion.auth_data.to_vec().ok();
             tmp_val.as_ref().map(|x| x.as_ref())
         }
         SIGN_RESULT_SIGNATURE => Some(assertion.signature.as_ref()),

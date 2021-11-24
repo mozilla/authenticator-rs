@@ -8,12 +8,11 @@ use authenticator::{
         RegisterArgsCtap2, SignArgsCtap2,
     },
     ctap2::server::{
-        Alg, PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, Transport,
-        User,
+        PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, Transport, User,
     },
     errors::{AuthenticatorError, PinError},
     statecallback::StateCallback,
-    Pin, RegisterResult, SignResult, StatusUpdate,
+    COSEAlgorithm, Pin, RegisterResult, SignResult, StatusUpdate,
 };
 use getopts::Options;
 use sha2::{Digest, Sha256};
@@ -90,8 +89,12 @@ fn register_user(manager: &mut AuthenticatorService, username: &str, timeout_ms:
         origin: origin.clone(),
         user: user.clone(),
         pub_cred_params: vec![
-            PublicKeyCredentialParameters { alg: Alg::ES256 },
-            PublicKeyCredentialParameters { alg: Alg::RS256 },
+            PublicKeyCredentialParameters {
+                alg: COSEAlgorithm::ES256,
+            },
+            PublicKeyCredentialParameters {
+                alg: COSEAlgorithm::RS256,
+            },
         ],
         exclude_list: vec![PublicKeyCredentialDescriptor {
             id: vec![],

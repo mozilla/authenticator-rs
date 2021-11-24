@@ -1,13 +1,14 @@
+use crate::crypto::COSEAlgorithm;
 use crate::{errors::AuthenticatorError, AuthenticatorTransports, KeyHandle};
 use serde::de::MapAccess;
 use serde::{
     de::{Error as SerdeError, Visitor},
-    ser::{Error as SerError, SerializeMap},
+    ser::SerializeMap,
     Deserialize, Deserializer, Serialize, Serializer,
 };
 use serde_bytes::ByteBuf;
 use sha2::{Digest, Sha256};
-use std::convert::Into;
+use std::convert::{Into, TryFrom};
 use std::fmt;
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone)]
@@ -91,82 +92,15 @@ pub struct User {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-/// see: https://www.iana.org/assignments/cose/cose.xhtml#table-algorithms
-// TODO(baloo): could probably use a more generic approach, need to see this
-//              whenever we introduce the firefox-side api
-pub enum Alg {
-    ES256,
-    RS256,
-    Unknown(i64),
-}
-
-impl Into<i64> for Alg {
-    fn into(self) -> i64 {
-        match self {
-            Alg::ES256 => -7,
-            Alg::RS256 => -257,
-            Alg::Unknown(x) => x,
-        }
-    }
-}
-
-impl Serialize for Alg {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        match *self {
-            Alg::ES256 => serializer.serialize_i8(-7),
-            Alg::RS256 => serializer.serialize_i16(-257),
-            Alg::Unknown(_) => Err(SerError::custom("Unkown algorithm!")),
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for Alg {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        struct AlgVisitor;
-
-        impl<'de> Visitor<'de> for AlgVisitor {
-            type Value = Alg;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("a signed integer")
-            }
-
-            fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
-            where
-                E: SerdeError,
-            {
-                match v {
-                    -7 => Ok(Alg::ES256),
-                    -257 => Ok(Alg::RS256),
-                    v => Ok(Alg::Unknown(v)),
-                    // v => Err(SerdeError::invalid_value(Unexpected::Signed(v), &self)),
-                }
-            }
-        }
-
-        deserializer.deserialize_any(AlgVisitor)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicKeyCredentialParameters {
-    pub alg: Alg,
+    pub alg: COSEAlgorithm,
 }
 
-impl From<i32> for PublicKeyCredentialParameters {
-    fn from(arg: i32) -> Self {
-        let alg = match arg {
-            -7 => Alg::ES256,
-            -257 => Alg::RS256,
-            v => Alg::Unknown(v as i64),
-        };
-        PublicKeyCredentialParameters { alg }
+impl TryFrom<i32> for PublicKeyCredentialParameters {
+    type Error = AuthenticatorError;
+    fn try_from(arg: i32) -> Result<Self, Self::Error> {
+        let alg = COSEAlgorithm::try_from(arg as i64)?;
+        Ok(PublicKeyCredentialParameters { alg })
     }
 }
 
@@ -369,8 +303,8 @@ impl From<&KeyHandle> for PublicKeyCredentialDescriptor {
 #[cfg(test)]
 mod test {
     use super::{
-        Alg, PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, Transport,
-        User,
+        COSEAlgorithm, PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty,
+        Transport, User,
     };
 
     #[test]
@@ -488,8 +422,12 @@ mod test {
     #[test]
     fn public_key() {
         let keys = vec![
-            PublicKeyCredentialParameters { alg: Alg::ES256 },
-            PublicKeyCredentialParameters { alg: Alg::RS256 },
+            PublicKeyCredentialParameters {
+                alg: COSEAlgorithm::ES256,
+            },
+            PublicKeyCredentialParameters {
+                alg: COSEAlgorithm::RS256,
+            },
         ];
 
         let payload = ser::to_vec(&keys);
