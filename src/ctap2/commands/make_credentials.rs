@@ -47,7 +47,7 @@ impl Default for MakeCredentialsOptions {
     fn default() -> Self {
         Self {
             resident_key: None,
-            user_verification: Some(true),
+            user_verification: None,
         }
     }
 }
