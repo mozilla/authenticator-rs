@@ -254,10 +254,6 @@ impl AuthenticatorService {
         status: Sender<crate::StatusUpdate>,
         callback: StateCallback<crate::Result<crate::RegisterResult>>,
     ) -> crate::Result<()> {
-        if args.challenge.len() != PARAMETER_SIZE {
-            return Err(AuthenticatorError::InvalidRelyingPartyInput);
-        }
-
         if args.exclude_list.iter().any(|x| x.id.len() > 256) {
             return Err(AuthenticatorError::InvalidRelyingPartyInput);
         }
