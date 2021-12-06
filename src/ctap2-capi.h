@@ -208,6 +208,32 @@ bool rust_ctap2_sign_result_item_copy(
     uint8_t *dst
 );
 
+bool rust_ctap2_sign_result_contains_username(
+    const rust_ctap2_sign_result *res,
+    size_t assertion_idx
+);
+
+/// # Safety
+///
+/// This function is used to get the length, prior to calling
+/// rust_ctap2_sign_result_username_copy()
+bool rust_ctap2_sign_result_username_len(
+    const rust_ctap2_sign_result *res,
+    size_t assertion_idx,
+    size_t *len
+);
+
+/// # Safety
+///
+/// This method does not ensure anything about dst before copying, so
+/// ensure it is long enough (using rust_ctap2_sign_result_username_len)
+bool rust_ctap2_sign_result_username_copy(
+    const rust_ctap2_sign_result* res,
+    size_t assertion_idx,
+    const char *dst
+);
+
+
 }
 
 #endif  // __CTAP2_CAPI

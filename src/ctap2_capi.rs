@@ -543,9 +543,7 @@ fn register_result_item_len(attestation: &AttestationObject, item_idx: u8) -> Op
 
 /// # Safety
 ///
-/// This function is used to get how many assertions there are in total
-/// The returned number can be used as index-maximum to access individual
-/// fields
+/// This function is used to get how long the specific item is.
 #[no_mangle]
 pub unsafe extern "C" fn rust_ctap2_register_result_item_len(
     res: *const Ctap2RegisterResult,
@@ -609,9 +607,8 @@ unsafe fn register_result_item_copy(
 
 /// # Safety
 ///
-/// This function is used to get how many assertions there are in total
-/// The returned number can be used as index-maximum to access individual
-/// fields
+/// This method does not ensure anything about dst before copying, so
+/// ensure it is long enough (using rust_ctap2_register_result_item_len)
 #[no_mangle]
 pub unsafe extern "C" fn rust_ctap2_register_result_item_copy(
     res: *const Ctap2RegisterResult,
@@ -720,9 +717,7 @@ pub unsafe extern "C" fn rust_ctap2_sign_result_item_contains(
 
 /// # Safety
 ///
-/// This function is used to get how many assertions there are in total
-/// The returned number can be used as index-maximum to access individual
-/// fields
+/// This function is used to get how long the specific item is.
 #[no_mangle]
 pub unsafe extern "C" fn rust_ctap2_sign_result_item_len(
     res: *const Ctap2SignResult,
@@ -789,9 +784,8 @@ unsafe fn sign_result_item_copy(assertion: &Assertion, item_idx: u8, dst: *mut u
 
 /// # Safety
 ///
-/// This function is used to get how many assertions there are in total
-/// The returned number can be used as index-maximum to access individual
-/// fields
+/// This method does not ensure anything about dst before copying, so
+/// ensure it is long enough (using rust_ctap2_sign_result_item_len)
 #[no_mangle]
 pub unsafe extern "C" fn rust_ctap2_sign_result_item_copy(
     res: *const Ctap2SignResult,
@@ -811,6 +805,105 @@ pub unsafe extern "C" fn rust_ctap2_sign_result_item_copy(
 
             sign_result_item_copy(&assertions.0[assertion_idx], item_idx, dst)
         }
+        Err(_) => false,
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rust_ctap2_sign_result_contains_username(
+    res: *const Ctap2SignResult,
+    assertion_idx: usize,
+) -> bool {
+    if res.is_null() {
+        return false;
+    }
+
+    match &*res {
+        Ok((assertions, _)) => {
+            if assertion_idx >= assertions.0.len() {
+                return false;
+            }
+            assertions.0[assertion_idx]
+                .user
+                .as_ref()
+                .map(|u| u.display_name.as_ref().or(u.name.as_ref()))
+                .is_some()
+        }
+        Err(_) => false,
+    }
+}
+
+/// # Safety
+///
+/// This function is used to get how long the specific username is.
+#[no_mangle]
+pub unsafe extern "C" fn rust_ctap2_sign_result_username_len(
+    res: *const Ctap2SignResult,
+    assertion_idx: usize,
+    len: *mut size_t,
+) -> bool {
+    if res.is_null() || len.is_null() {
+        return false;
+    }
+
+    match &*res {
+        Ok((assertions, _)) => {
+            if assertion_idx >= assertions.0.len() {
+                return false;
+            }
+
+            if let Some(name_len) = assertions.0[assertion_idx]
+                .user
+                .as_ref()
+                .map(|u| u.display_name.as_ref().or(u.name.as_ref()))
+                .flatten()
+                .map(|x| x.as_bytes().len())
+            {
+                *len = name_len;
+                true
+            } else {
+                false
+            }
+        }
+        Err(_) => false,
+    }
+}
+
+/// # Safety
+///
+/// This method does not ensure anything about dst before copying, so
+/// ensure it is long enough (using rust_ctap2_sign_result_username_len)
+#[no_mangle]
+pub unsafe extern "C" fn rust_ctap2_sign_result_username_copy(
+    res: *const Ctap2SignResult,
+    assertion_idx: usize,
+    dst: *mut c_char,
+) -> bool {
+    if res.is_null() || dst.is_null() {
+        return false;
+    }
+
+    match &*res {
+        Ok((assertions, _)) => {
+            if assertion_idx >= assertions.0.len() {
+                return false;
+            }
+
+            if let Some(name) = assertions.0[assertion_idx]
+                .user
+                .as_ref()
+                .map(|u| u.display_name.as_ref().or(u.name.as_ref()))
+                .flatten()
+                .map(|u| CString::new(u.clone()).ok())
+                .flatten()
+            {
+                ptr::copy_nonoverlapping(name.as_ptr(), dst, name.as_bytes().len());
+                true
+            } else {
+                false
+            }
+        }
+
         Err(_) => false,
     }
 }
