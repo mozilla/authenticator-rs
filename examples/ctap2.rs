@@ -4,8 +4,9 @@
 
 use authenticator::{
     authenticatorservice::{
-        AuthenticatorService, CtapVersion, GetAssertionOptions, MakeCredentialsOptions,
-        RegisterArgsCtap2, SignArgsCtap2,
+        AuthenticatorService, CtapVersion, GetAssertionExtensions, GetAssertionOptions,
+        HmacSecretExtension, MakeCredentialsExtensions, MakeCredentialsOptions, RegisterArgsCtap2,
+        SignArgsCtap2,
     },
     ctap2::server::{
         PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, Transport, User,
@@ -38,7 +39,7 @@ fn main() {
         "timeout in seconds",
         "SEC",
     );
-
+    opts.optflag("s", "hmac_secret", "With hmac-secret");
     opts.optflag("h", "help", "print this help menu");
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
@@ -136,6 +137,14 @@ fn main() {
             resident_key: None,
             user_verification: Some(true),
         },
+        extensions: MakeCredentialsExtensions {
+            hmac_secret: if matches.opt_present("hmac_secret") {
+                Some(true)
+            } else {
+                None
+            },
+            ..Default::default()
+        },
         pin: None,
     };
 
@@ -220,6 +229,20 @@ fn main() {
         relying_party_id: "example.com".to_string(),
         allow_list,
         options: GetAssertionOptions::default(),
+        extensions: GetAssertionExtensions {
+            hmac_secret: if matches.opt_present("hmac_secret") {
+                Some(HmacSecretExtension::new(
+                    vec![
+                        0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0x10, 0x11, 0x12, 0x13,
+                        0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25,
+                        0x26, 0x27, 0x28, 0x29, 0x30, 0x31, 0x32, 0x33, 0x34,
+                    ],
+                    None,
+                ))
+            } else {
+                None
+            },
+        },
         pin: None,
     };
 

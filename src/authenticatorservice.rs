@@ -4,8 +4,12 @@
 
 use crate::consts::PARAMETER_SIZE;
 use crate::ctap2::commands::client_pin::Pin;
-pub use crate::ctap2::commands::get_assertion::GetAssertionOptions;
-pub use crate::ctap2::commands::make_credentials::MakeCredentialsOptions;
+pub use crate::ctap2::commands::get_assertion::{
+    GetAssertionExtensions, GetAssertionOptions, HmacSecretExtension,
+};
+pub use crate::ctap2::commands::make_credentials::{
+    MakeCredentialsExtensions, MakeCredentialsOptions,
+};
 use crate::ctap2::server::{
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, User,
 };
@@ -38,6 +42,7 @@ pub struct RegisterArgsCtap2 {
     pub pub_cred_params: Vec<PublicKeyCredentialParameters>,
     pub exclude_list: Vec<PublicKeyCredentialDescriptor>,
     pub options: MakeCredentialsOptions,
+    pub extensions: MakeCredentialsExtensions,
     pub pin: Option<Pin>,
 }
 
@@ -74,6 +79,7 @@ pub struct SignArgsCtap2 {
     pub relying_party_id: String,
     pub allow_list: Vec<PublicKeyCredentialDescriptor>,
     pub options: GetAssertionOptions,
+    pub extensions: GetAssertionExtensions,
     pub pin: Option<Pin>,
     // Todo: Extensions
 }
@@ -94,6 +100,11 @@ impl From<SignArgsCtap2> for SignArgs {
     fn from(args: SignArgsCtap2) -> Self {
         SignArgs::CTAP2(args)
     }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct AssertionExtensions {
+    pub hmac_secret: Option<HmacSecretExtension>,
 }
 
 pub trait AuthenticatorTransport {

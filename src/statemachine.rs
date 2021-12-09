@@ -6,7 +6,7 @@ use crate::consts::PARAMETER_SIZE;
 use crate::ctap2::commands::get_assertion::{GetAssertion, GetAssertionResult};
 use crate::ctap2::commands::make_credentials::{MakeCredentials, MakeCredentialsResult};
 use crate::ctap2::commands::{CommandError, PinAuthCommand, Request, StatusCode};
-use crate::errors::{self, AuthenticatorError};
+use crate::errors::{self, AuthenticatorError, UnsupportedOption};
 use crate::statecallback::StateCallback;
 use crate::transport::platform::{device::Device, transaction::Transaction};
 use crate::transport::{errors::HIDError, FidoDevice, Nonce};
@@ -355,6 +355,19 @@ impl StateMachineCtap2 {
             //           to modify "params" directly.
             let mut makecred = params.clone();
             if params.is_ctap2_request() {
+                // First check if extensions have been requested that are not supported by the device
+                if let Some(true) = params.extensions.hmac_secret {
+                    if let Some(auth) = dev.get_authenticator_info() {
+                        if !auth.supports_hmac_secret() {
+                            callback.call(Err(AuthenticatorError::UnsupportedOption(
+                                UnsupportedOption::HmacSecret,
+                            )));
+                            return;
+                        }
+                    }
+                }
+
+                // Second, ask for PIN and get the shared secret
                 match makecred.determine_pin_auth(dev) {
                     Ok(x) => x,
                     Err(e) => {
@@ -438,6 +451,19 @@ impl StateMachineCtap2 {
             //           to modify "params" directly.
             let mut getassertion = params.clone();
             if params.is_ctap2_request() {
+                // First check if extensions have been requested that are not supported by the device
+                if let Some(_) = params.extensions.hmac_secret {
+                    if let Some(auth) = dev.get_authenticator_info() {
+                        if !auth.supports_hmac_secret() {
+                            callback.call(Err(AuthenticatorError::UnsupportedOption(
+                                UnsupportedOption::HmacSecret,
+                            )));
+                            return;
+                        }
+                    }
+                }
+
+                // Second, ask for PIN and get the shared secret
                 match getassertion.determine_pin_auth(dev) {
                     Ok(x) => x,
                     Err(e) => {
@@ -445,6 +471,19 @@ impl StateMachineCtap2 {
                         return;
                     }
                 };
+
+                // Third, use the shared secret in the extensions, if requested
+                if let Some(extension) = getassertion.extensions.hmac_secret.as_mut() {
+                    if let Some(secret) = dev.get_shared_secret() {
+                        match extension.calculate(secret) {
+                            Ok(x) => x,
+                            Err(e) => {
+                                callback.call(Err(e));
+                                return;
+                            }
+                        }
+                    }
+                }
             }
 
             debug!("------------------------------------------------------------------");

@@ -275,6 +275,7 @@ pub unsafe extern "C" fn rust_ctap2_mgr_register(
             resident_key: options.resident_key.then(|| true),
             user_verification: options.user_verification.then(|| true),
         },
+        extensions: Default::default(),
         pin,
     };
 
@@ -377,6 +378,7 @@ pub unsafe extern "C" fn rust_ctap2_mgr_sign(
             user_presence: options.user_presence.then(|| true),
             user_verification: options.user_verification.then(|| true),
         },
+        extensions: Default::default(),
         pin,
     };
 

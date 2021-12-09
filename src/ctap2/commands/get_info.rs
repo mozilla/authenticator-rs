@@ -139,6 +139,12 @@ pub struct AuthenticatorInfo {
     // lots more to come
 }
 
+impl AuthenticatorInfo {
+    pub fn supports_hmac_secret(&self) -> bool {
+        self.extensions.contains(&"hmac-secret".to_string())
+    }
+}
+
 impl<'de> Deserialize<'de> for AuthenticatorInfo {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where

@@ -12,6 +12,12 @@ use std::sync::mpsc;
 // https://www.philipdaniels.com/blog/2019/defining-rust-error-types/
 
 #[derive(Debug)]
+pub enum UnsupportedOption {
+    MaxPinLength,
+    HmacSecret,
+}
+
+#[derive(Debug)]
 pub enum AuthenticatorError {
     // Errors from external libraries...
     Io(io::Error),
@@ -26,6 +32,7 @@ pub enum AuthenticatorError {
     HIDError(HIDError),
     CryptoError,
     PinError(PinError),
+    UnsupportedOption(UnsupportedOption),
 }
 
 impl AuthenticatorError {
@@ -72,6 +79,9 @@ impl fmt::Display for AuthenticatorError {
                 write!(f, "The cryptography implementation encountered an error")
             }
             AuthenticatorError::PinError(ref e) => write!(f, "PIN Error: {}", e),
+            AuthenticatorError::UnsupportedOption(ref e) => {
+                write!(f, "Unsupported option: {:?}", e)
+            }
         }
     }
 }

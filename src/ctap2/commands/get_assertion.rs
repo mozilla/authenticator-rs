@@ -5,12 +5,14 @@ use super::{
 use crate::consts::{
     PARAMETER_SIZE, U2F_AUTHENTICATE, U2F_CHECK_IS_REGISTERED, U2F_REQUEST_USER_PRESENCE,
 };
+use crate::crypto::{authenticate, encrypt, COSEKey, CryptoError, ECDHSecret};
 use crate::ctap2::attestation::{AuthenticatorData, AuthenticatorDataFlags};
 use crate::ctap2::client_data::CollectedClientData;
 use crate::ctap2::commands::client_pin::{Pin, PinAuth};
 use crate::ctap2::commands::get_next_assertion::GetNextAssertion;
 use crate::ctap2::commands::make_credentials::UserVerification;
 use crate::ctap2::server::{PublicKeyCredentialDescriptor, RelyingPartyWrapper, User};
+use crate::errors::AuthenticatorError;
 use crate::transport::errors::{ApduErrorStatus, HIDError};
 use crate::transport::FidoDevice;
 use crate::u2ftypes::{U2FAPDUHeader, U2FDevice};
@@ -25,7 +27,7 @@ use serde::{
 };
 use serde_bytes::ByteBuf;
 use serde_cbor::{de::from_slice, ser, Value};
-use serde_json::{value as json_value, Map};
+use std::convert::TryInto;
 use std::fmt;
 use std::io;
 
@@ -35,7 +37,7 @@ pub enum GetAssertionResult {
     CTAP2(AssertionObject, CollectedClientData),
 }
 
-#[derive(Copy, Clone, Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Serialize)]
 #[cfg_attr(test, derive(Deserialize))]
 pub struct GetAssertionOptions {
     #[serde(rename = "uv", skip_serializing_if = "Option::is_none")]
@@ -70,6 +72,110 @@ impl UserVerification for GetAssertionOptions {
 }
 
 #[derive(Debug, Clone)]
+pub struct CalculatedHmacSecretExtension {
+    pub public_key: COSEKey,
+    pub salt_enc: Vec<u8>,
+    pub salt_auth: [u8; 16],
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct HmacSecretExtension {
+    pub salt1: Vec<u8>,
+    pub salt2: Option<Vec<u8>>,
+    calculated_hmac: Option<CalculatedHmacSecretExtension>,
+}
+
+impl HmacSecretExtension {
+    pub fn new(salt1: Vec<u8>, salt2: Option<Vec<u8>>) -> Self {
+        HmacSecretExtension {
+            salt1,
+            salt2,
+            calculated_hmac: None,
+        }
+    }
+
+    pub fn calculate(&mut self, secret: &ECDHSecret) -> Result<(), AuthenticatorError> {
+        if self.salt1.len() < 32 {
+            return Err(CryptoError::WrongSaltLength.into());
+        }
+        let salt_enc = match &self.salt2 {
+            Some(salt2) => {
+                if salt2.len() < 32 {
+                    return Err(CryptoError::WrongSaltLength.into());
+                }
+                let salts = [&self.salt1[..32], &salt2[..32]].concat(); // salt1 || salt2
+                encrypt(secret.shared_secret(), &salts)
+            }
+            None => encrypt(secret.shared_secret(), &self.salt1[..32]),
+        }
+        .map_err(|e| CryptoError::Backend(e))?;
+        let salt_auth_full =
+            authenticate(secret.shared_secret(), &salt_enc).map_err(|e| CryptoError::Backend(e))?;
+        let salt_auth = salt_auth_full
+            .windows(16)
+            .next()
+            .ok_or(AuthenticatorError::InternalError(String::from(
+                "salt_auth too short",
+            )))?
+            .try_into()
+            .map_err(|_| {
+                AuthenticatorError::InternalError(String::from(
+                    "salt_auth conversion failed. Should never happen.",
+                ))
+            })?;
+        let public_key = secret.my_public_key().clone();
+        self.calculated_hmac = Some(CalculatedHmacSecretExtension {
+            public_key,
+            salt_enc,
+            salt_auth,
+        });
+
+        Ok(())
+    }
+}
+
+impl Serialize for HmacSecretExtension {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if let Some(calc) = &self.calculated_hmac {
+            let mut map = serializer.serialize_map(Some(3))?;
+            map.serialize_entry(&1, &calc.public_key)?;
+            map.serialize_entry(&2, serde_bytes::Bytes::new(&calc.salt_enc))?;
+            map.serialize_entry(&3, serde_bytes::Bytes::new(&calc.salt_auth))?;
+            map.end()
+        } else {
+            Err(SerError::custom(
+                "hmac secret has not been calculated before being serialized",
+            ))
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct GetAssertionExtensions {
+    pub hmac_secret: Option<HmacSecretExtension>,
+}
+
+impl Serialize for GetAssertionExtensions {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(1))?;
+        map.serialize_entry(&"hmac-secret", &self.hmac_secret)?;
+        map.end()
+    }
+}
+
+impl GetAssertionExtensions {
+    fn has_extensions(&self) -> bool {
+        self.hmac_secret.is_some()
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct GetAssertion {
     pub(crate) client_data: CollectedClientData,
     pub(crate) rp: RelyingPartyWrapper,
@@ -81,7 +187,7 @@ pub struct GetAssertion {
     // create() call, while the CBOR authenticator extension input is passed
     // from the client to the authenticator for authenticator extensions during
     // the processing of these calls.
-    pub(crate) extensions: Map<String, json_value::Value>,
+    pub(crate) extensions: GetAssertionExtensions,
     pub(crate) options: GetAssertionOptions,
     pub(crate) pin: Option<Pin>,
     pub(crate) pin_auth: Option<PinAuth>,
@@ -94,14 +200,14 @@ impl GetAssertion {
         rp: RelyingPartyWrapper,
         allow_list: Vec<PublicKeyCredentialDescriptor>,
         options: GetAssertionOptions,
+        extensions: GetAssertionExtensions,
         pin: Option<Pin>,
     ) -> Self {
         Self {
             client_data,
             rp,
             allow_list,
-            // TODO(baloo): need to sort those out once final api is in
-            extensions: Map::new(),
+            extensions,
             options,
             pin,
             pin_auth: None,
@@ -138,7 +244,7 @@ impl Serialize for GetAssertion {
         if !self.allow_list.is_empty() {
             map_len += 1;
         }
-        if !self.extensions.is_empty() {
+        if self.extensions.has_extensions() {
             map_len += 1;
         }
         if self.options.has_some() {
@@ -168,7 +274,7 @@ impl Serialize for GetAssertion {
         if !self.allow_list.is_empty() {
             map.serialize_entry(&3, &self.allow_list)?;
         }
-        if !self.extensions.is_empty() {
+        if self.extensions.has_extensions() {
             map.serialize_entry(&4, &self.extensions)?;
         }
         if self.options.has_some() {
@@ -340,7 +446,7 @@ impl RequestCtap1 for GetAssertion {
                 flags,
                 counter,
                 credential_data: None,
-                extensions: Vec::new(),
+                extensions: Default::default(),
             };
             let assertion = Assertion {
                 credentials: None,
@@ -597,6 +703,7 @@ pub mod test {
                 user_presence: Some(true),
                 user_verification: None,
             },
+            Default::default(),
             None,
         );
         let mut device = TestDevice::new();
@@ -690,7 +797,7 @@ pub mod test {
             flags: AuthenticatorDataFlags::USER_PRESENT,
             counter: 0x11,
             credential_data: None,
-            extensions: Vec::new(),
+            extensions: Default::default(),
         };
 
         let expected_assertion = Assertion {
@@ -798,6 +905,7 @@ pub mod test {
                 user_presence: Some(true),
                 user_verification: None,
             },
+            Default::default(),
             None,
         );
         let mut device = TestDevice::new(); // not really used (all functions ignore it)
@@ -835,7 +943,7 @@ pub mod test {
             flags: AuthenticatorDataFlags::USER_PRESENT,
             counter: 0x3B,
             credential_data: None,
-            extensions: Vec::new(),
+            extensions: Default::default(),
         };
 
         let expected_assertion = Assertion {

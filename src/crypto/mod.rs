@@ -636,6 +636,7 @@ pub enum CryptoError {
     UnknownKeyType,
     UnknownSignatureScheme,
     UnknownAlgorithm,
+    WrongSaltLength,
     Backend(BackendError),
 }
 

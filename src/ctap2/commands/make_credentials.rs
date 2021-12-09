@@ -23,7 +23,6 @@ use serde::{
     Serialize, Serializer,
 };
 use serde_cbor::{self, de::from_slice, ser, Value};
-use serde_json::{value as json_value, Map};
 use std::fmt;
 use std::io;
 
@@ -73,6 +72,20 @@ impl UserVerification for MakeCredentialsOptions {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct MakeCredentialsExtensions {
+    #[serde(rename = "pinMinLength", skip_serializing_if = "Option::is_none")]
+    pub pin_min_length: Option<bool>,
+    #[serde(rename = "hmac-secret", skip_serializing_if = "Option::is_none")]
+    pub hmac_secret: Option<bool>,
+}
+
+impl MakeCredentialsExtensions {
+    fn has_extensions(&self) -> bool {
+        self.pin_min_length.or(self.hmac_secret).is_some()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct MakeCredentials {
     pub(crate) client_data: CollectedClientData,
@@ -88,7 +101,7 @@ pub struct MakeCredentials {
     // create() call, while the CBOR authenticator extension input is passed
     // from the client to the authenticator for authenticator extensions during
     // the processing of these calls.
-    pub(crate) extensions: Map<String, json_value::Value>,
+    pub(crate) extensions: MakeCredentialsExtensions,
     pub(crate) options: MakeCredentialsOptions,
     pub(crate) pin: Option<Pin>,
     pub(crate) pin_auth: Option<PinAuth>,
@@ -103,6 +116,7 @@ impl MakeCredentials {
         pub_cred_params: Vec<PublicKeyCredentialParameters>,
         exclude_list: Vec<PublicKeyCredentialDescriptor>,
         options: MakeCredentialsOptions,
+        extensions: MakeCredentialsExtensions,
         pin: Option<Pin>,
     ) -> Self {
         Self {
@@ -111,8 +125,7 @@ impl MakeCredentials {
             user,
             pub_cred_params,
             exclude_list,
-            // TODO(baloo): need to sort those out once final api is in
-            extensions: Map::new(),
+            extensions,
             options,
             pin,
             pin_auth: None,
@@ -150,7 +163,7 @@ impl Serialize for MakeCredentials {
         if !self.exclude_list.is_empty() {
             map_len += 1;
         }
-        if !self.extensions.is_empty() {
+        if self.extensions.has_extensions() {
             map_len += 1;
         }
         if self.options.has_some() {
@@ -181,7 +194,7 @@ impl Serialize for MakeCredentials {
         if !self.exclude_list.is_empty() {
             map.serialize_entry(&5, &self.exclude_list)?;
         }
-        if !self.extensions.is_empty() {
+        if self.extensions.has_extensions() {
             map.serialize_entry(&6, &self.extensions)?;
         }
         if self.options.has_some() {
@@ -310,7 +323,7 @@ impl RequestCtap1 for MakeCredentials {
                     credential_id: Vec::from(key_handle),
                     credential_public_key,
                 }),
-                extensions: Vec::new(),
+                extensions: Default::default(),
             };
 
             // TODO(MS)
@@ -436,6 +449,7 @@ pub mod test {
                 resident_key: Some(true),
                 user_verification: None,
             },
+            Default::default(),
             None,
         );
 
@@ -491,7 +505,7 @@ pub mod test {
                         }),
                     },
                 }),
-                extensions: Vec::new(),
+                extensions: Default::default(),
             },
             att_statement: AttestationStatement::Packed(AttestationStatementPacked {
                 alg: COSEAlgorithm::ES256,
@@ -581,6 +595,7 @@ pub mod test {
                 resident_key: Some(true),
                 user_verification: None,
             },
+            Default::default(),
             None,
         );
 
@@ -640,7 +655,7 @@ pub mod test {
                         }),
                     },
                 }),
-                extensions: Vec::new(),
+                extensions: Default::default(),
             },
             att_statement: AttestationStatement::Unparsed(vec![
                 0x30, 0x82, 0x02, 0x4A, 0x30, 0x82, 0x01, 0x32, 0xA0, 0x03, 0x02, 0x01, 0x02, 0x02,

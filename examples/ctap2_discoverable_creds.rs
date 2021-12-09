@@ -104,6 +104,7 @@ fn register_user(manager: &mut AuthenticatorService, username: &str, timeout_ms:
             resident_key: Some(true),
             user_verification: Some(true),
         },
+        extensions: Default::default(),
         pin: None,
     };
 
@@ -258,6 +259,7 @@ fn main() {
         relying_party_id: "example.com".to_string(),
         allow_list,
         options: GetAssertionOptions::default(),
+        extensions: Default::default(),
         pin: None,
     };
 

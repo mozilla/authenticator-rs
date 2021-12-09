@@ -341,6 +341,7 @@ impl AuthenticatorTransport for Manager {
                     args.pub_cred_params,
                     args.exclude_list,
                     args.options,
+                    args.extensions,
                     args.pin,
                     // pin_auth will be filled in Statemachine, once we have a device
                 )
@@ -366,6 +367,7 @@ impl AuthenticatorTransport for Manager {
                         resident_key: None,
                         user_verification: None,
                     },
+                    Default::default(),
                     None,
                 )
             }
@@ -427,8 +429,14 @@ impl AuthenticatorTransport for Manager {
 
                         let allow_list = vec![key_handle.into()];
 
-                        let get_assertion =
-                            GetAssertion::new(client_data.clone(), rp, allow_list, options, None);
+                        let get_assertion = GetAssertion::new(
+                            client_data.clone(),
+                            rp,
+                            allow_list,
+                            options,
+                            Default::default(),
+                            None,
+                        );
 
                         let action = QueueAction::SignCtap2 {
                             timeout,
@@ -464,6 +472,7 @@ impl AuthenticatorTransport for Manager {
                     }),
                     args.allow_list,
                     args.options,
+                    args.extensions,
                     args.pin,
                 );
 
