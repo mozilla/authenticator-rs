@@ -103,11 +103,6 @@ pub(crate) fn parse_key(curve: ECDSACurve, x: &[u8], y: &[u8]) -> Result<Vec<u8>
 /// to transmit and the shared secret.
 pub(crate) fn encapsulate(key: &COSEKey) -> Result<ECDHSecret> {
     if let COSEKeyType::EC2(ec2key) = &key.key {
-        // let curve_name = to_openssl_name(ec2key.curve)?;
-        // let group = EcGroup::from_curve_name(curve_name)?;
-        // let my_key = EcKey::generate(&group)?;
-
-        // encapsulate_helper(&ec2key, key.alg, group, my_key)
         let alg = to_nss_alg(key.alg)?;
         let keypair: KeyPair<Ephemeral> = KeyPair::generate(alg)?;
         let (private_key, public_key) = keypair.split();
