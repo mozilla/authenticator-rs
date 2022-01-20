@@ -37,7 +37,7 @@ features = [
 ]
 
 [build-dependencies]
-bindgen = { version = "^0.51", optional = true }
+bindgen = { version = "^0.58.1", optional = true }
 
 [dependencies]
 rand = "0.7"
