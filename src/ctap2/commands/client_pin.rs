@@ -1,6 +1,8 @@
 use super::{get_info::AuthenticatorInfo, Command, CommandError, RequestCtap2, StatusCode};
+use crate::crypto::{
+    authenticate, decrypt, encapsulate, encrypt, BackendError, COSEKey, CryptoError, ECDHSecret,
+};
 use crate::ctap2::client_data::ClientDataHash;
-use crate::ctap2::crypto::{ECDHSecret, PublicKey};
 use crate::transport::errors::HIDError;
 use crate::u2ftypes::U2FDevice;
 use serde::{
@@ -29,10 +31,10 @@ pub enum PINSubcommand {
 }
 
 #[derive(Debug)]
-pub(crate) struct ClientPIN {
-    pin_protocol: u8,
+pub struct ClientPIN {
+    pin_protocol: Option<u8>,
     subcommand: PINSubcommand,
-    key_agreement: Option<PublicKey>,
+    key_agreement: Option<COSEKey>,
     pin_auth: Option<[u8; 16]>,
     new_pin_enc: Option<ByteBuf>,
     pin_hash_enc: Option<ByteBuf>,
@@ -41,7 +43,7 @@ pub(crate) struct ClientPIN {
 impl Default for ClientPIN {
     fn default() -> Self {
         ClientPIN {
-            pin_protocol: 0,
+            pin_protocol: None,
             subcommand: PINSubcommand::GetRetries,
             key_agreement: None,
             pin_auth: None,
@@ -58,7 +60,10 @@ impl Serialize for ClientPIN {
     {
         // Need to define how many elements are going to be in the map
         // beforehand
-        let mut map_len = 2;
+        let mut map_len = 1;
+        if self.pin_protocol.is_some() {
+            map_len += 1;
+        }
         if self.key_agreement.is_some() {
             map_len += 1;
         }
@@ -73,7 +78,9 @@ impl Serialize for ClientPIN {
         }
 
         let mut map = serializer.serialize_map(Some(map_len))?;
-        map.serialize_entry(&1, &self.pin_protocol)?;
+        if let Some(ref pin_protocol) = self.pin_protocol {
+            map.serialize_entry(&1, pin_protocol)?;
+        }
         let command: u8 = self.subcommand as u8;
         map.serialize_entry(&2, &command)?;
         if let Some(ref key_agreement) = self.key_agreement {
@@ -93,17 +100,17 @@ impl Serialize for ClientPIN {
     }
 }
 
-pub(crate) trait ClientPINSubCommand {
+pub trait ClientPINSubCommand {
     type Output;
     fn as_client_pin(&self) -> Result<ClientPIN, CommandError>;
     fn parse_response_payload(&self, input: &[u8]) -> Result<Self::Output, CommandError>;
 }
 
 struct ClientPinResponse {
-    key_agreement: Option<PublicKey>,
+    key_agreement: Option<COSEKey>,
     pin_token: Option<EncryptedPinToken>,
     /// Number of PIN attempts remaining before lockout.
-    _retries: Option<u8>,
+    retries: Option<u8>,
 }
 
 impl<'de> Deserialize<'de> for ClientPinResponse {
@@ -154,7 +161,7 @@ impl<'de> Deserialize<'de> for ClientPinResponse {
                 Ok(ClientPinResponse {
                     key_agreement,
                     pin_token,
-                    _retries: retries,
+                    retries,
                 })
             }
         }
@@ -183,7 +190,7 @@ impl ClientPINSubCommand for GetKeyAgreement {
 
     fn as_client_pin(&self) -> Result<ClientPIN, CommandError> {
         Ok(ClientPIN {
-            pin_protocol: self.pin_protocol,
+            pin_protocol: Some(self.pin_protocol),
             subcommand: PINSubcommand::GetKeyAgreement,
             ..ClientPIN::default()
         })
@@ -232,14 +239,14 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinToken<'sc, 'pin> {
     type Output = PinToken;
 
     fn as_client_pin(&self) -> Result<ClientPIN, CommandError> {
-        let iv = [0u8; 16];
         let input = self.pin.for_pin_token();
         trace!("pin_hash = {:#04X?}", &input.as_ref());
-        let pin_hash_enc = self.shared_secret.encrypt(input.as_ref(), &iv)?;
+        let pin_hash_enc = encrypt(self.shared_secret.shared_secret(), input.as_ref())
+            .map_err(|e| CryptoError::Backend(e))?;
         trace!("pin_hash_enc = {:#04X?}", &pin_hash_enc);
 
         Ok(ClientPIN {
-            pin_protocol: self.pin_protocol,
+            pin_protocol: Some(self.pin_protocol),
             subcommand: PINSubcommand::GetPINToken,
             key_agreement: Some(self.shared_secret.my_public_key().clone()),
             pin_hash_enc: Some(ByteBuf::from(pin_hash_enc)),
@@ -253,15 +260,49 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinToken<'sc, 'pin> {
 
         let get_pin_response: ClientPinResponse =
             from_slice(input).map_err(CommandError::Deserializing)?;
-        if let Some(encrypted_pin_token) = get_pin_response.pin_token {
-            let iv = [0u8; 16];
-            let pin_token = self
-                .shared_secret
-                .decrypt(encrypted_pin_token.as_ref(), &iv)?;
-            let pin_token = PinToken(pin_token);
-            Ok(pin_token)
-        } else {
-            Err(CommandError::MissingRequiredField("key_agreement"))
+        match get_pin_response.pin_token {
+            Some(encrypted_pin_token) => {
+                let pin_token = decrypt(
+                    self.shared_secret.shared_secret(),
+                    encrypted_pin_token.as_ref(),
+                )
+                .map_err(|e| CryptoError::Backend(e))?;
+                let pin_token = PinToken(pin_token);
+                Ok(pin_token)
+            }
+            None => Err(CommandError::MissingRequiredField("key_agreement")),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct GetRetries {}
+
+impl GetRetries {
+    pub fn new() -> Self {
+        GetRetries {}
+    }
+}
+
+impl ClientPINSubCommand for GetRetries {
+    type Output = u8;
+
+    fn as_client_pin(&self) -> Result<ClientPIN, CommandError> {
+        Ok(ClientPIN {
+            subcommand: PINSubcommand::GetRetries,
+            ..ClientPIN::default()
+        })
+    }
+
+    fn parse_response_payload(&self, input: &[u8]) -> Result<Self::Output, CommandError> {
+        let value: Value = from_slice(input).map_err(CommandError::Deserializing)?;
+        debug!("GetKeyAgreement::parse_response_payload {:?}", value);
+
+        let get_pin_response: ClientPinResponse =
+            from_slice(input).map_err(CommandError::Deserializing)?;
+        match get_pin_response.retries {
+            Some(retries) => Ok(retries),
+            None => Err(CommandError::MissingRequiredField("retries")),
         }
     }
 }
@@ -320,15 +361,11 @@ where
 }
 
 #[derive(Debug)]
-pub struct KeyAgreement(PublicKey);
+pub struct KeyAgreement(COSEKey);
 
 impl KeyAgreement {
     pub fn shared_secret(&self) -> Result<ECDHSecret, CommandError> {
-        unimplemented!();
-        //         self.0
-        //             .complete_handshake()
-        //             .map_err(|_| Error::ECDH)
-        //             .map(ECDHSecret)
+        encapsulate(&self.0).map_err(|e| CommandError::Crypto(CryptoError::Backend(e)))
     }
 }
 
@@ -345,7 +382,7 @@ impl AsRef<[u8]> for EncryptedPinToken {
 pub struct PinToken(Vec<u8>);
 
 impl PinToken {
-    pub fn auth(&self, _client_hash_data: &ClientDataHash) -> Result<PinAuth, PinError> {
+    pub fn auth(&self, client_hash_data: &ClientDataHash) -> Result<PinAuth, PinError> {
         if self.0.len() < 4 {
             return Err(PinError::PinIsTooShort);
         }
@@ -355,15 +392,12 @@ impl PinToken {
             return Err(PinError::PinIsTooLong(bytes.len()));
         }
 
-        unimplemented!();
-        /*let mut mac =
-            Hmac::<Sha256>::new_varkey(self.as_ref()).map_err(|_| PinError::InvalidKeyLen)?;
-        mac.input(client_hash_data.as_ref());
+        let hmac = authenticate(self.as_ref(), client_hash_data.as_ref())?;
 
         let mut out = [0u8; 16];
-        out.copy_from_slice(&mac.result().code().as_slice()[0..16]);
+        out.copy_from_slice(&hmac[0..16]);
 
-        Ok(PinAuth(out))*/
+        Ok(PinAuth(out))
     }
 }
 
@@ -373,7 +407,7 @@ impl AsRef<[u8]> for PinToken {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[cfg_attr(test, derive(Deserialize))]
 pub struct PinAuth([u8; 16]);
 
@@ -392,6 +426,7 @@ impl Serialize for PinAuth {
     }
 }
 
+#[derive(Clone)]
 pub struct Pin(String);
 
 impl fmt::Debug for Pin {
@@ -417,29 +452,49 @@ impl Pin {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug)]
 pub enum PinError {
+    PinRequired,
     PinIsTooShort,
     PinIsTooLong(usize),
     InvalidKeyLen,
+    InvalidPin(Option<u8>),
+    PinAuthBlocked,
+    PinBlocked,
+    Backend(BackendError),
 }
 
 impl fmt::Display for PinError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
+            PinError::PinRequired => write!(f, "PinError: Pin required."),
             PinError::PinIsTooShort => write!(f, "PinError: pin is too short"),
             PinError::PinIsTooLong(len) => write!(f, "PinError: pin is too long ({})", len),
             PinError::InvalidKeyLen => write!(f, "PinError: invalid key len"),
+            PinError::InvalidPin(ref e) => {
+                let mut res = write!(f, "PinError: Invalid Pin.");
+                if let Some(retries) = e {
+                    res = write!(f, " Retries left: {:?}", retries)
+                }
+                res
+            }
+            PinError::PinAuthBlocked => write!(
+                f,
+                "PinError: Pin authentication blocked. Device needs power cycle."
+            ),
+            PinError::PinBlocked => write!(
+                f,
+                "PinError: No retries left. Pin blocked. Device needs reset."
+            ),
+            PinError::Backend(ref e) => write!(f, "PinError: Crypto backend error: {:?}", e),
         }
     }
 }
 
-impl StdErrorT for PinError {
-    fn description(&self) -> &str {
-        match *self {
-            PinError::PinIsTooShort => "PinError: pin is too short",
-            PinError::PinIsTooLong(_) => "PinError: pin is too long",
-            PinError::InvalidKeyLen => "PinError: hmac invalid key len",
-        }
+impl StdErrorT for PinError {}
+
+impl From<BackendError> for PinError {
+    fn from(e: BackendError) -> Self {
+        PinError::Backend(e)
     }
 }

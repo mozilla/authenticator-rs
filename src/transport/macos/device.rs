@@ -5,11 +5,16 @@
 extern crate log;
 
 use crate::consts::{CID_BROADCAST, MAX_HID_RPT_SIZE};
+use crate::transport::hid::HIDDevice;
 use crate::transport::platform::iokit::*;
+use crate::transport::AuthenticatorInfo;
+use crate::transport::ECDHSecret;
+use crate::transport::HIDError;
 use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
 use core_foundation::base::*;
 use core_foundation::string::*;
 use std::convert::TryInto;
+use std::fmt;
 use std::io;
 use std::io::{Read, Write};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
@@ -22,6 +27,8 @@ pub struct Device {
     cid: [u8; 4],
     report_rx: Receiver<Vec<u8>>,
     dev_info: Option<U2FDeviceInfo>,
+    secret: Option<ECDHSecret>,
+    authenticator_info: Option<AuthenticatorInfo>,
 }
 
 impl Device {
@@ -32,6 +39,8 @@ impl Device {
             cid: CID_BROADCAST,
             report_rx,
             dev_info: None,
+            secret: None,
+            authenticator_info: None,
         })
     }
 
@@ -65,6 +74,12 @@ impl Device {
         }
 
         Ok(CFString::from_void(prop_ref).to_string())
+    }
+}
+
+impl fmt::Debug for Device {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Device").field("cid", &self.cid).finish()
     }
 }
 
@@ -152,5 +167,38 @@ impl U2FDevice for Device {
 
     fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {
         self.dev_info = Some(dev_info);
+    }
+}
+
+impl HIDDevice for Device {
+    type BuildParameters = (IOHIDDeviceRef, Receiver<Vec<u8>>);
+    type Id = [u8; 4];
+
+    fn new(dev_ids: Self::BuildParameters) -> Result<Self, HIDError> {
+        Device::new(dev_ids).map_err(|_| HIDError::DeviceNotInitialized)
+    }
+
+    fn initialized(&self) -> bool {
+        self.cid != CID_BROADCAST
+    }
+
+    fn id(&self) -> Self::Id {
+        self.cid
+    }
+
+    fn get_shared_secret(&self) -> Option<&ECDHSecret> {
+        self.secret.as_ref()
+    }
+
+    fn set_shared_secret(&mut self, secret: ECDHSecret) {
+        self.secret = Some(secret);
+    }
+
+    fn get_authenticator_info(&self) -> Option<&AuthenticatorInfo> {
+        self.authenticator_info.as_ref()
+    }
+
+    fn set_authenticator_info(&mut self, authenticator_info: AuthenticatorInfo) {
+        self.authenticator_info = Some(authenticator_info);
     }
 }

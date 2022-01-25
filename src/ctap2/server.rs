@@ -1,19 +1,15 @@
-use serde_bytes::ByteBuf;
-#[cfg(test)]
-use serde_cbor::{error, ser};
-use sha2::{Digest, Sha256};
-use std::fmt;
-
-#[cfg(test)]
+use crate::crypto::COSEAlgorithm;
+use crate::{errors::AuthenticatorError, AuthenticatorTransports, KeyHandle};
 use serde::de::MapAccess;
 use serde::{
-    de::{Error as SerdeError, Unexpected, Visitor},
+    de::{Error as SerdeError, Visitor},
     ser::SerializeMap,
     Deserialize, Deserializer, Serialize, Serializer,
 };
-
-use crate::AuthenticatorTransports;
-use crate::KeyHandle;
+use serde_bytes::ByteBuf;
+use sha2::{Digest, Sha256};
+use std::convert::{Into, TryFrom};
+use std::fmt;
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct RpIdHash(pub [u8; 32]);
@@ -32,10 +28,10 @@ impl AsRef<[u8]> for RpIdHash {
 }
 
 impl RpIdHash {
-    pub fn from(src: &[u8]) -> Result<RpIdHash, ()> {
+    pub fn from(src: &[u8]) -> Result<RpIdHash, AuthenticatorError> {
         let mut payload = [0u8; 32];
         if src.len() != payload.len() {
-            Err(())
+            Err(AuthenticatorError::InvalidRelyingPartyInput)
         } else {
             payload.copy_from_slice(src);
             Ok(RpIdHash(payload))
@@ -43,7 +39,7 @@ impl RpIdHash {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 #[cfg_attr(test, derive(Deserialize))]
 pub struct RelyingParty {
     // TODO(baloo): spec is wrong !!!!111
@@ -57,20 +53,29 @@ pub struct RelyingParty {
     pub icon: Option<String>,
 }
 
-impl RelyingParty {
-    #[cfg(test)]
-    pub fn to_ctap2(&self) -> Result<Vec<u8>, error::Error> {
-        ser::to_vec(self)
-    }
+// Note: This enum is provided to make old CTAP1/U2F API work. This should be deprecated at some point
+#[derive(Debug, Clone)]
+pub enum RelyingPartyWrapper {
+    Data(RelyingParty),
+    // CTAP1 hash can be derived from full object, see RelyingParty::hash below,
+    // but very old backends might still provide application IDs.
+    Hash(RpIdHash),
+}
 
+impl RelyingPartyWrapper {
     pub fn hash(&self) -> RpIdHash {
-        let mut hasher = Sha256::new();
-        hasher.input(&self.id);
+        match *self {
+            RelyingPartyWrapper::Data(ref d) => {
+                let mut hasher = Sha256::new();
+                hasher.input(&d.id);
 
-        let mut output = [0u8; 32];
-        output.copy_from_slice(&hasher.result().as_slice());
+                let mut output = [0u8; 32];
+                output.copy_from_slice(&hasher.result().as_slice());
 
-        RpIdHash(output)
+                RpIdHash(output)
+            }
+            RelyingPartyWrapper::Hash(ref d) => d.clone(),
+        }
     }
 }
 
@@ -80,73 +85,23 @@ pub struct User {
     #[serde(with = "serde_bytes")]
     pub id: Vec<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub icon: Option<String>,
-    pub name: String,
+    pub icon: Option<String>, // This has been removed from Webauthn-2
+    pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "displayName")]
     pub display_name: Option<String>,
 }
 
-#[cfg(test)]
-impl User {
-    pub fn to_ctap2(&self) -> Result<Vec<u8>, error::Error> {
-        ser::to_vec(self)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
-/// see: https://www.iana.org/assignments/cose/cose.xhtml#table-algorithms
-// TODO(baloo): could probably use a more generic approach, need to see this
-//              whenever we introduce the firefox-side api
-pub enum Alg {
-    ES256,
-    RS256,
-}
-
-impl Serialize for Alg {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        match *self {
-            Alg::ES256 => serializer.serialize_i8(-7),
-            Alg::RS256 => serializer.serialize_i16(-257),
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for Alg {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        struct AlgVisitor;
-
-        impl<'de> Visitor<'de> for AlgVisitor {
-            type Value = Alg;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("a signed integer")
-            }
-
-            fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
-            where
-                E: SerdeError,
-            {
-                match v {
-                    -7 => Ok(Alg::ES256),
-                    -257 => Ok(Alg::RS256),
-                    v => Err(SerdeError::invalid_value(Unexpected::Signed(v), &self)),
-                }
-            }
-        }
-
-        deserializer.deserialize_any(AlgVisitor)
-    }
-}
-
-#[derive(Debug, Clone)]
 pub struct PublicKeyCredentialParameters {
-    pub alg: Alg,
+    pub alg: COSEAlgorithm,
+}
+
+impl TryFrom<i32> for PublicKeyCredentialParameters {
+    type Error = AuthenticatorError;
+    fn try_from(arg: i32) -> Result<Self, Self::Error> {
+        let alg = COSEAlgorithm::try_from(arg as i64)?;
+        Ok(PublicKeyCredentialParameters { alg })
+    }
 }
 
 impl Serialize for PublicKeyCredentialParameters {
@@ -161,7 +116,6 @@ impl Serialize for PublicKeyCredentialParameters {
     }
 }
 
-#[cfg(test)]
 impl<'de> Deserialize<'de> for PublicKeyCredentialParameters {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -182,14 +136,12 @@ impl<'de> Deserialize<'de> for PublicKeyCredentialParameters {
             {
                 let mut found_type = false;
                 let mut alg = None;
-
                 while let Some(key) = map.next_key()? {
                     match key {
                         "alg" => {
                             if alg.is_some() {
                                 return Err(SerdeError::duplicate_field("alg"));
                             }
-
                             alg = Some(map.next_value()?);
                         }
                         "type" => {
@@ -223,7 +175,7 @@ impl<'de> Deserialize<'de> for PublicKeyCredentialParameters {
     }
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize, Eq)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, Eq, Clone)]
 #[serde(rename_all = "lowercase")]
 pub enum Transport {
     USB,
@@ -249,7 +201,7 @@ impl From<AuthenticatorTransports> for Vec<Transport> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicKeyCredentialDescriptor {
     pub id: Vec<u8>,
     pub transports: Vec<Transport>,
@@ -260,15 +212,18 @@ impl Serialize for PublicKeyCredentialDescriptor {
     where
         S: Serializer,
     {
-        let mut map = serializer.serialize_map(Some(3))?;
+        // TODO(MS): Transports is OPTIONAL, but some older tokens don't understand it
+        //           and return a CBOR-Parsing error. It is only a hint for the token,
+        //           so we'll leave it out for the moment
+        let mut map = serializer.serialize_map(Some(2))?;
+        // let mut map = serializer.serialize_map(Some(3))?;
         map.serialize_entry("type", "public-key")?;
         map.serialize_entry("id", &ByteBuf::from(self.id.clone()))?;
-        map.serialize_entry("transports", &self.transports)?;
+        // map.serialize_entry("transports", &self.transports)?;
         map.end()
     }
 }
 
-#[cfg(test)]
 impl<'de> Deserialize<'de> for PublicKeyCredentialDescriptor {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -290,28 +245,25 @@ impl<'de> Deserialize<'de> for PublicKeyCredentialDescriptor {
                 let mut found_type = false;
                 let mut id = None;
                 let mut transports = None;
-
                 while let Some(key) = map.next_key()? {
                     match key {
                         "id" => {
                             if id.is_some() {
                                 return Err(SerdeError::duplicate_field("id"));
                             }
-
-                            id = Some(map.next_value()?);
+                            let id_bytes: ByteBuf = map.next_value()?;
+                            id = Some(id_bytes.into_vec());
                         }
                         "transports" => {
                             if transports.is_some() {
                                 return Err(SerdeError::duplicate_field("transports"));
                             }
-
                             transports = Some(map.next_value()?);
                         }
                         "type" => {
                             if found_type {
                                 return Err(SerdeError::duplicate_field("type"));
                             }
-
                             let v: &str = map.next_value()?;
                             if v != "public-key" {
                                 return Err(SerdeError::custom(format!("invalid value: {}", v)));
@@ -329,7 +281,7 @@ impl<'de> Deserialize<'de> for PublicKeyCredentialDescriptor {
                 }
 
                 let id = id.ok_or(SerdeError::missing_field("id"))?;
-                let transports = transports.ok_or(SerdeError::missing_field("transports"))?;
+                let transports = transports.unwrap_or(Vec::new());
 
                 Ok(PublicKeyCredentialDescriptor { id, transports })
             }
@@ -351,8 +303,8 @@ impl From<&KeyHandle> for PublicKeyCredentialDescriptor {
 #[cfg(test)]
 mod test {
     use super::{
-        Alg, PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, Transport,
-        User,
+        COSEAlgorithm, PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty,
+        Transport, User,
     };
 
     #[test]
@@ -363,8 +315,7 @@ mod test {
             icon: None,
         };
 
-        let payload = rp.to_ctap2();
-        let payload = payload.unwrap();
+        let payload = ser::to_vec(&rp).unwrap();
         assert_eq!(
             &payload,
             &[
@@ -386,13 +337,12 @@ mod test {
                 0x01, 0x93, 0x30, 0x82,
             ],
             icon: Some(String::from("https://pics.example.com/00/p/aBjjjpqPb.png")),
-            name: String::from("johnpsmith@example.com"),
+            name: Some(String::from("johnpsmith@example.com")),
             display_name: Some(String::from("John P. Smith")),
         };
 
-        let payload = user.to_ctap2();
+        let payload = ser::to_vec(&user).unwrap();
         println!("payload = {:?}", payload);
-        let payload = payload.unwrap();
         assert_eq!(
             payload,
             vec![
@@ -439,13 +389,12 @@ mod test {
                 0x01, 0x93, 0x30, 0x82,
             ],
             icon: None,
-            name: String::from("johnpsmith@example.com"),
+            name: Some(String::from("johnpsmith@example.com")),
             display_name: None,
         };
 
-        let payload = user.to_ctap2();
+        let payload = ser::to_vec(&user).unwrap();
         println!("payload = {:?}", payload);
-        let payload = payload.unwrap();
         assert_eq!(
             payload,
             vec![
@@ -473,8 +422,12 @@ mod test {
     #[test]
     fn public_key() {
         let keys = vec![
-            PublicKeyCredentialParameters { alg: Alg::ES256 },
-            PublicKeyCredentialParameters { alg: Alg::RS256 },
+            PublicKeyCredentialParameters {
+                alg: COSEAlgorithm::ES256,
+            },
+            PublicKeyCredentialParameters {
+                alg: COSEAlgorithm::RS256,
+            },
         ];
 
         let payload = ser::to_vec(&keys);
@@ -524,7 +477,8 @@ mod test {
         assert_eq!(
             payload,
             vec![
-                0xa3, // map(3)
+                // 0xa3, // map(3)
+                0xa2, // map(2)
                 0x64, // text(4)
                 0x74, 0x79, 0x70, 0x65, // "type"
                 0x6a, // text(10)
@@ -538,15 +492,18 @@ mod test {
                 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, // ...
                 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, // ...
                 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, // ...
-                0x1e, 0x1f, // ...
-                0x6a, // text(10)
-                0x74, 0x72, 0x61, 0x6e, 0x73, 0x70, // "transports"
-                0x6f, 0x72, 0x74, 0x73, // ...
-                0x82, // array(2)
-                0x63, // text(3)
-                0x62, 0x6c, 0x65, // "ble"
-                0x63, // text(3)
-                0x75, 0x73, 0x62 // "usb"
+                0x1e,
+                0x1f, // ...
+
+                      // Deactivated for now
+                      //0x6a, // text(10)
+                      //0x74, 0x72, 0x61, 0x6e, 0x73, 0x70, // "transports"
+                      //0x6f, 0x72, 0x74, 0x73, // ...
+                      //0x82, // array(2)
+                      //0x63, // text(3)
+                      //0x62, 0x6c, 0x65, // "ble"
+                      //0x63, // text(3)
+                      //0x75, 0x73, 0x62 // "usb"
             ]
         );
     }

@@ -1,7 +1,10 @@
-use super::crypto;
-use crate::ctap2::client_data::ClientDataHash;
-use crate::ctap2::commands::client_pin::{GetKeyAgreement, GetPinToken, Pin, PinAuth, PinError};
+use crate::crypto;
+use crate::ctap2::client_data::{ClientDataHash, CollectedClientData};
+use crate::ctap2::commands::client_pin::{
+    GetKeyAgreement, GetPinToken, GetRetries, Pin, PinAuth, PinError,
+};
 use crate::ctap2::commands::get_info::GetInfo;
+use crate::errors::AuthenticatorError;
 use crate::transport::errors::{ApduErrorStatus, HIDError};
 use crate::transport::FidoDevice;
 use serde_cbor::{error::Error as CborError, Value};
@@ -12,35 +15,32 @@ use std::io::{Read, Write};
 
 pub(crate) mod client_pin;
 pub(crate) mod get_assertion;
-#[allow(dead_code)] // TODO(MS): Remove me asap
 pub(crate) mod get_info;
 pub(crate) mod get_next_assertion;
 pub(crate) mod get_version;
 pub(crate) mod make_credentials;
 
-pub(crate) trait Request<T>
+pub trait Request<T>
 where
     Self: fmt::Debug,
     Self: RequestCtap1<Output = T>,
     Self: RequestCtap2<Output = T>,
 {
+    fn is_ctap2_request(&self) -> bool;
 }
 
 /// Retryable wraps an error type and may ask manager to retry sending a
 /// command, this is useful for ctap1 where token will reply with "condition not
 /// sufficient" because user needs to press the button.
 #[derive(Debug)]
-pub(crate) enum Retryable<T> {
+pub enum Retryable<T> {
     Retry,
     Error(T),
 }
 
 impl<T> Retryable<T> {
     pub fn is_retry(&self) -> bool {
-        match *self {
-            Retryable::Retry => true,
-            _ => false,
-        }
+        matches!(*self, Retryable::Retry)
     }
 
     pub fn is_error(&self) -> bool {
@@ -54,7 +54,7 @@ impl<T> From<T> for Retryable<T> {
     }
 }
 
-pub(crate) trait RequestCtap1: fmt::Debug {
+pub trait RequestCtap1: fmt::Debug {
     type Output;
 
     fn apdu_format<Dev>(&self, dev: &mut Dev) -> Result<Vec<u8>, HIDError>
@@ -68,7 +68,7 @@ pub(crate) trait RequestCtap1: fmt::Debug {
     ) -> Result<Self::Output, Retryable<HIDError>>;
 }
 
-pub(crate) trait RequestCtap2: fmt::Debug {
+pub trait RequestCtap2: fmt::Debug {
     type Output;
 
     fn command() -> Command;
@@ -84,6 +84,61 @@ pub(crate) trait RequestCtap2: fmt::Debug {
     ) -> Result<Self::Output, HIDError>
     where
         Dev: FidoDevice + Read + Write + fmt::Debug;
+}
+
+pub(crate) trait PinAuthCommand {
+    fn pin(&self) -> &Option<Pin>;
+    fn pin_auth(&self) -> &Option<PinAuth>;
+    fn set_pin_auth(&mut self, pin_auth: Option<PinAuth>);
+    fn client_data(&self) -> &CollectedClientData;
+    fn determine_pin_auth<D: FidoDevice>(&mut self, dev: &mut D) -> Result<(), AuthenticatorError> {
+        if !dev.supports_ctap2() {
+            self.set_pin_auth(None);
+            return Ok(());
+        }
+
+        let client_data_hash = self
+            .client_data()
+            .hash()
+            .map_err(|e| AuthenticatorError::HIDError(HIDError::Command(CommandError::Json(e))))?;
+        let pin_auth = match calculate_pin_auth(dev, &client_data_hash, &self.pin()) {
+            Ok(pin_auth) => pin_auth,
+            Err(AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
+                StatusCode::PinInvalid,
+                _,
+            )))) => {
+                // If the given PIN was wrong, determine no. of left retries
+                let cmd = GetRetries::new();
+                let retries = dev.send_cbor(&cmd).ok(); // If we got retries, wrap it in Some, otherwise ignore err
+                return Err(AuthenticatorError::PinError(PinError::InvalidPin(retries)));
+            }
+            Err(AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
+                StatusCode::PinAuthBlocked,
+                _,
+            )))) => {
+                return Err(AuthenticatorError::PinError(PinError::PinAuthBlocked));
+            }
+            Err(AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
+                StatusCode::PinBlocked,
+                _,
+            )))) => {
+                return Err(AuthenticatorError::PinError(PinError::PinBlocked));
+            }
+            Err(AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
+                StatusCode::PinRequired,
+                _,
+            )))) => {
+                return Err(AuthenticatorError::PinError(PinError::PinRequired));
+            }
+            // TODO(MS): Add "PinNotSet"
+            // TODO(MS): Add "PinPolicyViolated"
+            Err(err) => {
+                return Err(err);
+            }
+        };
+        self.set_pin_auth(pin_auth);
+        Ok(())
+    }
 }
 
 // Spec: https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html#authenticator-api
@@ -205,17 +260,11 @@ pub enum StatusCode {
 
 impl StatusCode {
     fn is_ok(&self) -> bool {
-        match *self {
-            StatusCode::OK => true,
-            _ => false,
-        }
+        matches!(*self, StatusCode::OK)
     }
 
     fn device_busy(&self) -> bool {
-        match *self {
-            StatusCode::ChannelBusy => true,
-            _ => false,
-        }
+        matches!(*self, StatusCode::ChannelBusy)
     }
 }
 
@@ -330,7 +379,6 @@ pub enum CommandError {
     Json(json::Error),
     Crypto(crypto::CryptoError),
     UnsupportedPinProtocol,
-    Pin(PinError),
 }
 
 impl fmt::Display for CommandError {
@@ -354,18 +402,17 @@ impl fmt::Display for CommandError {
             CommandError::UnsupportedPinProtocol => {
                 write!(f, "CommandError: Pin protocol is not supported")
             }
-            CommandError::Pin(ref p) => write!(f, "CommandError: Pin error: {}", p),
         }
     }
 }
 
 impl StdErrorT for CommandError {}
 
-pub(crate) fn calculate_pin_auth<Dev, Cmd>(
+pub(crate) fn calculate_pin_auth<Dev>(
     dev: &mut Dev,
     client_data_hash: &ClientDataHash,
     pin: &Option<Pin>,
-) -> Result<Option<PinAuth>, HIDError>
+) -> Result<Option<PinAuth>, AuthenticatorError>
 where
     Dev: FidoDevice,
 {
@@ -380,6 +427,8 @@ where
         info
     };
 
+    // TODO(MS): What to do if token supports client_pin, but none has been set: Some(false)
+    //           AND a Pin is not None?
     let pin_auth = if info.options.client_pin == Some(true) {
         let pin = pin
             .as_ref()
@@ -404,7 +453,7 @@ where
         Some(
             pin_token
                 .auth(&client_data_hash)
-                .map_err(CommandError::Pin)?,
+                .map_err(AuthenticatorError::PinError)?,
         )
     } else {
         None
@@ -417,8 +466,8 @@ where
 pub mod tests {
     use super::*;
     use crate::consts::CID_BROADCAST;
+    use crate::crypto::ECDHSecret;
     use crate::ctap2::commands::get_info::AuthenticatorInfo;
-    use crate::ctap2::crypto::ECDHSecret;
     use crate::transport::hid::HIDDevice;
     use crate::u2fprotocol::tests::platform::TestDevice;
     use crate::u2ftypes::U2FDevice;

@@ -1,90 +1,14 @@
 use super::{Command, CommandError, RequestCtap2, StatusCode};
+use crate::ctap2::attestation::AAGuid;
+use crate::ctap2::server::PublicKeyCredentialParameters;
 use crate::transport::errors::HIDError;
 use crate::u2ftypes::U2FDevice;
 use serde::{
     de::{Error as SError, MapAccess, Visitor},
-    Deserialize, Deserializer, Serialize,
+    Deserialize, Deserializer,
 };
 use serde_cbor::{de::from_slice, Value};
 use std::fmt;
-
-#[derive(Serialize, PartialEq, Eq, Clone)]
-pub struct AAGuid(pub [u8; 16]);
-
-impl AAGuid {
-    fn from(src: &[u8]) -> Result<AAGuid, ()> {
-        let mut payload = [0u8; 16];
-        if src.len() != payload.len() {
-            Err(())
-        } else {
-            payload.copy_from_slice(src);
-            Ok(AAGuid(payload))
-        }
-    }
-
-    pub fn empty() -> Self {
-        AAGuid([0u8; 16])
-    }
-}
-
-impl fmt::Debug for AAGuid {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "AAGuid({:x}{:x}{:x}{:x}-{:x}{:x}-{:x}{:x}-{:x}{:x}-{:x}{:x}{:x}{:x}{:x}{:x})",
-            self.0[0],
-            self.0[1],
-            self.0[2],
-            self.0[3],
-            self.0[4],
-            self.0[5],
-            self.0[6],
-            self.0[7],
-            self.0[8],
-            self.0[9],
-            self.0[10],
-            self.0[11],
-            self.0[12],
-            self.0[13],
-            self.0[14],
-            self.0[15]
-        )
-    }
-}
-
-impl<'de> Deserialize<'de> for AAGuid {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        struct AAGuidVisitor;
-
-        impl<'de> Visitor<'de> for AAGuidVisitor {
-            type Value = AAGuid;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("a byte array")
-            }
-
-            fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
-            where
-                E: SError,
-            {
-                if v.len() != 16 {
-                    return Err(E::custom("expecting 16 bytes data"));
-                }
-
-                let mut buf = [0u8; 16];
-
-                buf.copy_from_slice(v);
-
-                Ok(AAGuid(buf))
-            }
-        }
-
-        deserializer.deserialize_bytes(AAGuidVisitor)
-    }
-}
 
 #[derive(Debug)]
 pub struct GetInfo {}
@@ -181,6 +105,8 @@ pub(crate) struct AuthenticatorOptions {
     /// If a device is capable of verifying the user within itself as well as
     /// able to do Client PIN, it will return both "uv" and the Client PIN
     /// option.
+    // TODO(MS): My Token (key-ID FIDO2) does return Some(false) here, even though
+    //           it has no built-in verification method. Not to be trusted...
     #[serde(rename = "uv")]
     pub(crate) user_verification: Option<bool>,
 }
@@ -205,6 +131,18 @@ pub struct AuthenticatorInfo {
     pub(crate) options: AuthenticatorOptions,
     pub(crate) max_msg_size: Option<usize>,
     pub(crate) pin_protocols: Vec<u32>,
+    // CTAP 2.1
+    pub(crate) max_credential_count_in_list: Option<usize>,
+    pub(crate) max_credential_id_length: Option<usize>,
+    pub(crate) transports: Option<Vec<String>>,
+    pub(crate) algorithms: Option<Vec<PublicKeyCredentialParameters>>,
+    // lots more to come
+}
+
+impl AuthenticatorInfo {
+    pub fn supports_hmac_secret(&self) -> bool {
+        self.extensions.contains(&"hmac-secret".to_string())
+    }
 }
 
 impl<'de> Deserialize<'de> for AuthenticatorInfo {
@@ -231,7 +169,10 @@ impl<'de> Deserialize<'de> for AuthenticatorInfo {
                 let mut options = AuthenticatorOptions::default();
                 let mut max_msg_size = None;
                 let mut pin_protocols = Vec::new();
-
+                let mut max_credential_count_in_list = None;
+                let mut max_credential_id_length = None;
+                let mut transports = None;
+                let mut algorithms = None;
                 while let Some(key) = map.next_key()? {
                     match key {
                         1 => {
@@ -261,6 +202,34 @@ impl<'de> Deserialize<'de> for AuthenticatorInfo {
                         6 => {
                             pin_protocols = map.next_value()?;
                         }
+                        7 => {
+                            if max_credential_count_in_list.is_some() {
+                                return Err(serde::de::Error::duplicate_field(
+                                    "max_credential_count_in_list",
+                                ));
+                            }
+                            max_credential_count_in_list = Some(map.next_value()?);
+                        }
+                        8 => {
+                            if max_credential_id_length.is_some() {
+                                return Err(serde::de::Error::duplicate_field(
+                                    "max_credential_id_length",
+                                ));
+                            }
+                            max_credential_id_length = Some(map.next_value()?);
+                        }
+                        9 => {
+                            if transports.is_some() {
+                                return Err(serde::de::Error::duplicate_field("transports"));
+                            }
+                            transports = Some(map.next_value()?);
+                        }
+                        10 => {
+                            if algorithms.is_some() {
+                                return Err(serde::de::Error::duplicate_field("algorithms"));
+                            }
+                            algorithms = Some(map.next_value()?);
+                        }
                         k => return Err(M::Error::custom(format!("unexpected key: {:?}", k))),
                     }
                 }
@@ -279,6 +248,10 @@ impl<'de> Deserialize<'de> for AuthenticatorInfo {
                         options,
                         max_msg_size,
                         pin_protocols,
+                        max_credential_count_in_list,
+                        max_credential_id_length,
+                        transports,
+                        algorithms,
                     })
                 } else {
                     Err(M::Error::custom("No AAGuid specified".to_string()))
@@ -333,6 +306,10 @@ pub mod tests {
             },
             max_msg_size: Some(1200),
             pin_protocols: vec![1],
+            max_credential_count_in_list: None,
+            max_credential_id_length: None,
+            transports: None,
+            algorithms: None,
         };
 
         assert_eq!(authenticator_info, expected);
@@ -410,6 +387,10 @@ pub mod tests {
             },
             max_msg_size: Some(1200),
             pin_protocols: vec![1],
+            max_credential_count_in_list: None,
+            max_credential_id_length: None,
+            transports: None,
+            algorithms: None,
         };
 
         assert_eq!(result, &expected);

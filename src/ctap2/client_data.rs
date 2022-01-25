@@ -1,7 +1,6 @@
-#[cfg(test)]
-use serde::de::{self, Deserialize, Deserializer, Visitor};
+use serde::de::{self, Deserializer, Error as SerdeError, MapAccess, Visitor};
 use serde::ser::SerializeMap;
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Serialize, Serializer};
 use serde_json as json;
 use sha2::{Digest, Sha256};
 use std::fmt;
@@ -35,7 +34,7 @@ use std::fmt;
 //        communicating with the Relying Party.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TokenBinding {
-    Present(Vec<u8>),
+    Present(String),
     Supported,
 }
 
@@ -50,19 +49,76 @@ impl Serialize for TokenBinding {
                 map.serialize_entry(&"status", &"supported")?;
             }
             TokenBinding::Present(ref v) => {
-                // The term Base64url Encoding refers to the base64 encoding
-                // using the URL- and filename-safe character set defined in
-                // Section 5 of [RFC4648], with all trailing '=' characters
-                // omitted (as permitted by Section 3.2) and without the
-                // inclusion of any line breaks, whitespace, or other additional
-                // characters.
-                let b64 = base64::encode_config(&v, base64::URL_SAFE_NO_PAD);
-
                 map.serialize_entry(&"status", "present")?;
-                map.serialize_entry(&"id", &b64)?;
+                // Verify here, that `v` is valid base64 encoded?
+                // base64::decode_config(&v, base64::URL_SAFE_NO_PAD);
+                // For now: Let the token do that.
+                map.serialize_entry(&"id", &v)?;
             }
         }
         map.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for TokenBinding {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct TokenBindingVisitor;
+
+        impl<'de> Visitor<'de> for TokenBindingVisitor {
+            type Value = TokenBinding;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a byte string")
+            }
+
+            fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+            where
+                M: MapAccess<'de>,
+            {
+                let mut id = None;
+                let mut status = None;
+
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        "status" => {
+                            status = Some(map.next_value()?);
+                        }
+                        "id" => {
+                            id = Some(map.next_value()?);
+                        }
+                        k => {
+                            return Err(M::Error::custom(format!("unexpected key: {:?}", k)));
+                        }
+                    }
+                }
+
+                if let Some(stat) = status {
+                    match stat {
+                        "present" => {
+                            if let Some(id) = id {
+                                Ok(TokenBinding::Present(id))
+                            } else {
+                                Err(SerdeError::missing_field("id"))
+                            }
+                        }
+                        "supported" => Ok(TokenBinding::Supported),
+                        k => {
+                            return Err(M::Error::custom(format!(
+                                "unexpected status key: {:?}",
+                                k
+                            )));
+                        }
+                    }
+                } else {
+                    Err(SerdeError::missing_field("status"))
+                }
+            }
+        }
+
+        deserializer.deserialize_map(TokenBindingVisitor)
     }
 }
 
@@ -92,39 +148,71 @@ impl Serialize for WebauthnType {
     }
 }
 
-#[derive(Serialize, Clone, PartialEq, Eq)]
-pub struct Challenge(Vec<u8>);
+impl<'de> Deserialize<'de> for WebauthnType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct WebauthnTypeVisitor;
 
-impl fmt::Debug for Challenge {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let value = base64::encode_config(&self.0, base64::URL_SAFE_NO_PAD);
-        write!(f, "Challenge({})", value)
+        impl<'de> Visitor<'de> for WebauthnTypeVisitor {
+            type Value = WebauthnType;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a string")
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                match v {
+                    "webauthn.create" => Ok(WebauthnType::Create),
+                    "webauthn.get" => Ok(WebauthnType::Get),
+                    _ => Err(E::custom("unexpected webauthn_type")),
+                }
+            }
+        }
+
+        deserializer.deserialize_str(WebauthnTypeVisitor)
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct Challenge(pub String);
+
+impl Challenge {
+    pub fn new(input: Vec<u8>) -> Self {
+        let value = base64::encode_config(&input, base64::URL_SAFE_NO_PAD);
+        Challenge(value)
     }
 }
 
 impl From<Vec<u8>> for Challenge {
     fn from(v: Vec<u8>) -> Challenge {
-        Challenge(v)
+        Challenge::new(v)
     }
 }
 
 impl AsRef<[u8]> for Challenge {
     fn as_ref(&self) -> &[u8] {
-        self.0.as_ref()
+        self.0.as_bytes()
     }
 }
 
 pub type Origin = String;
 
-#[derive(Debug, Serialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 pub struct CollectedClientData {
     #[serde(rename = "type")]
     pub webauthn_type: WebauthnType,
     pub challenge: Challenge,
     pub origin: Origin,
-    // Should not be skipped but default to False according to https://www.w3.org/TR/webauthn/#collectedclientdata-hash-of-the-serialized-client-data
-    #[serde(rename = "crossOrigin", skip_serializing_if = "Option::is_none")]
-    pub cross_origin: Option<bool>,
+    // It is optional, according to https://www.w3.org/TR/webauthn/#collectedclientdata-hash-of-the-serialized-client-data
+    // But we are serializing it, so we *have to* set crossOrigin (if not given, we have to set it to false)
+    // Thus, on our side, it is not optional. For deserializing, we provide a default (bool's default == False)
+    #[serde(rename = "crossOrigin", default)]
+    pub cross_origin: bool,
     #[serde(rename = "tokenBinding", skip_serializing_if = "Option::is_none")]
     pub token_binding: Option<TokenBinding>,
 }
@@ -194,7 +282,6 @@ impl CollectedClientData {
         // See: https://heycam.github.io/webidl/#dfn-dictionary
 
         let data = json::to_vec(&self)?;
-
         let mut hasher = Sha256::new();
         hasher.input(&data);
 
@@ -212,7 +299,7 @@ mod test {
 
     #[test]
     fn test_token_binding_status() {
-        let tok = TokenBinding::Present(vec![0x00, 0x01, 0x02, 0x03]);
+        let tok = TokenBinding::Present("AAECAw".to_string());
 
         let json_value = json::to_string(&tok).unwrap();
         assert_eq!(json_value, "{\"status\":\"present\",\"id\":\"AAECAw\"}");
@@ -236,22 +323,58 @@ mod test {
     }
 
     #[test]
+    fn test_collected_client_data_parsing() {
+        let original_str = "{\"type\":\"webauthn.create\",\"challenge\":\"AAECAw\",\"origin\":\"example.com\",\"crossOrigin\":false,\"tokenBinding\":{\"status\":\"present\",\"id\":\"AAECAw\"}}";
+        let parsed: CollectedClientData = serde_json::from_str(&original_str).unwrap();
+        let expected = CollectedClientData {
+            webauthn_type: WebauthnType::Create,
+            challenge: Challenge::new(vec![0x00, 0x01, 0x02, 0x03]),
+            origin: String::from("example.com"),
+            cross_origin: false,
+            token_binding: Some(TokenBinding::Present("AAECAw".to_string())),
+        };
+        assert_eq!(parsed, expected);
+
+        let back_again = serde_json::to_string(&expected).unwrap();
+        assert_eq!(back_again, original_str);
+    }
+
+    #[test]
+    fn test_collected_client_data_defaults() {
+        let cross_origin_str = "{\"type\":\"webauthn.create\",\"challenge\":\"AAECAw\",\"origin\":\"example.com\",\"crossOrigin\":false,\"tokenBinding\":{\"status\":\"present\",\"id\":\"AAECAw\"}}";
+        let no_cross_origin_str = "{\"type\":\"webauthn.create\",\"challenge\":\"AAECAw\",\"origin\":\"example.com\",\"tokenBinding\":{\"status\":\"present\",\"id\":\"AAECAw\"}}";
+        let parsed: CollectedClientData = serde_json::from_str(&no_cross_origin_str).unwrap();
+        let expected = CollectedClientData {
+            webauthn_type: WebauthnType::Create,
+            challenge: Challenge::new(vec![0x00, 0x01, 0x02, 0x03]),
+            origin: String::from("example.com"),
+            cross_origin: false,
+            token_binding: Some(TokenBinding::Present("AAECAw".to_string())),
+        };
+        assert_eq!(parsed, expected);
+
+        let back_again = serde_json::to_string(&expected).unwrap();
+        assert_eq!(back_again, cross_origin_str);
+    }
+
+    #[test]
     fn test_collected_client_data() {
         let client_data = CollectedClientData {
             webauthn_type: WebauthnType::Create,
-            challenge: Challenge(vec![0x00, 0x01, 0x02, 0x03]),
+            challenge: Challenge::new(vec![0x00, 0x01, 0x02, 0x03]),
             origin: String::from("example.com"),
-            cross_origin: None,
-            token_binding: Some(TokenBinding::Present(vec![0x00, 0x01, 0x02, 0x03])),
+            cross_origin: false,
+            token_binding: Some(TokenBinding::Present("AAECAw".to_string())),
         };
 
         assert_eq!(
             client_data.hash().unwrap(),
+            //  echo -n '{"type":"webauthn.create","challenge":"AAECAw","origin":"example.com","crossOrigin":false,"tokenBinding":{"status":"present","id":"AAECAw"}}' | sha256sum -t
             ClientDataHash {
                 0: [
-                    0xc1, 0xdd, 0x35, 0x5f, 0x3c, 0x81, 0x69, 0x23, 0xe0, 0x57, 0xca, 0x03, 0x8d,
-                    0xba, 0xad, 0xb8, 0x5f, 0x95, 0x55, 0xcf, 0xc7, 0x62, 0x9b, 0x9d, 0x53, 0x66,
-                    0x97, 0x53, 0x80, 0xd7, 0x69, 0x4f
+                    0x75, 0x35, 0x35, 0x7d, 0x49, 0x6e, 0x33, 0xc8, 0x18, 0x7f, 0xea, 0x8d, 0x11,
+                    0x32, 0x64, 0xaa, 0xa4, 0x52, 0x3e, 0x13, 0x40, 0x14, 0x9f, 0xbe, 0x00, 0x3f,
+                    0x10, 0x87, 0x54, 0xc3, 0x2d, 0x80
                 ]
             }
         );

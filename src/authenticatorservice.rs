@@ -2,22 +2,118 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+use crate::consts::PARAMETER_SIZE;
+use crate::ctap2::commands::client_pin::Pin;
+pub use crate::ctap2::commands::get_assertion::{
+    GetAssertionExtensions, GetAssertionOptions, HmacSecretExtension,
+};
+pub use crate::ctap2::commands::make_credentials::{
+    MakeCredentialsExtensions, MakeCredentialsOptions,
+};
+use crate::ctap2::server::{
+    PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, User,
+};
+use crate::errors::*;
+use crate::manager::Manager;
+use crate::statecallback::StateCallback;
 use std::sync::{mpsc::Sender, Arc, Mutex};
 
-use crate::consts::PARAMETER_SIZE;
-use crate::errors::*;
-use crate::statecallback::StateCallback;
+// TODO(MS): Once U2FManager gets completely removed, this can be removed as well
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CtapVersion {
+    CTAP1,
+    CTAP2,
+}
+
+#[derive(Debug, Clone)]
+pub struct RegisterArgsCtap1 {
+    pub flags: crate::RegisterFlags,
+    pub challenge: Vec<u8>,
+    pub application: crate::AppId,
+    pub key_handles: Vec<crate::KeyHandle>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RegisterArgsCtap2 {
+    pub challenge: Vec<u8>,
+    pub relying_party: RelyingParty,
+    pub origin: String,
+    pub user: User,
+    pub pub_cred_params: Vec<PublicKeyCredentialParameters>,
+    pub exclude_list: Vec<PublicKeyCredentialDescriptor>,
+    pub options: MakeCredentialsOptions,
+    pub extensions: MakeCredentialsExtensions,
+    pub pin: Option<Pin>,
+}
+
+#[derive(Debug)]
+pub enum RegisterArgs {
+    CTAP1(RegisterArgsCtap1),
+    CTAP2(RegisterArgsCtap2),
+}
+
+impl From<RegisterArgsCtap1> for RegisterArgs {
+    fn from(args: RegisterArgsCtap1) -> Self {
+        RegisterArgs::CTAP1(args)
+    }
+}
+
+impl From<RegisterArgsCtap2> for RegisterArgs {
+    fn from(args: RegisterArgsCtap2) -> Self {
+        RegisterArgs::CTAP2(args)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SignArgsCtap1 {
+    pub flags: crate::SignFlags,
+    pub challenge: Vec<u8>,
+    pub app_ids: Vec<crate::AppId>,
+    pub key_handles: Vec<crate::KeyHandle>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SignArgsCtap2 {
+    pub challenge: Vec<u8>,
+    pub origin: String,
+    pub relying_party_id: String,
+    pub allow_list: Vec<PublicKeyCredentialDescriptor>,
+    pub options: GetAssertionOptions,
+    pub extensions: GetAssertionExtensions,
+    pub pin: Option<Pin>,
+    // Todo: Extensions
+}
+
+#[derive(Debug)]
+pub enum SignArgs {
+    CTAP1(SignArgsCtap1),
+    CTAP2(SignArgsCtap2),
+}
+
+impl From<SignArgsCtap1> for SignArgs {
+    fn from(args: SignArgsCtap1) -> Self {
+        SignArgs::CTAP1(args)
+    }
+}
+
+impl From<SignArgsCtap2> for SignArgs {
+    fn from(args: SignArgsCtap2) -> Self {
+        SignArgs::CTAP2(args)
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct AssertionExtensions {
+    pub hmac_secret: Option<HmacSecretExtension>,
+}
 
 pub trait AuthenticatorTransport {
     /// The implementation of this method must return quickly and should
     /// report its status via the status and callback methods
     fn register(
         &mut self,
-        flags: crate::RegisterFlags,
         timeout: u64,
-        challenge: Vec<u8>,
-        application: crate::AppId,
-        key_handles: Vec<crate::KeyHandle>,
+        ctap_args: RegisterArgs,
         status: Sender<crate::StatusUpdate>,
         callback: StateCallback<crate::Result<crate::RegisterResult>>,
     ) -> crate::Result<()>;
@@ -26,11 +122,8 @@ pub trait AuthenticatorTransport {
     /// report its status via the status and callback methods
     fn sign(
         &mut self,
-        flags: crate::SignFlags,
         timeout: u64,
-        challenge: Vec<u8>,
-        app_ids: Vec<crate::AppId>,
-        key_handles: Vec<crate::KeyHandle>,
+        ctap_args: SignArgs,
         status: Sender<crate::StatusUpdate>,
         callback: StateCallback<crate::Result<crate::SignResult>>,
     ) -> crate::Result<()>;
@@ -40,6 +133,7 @@ pub trait AuthenticatorTransport {
 
 pub struct AuthenticatorService {
     transports: Vec<Arc<Mutex<Box<dyn AuthenticatorTransport + Send>>>>,
+    ctap_version: CtapVersion,
 }
 
 fn clone_and_configure_cancellation_callback<T>(
@@ -62,9 +156,10 @@ fn clone_and_configure_cancellation_callback<T>(
 }
 
 impl AuthenticatorService {
-    pub fn new() -> crate::Result<Self> {
+    pub fn new(ctap_version: CtapVersion) -> crate::Result<Self> {
         Ok(Self {
             transports: Vec::new(),
+            ctap_version,
         })
     }
 
@@ -78,9 +173,16 @@ impl AuthenticatorService {
     }
 
     pub fn add_u2f_usb_hid_platform_transports(&mut self) {
-        match crate::U2FManager::new() {
-            Ok(token) => self.add_transport(Box::new(token)),
-            Err(e) => error!("Could not add U2F HID transport: {}", e),
+        if self.ctap_version == CtapVersion::CTAP1 {
+            match crate::U2FManager::new() {
+                Ok(token) => self.add_transport(Box::new(token)),
+                Err(e) => error!("Could not add U2F HID transport: {}", e),
+            }
+        } else {
+            match Manager::new() {
+                Ok(token) => self.add_transport(Box::new(token)),
+                Err(e) => error!("Could not add CTAP2 HID transport: {}", e),
+            }
         }
     }
 
@@ -97,19 +199,29 @@ impl AuthenticatorService {
 
     pub fn register(
         &mut self,
-        flags: crate::RegisterFlags,
         timeout: u64,
-        challenge: Vec<u8>,
-        application: crate::AppId,
-        key_handles: Vec<crate::KeyHandle>,
+        ctap_args: RegisterArgs,
         status: Sender<crate::StatusUpdate>,
         callback: StateCallback<crate::Result<crate::RegisterResult>>,
     ) -> crate::Result<()> {
-        if challenge.len() != PARAMETER_SIZE || application.len() != PARAMETER_SIZE {
+        match ctap_args {
+            RegisterArgs::CTAP1(a) => self.register_ctap1(timeout, a, status, callback),
+            RegisterArgs::CTAP2(a) => self.register_ctap2(timeout, a, status, callback),
+        }
+    }
+
+    fn register_ctap1(
+        &mut self,
+        timeout: u64,
+        args: RegisterArgsCtap1,
+        status: Sender<crate::StatusUpdate>,
+        callback: StateCallback<crate::Result<crate::RegisterResult>>,
+    ) -> crate::Result<()> {
+        if args.challenge.len() != PARAMETER_SIZE || args.application.len() != PARAMETER_SIZE {
             return Err(AuthenticatorError::InvalidRelyingPartyInput);
         }
 
-        for key_handle in &key_handles {
+        for key_handle in &args.key_handles {
             if key_handle.credential.len() > 256 {
                 return Err(AuthenticatorError::InvalidRelyingPartyInput);
             }
@@ -136,11 +248,50 @@ impl AuthenticatorService {
             );
 
             transport_mutex.lock().unwrap().register(
-                flags,
                 timeout,
-                challenge.clone(),
-                application.clone(),
-                key_handles.clone(),
+                RegisterArgs::CTAP1(args.clone()),
+                status.clone(),
+                clone_and_configure_cancellation_callback(callback.clone(), transports_to_cancel),
+            )?;
+        }
+
+        Ok(())
+    }
+
+    fn register_ctap2(
+        &mut self,
+        timeout: u64,
+        args: RegisterArgsCtap2,
+        status: Sender<crate::StatusUpdate>,
+        callback: StateCallback<crate::Result<crate::RegisterResult>>,
+    ) -> crate::Result<()> {
+        if args.exclude_list.iter().any(|x| x.id.len() > 256) {
+            return Err(AuthenticatorError::InvalidRelyingPartyInput);
+        }
+
+        let iterable_transports = self.transports.clone();
+        if iterable_transports.is_empty() {
+            return Err(AuthenticatorError::NoConfiguredTransports);
+        }
+
+        debug!(
+            "register called with {} transports, iterable is {}",
+            self.transports.len(),
+            iterable_transports.len()
+        );
+
+        for (idx, transport_mutex) in iterable_transports.iter().enumerate() {
+            let mut transports_to_cancel = iterable_transports.clone();
+            transports_to_cancel.remove(idx);
+
+            debug!(
+                "register transports_to_cancel {}",
+                transports_to_cancel.len()
+            );
+
+            transport_mutex.lock().unwrap().register(
+                timeout,
+                RegisterArgs::CTAP2(args.clone()),
                 status.clone(),
                 clone_and_configure_cancellation_callback(callback.clone(), transports_to_cancel),
             )?;
@@ -151,29 +302,39 @@ impl AuthenticatorService {
 
     pub fn sign(
         &mut self,
-        flags: crate::SignFlags,
         timeout: u64,
-        challenge: Vec<u8>,
-        app_ids: Vec<crate::AppId>,
-        key_handles: Vec<crate::KeyHandle>,
+        ctap_args: SignArgs,
         status: Sender<crate::StatusUpdate>,
         callback: StateCallback<crate::Result<crate::SignResult>>,
     ) -> crate::Result<()> {
-        if challenge.len() != PARAMETER_SIZE {
+        match ctap_args {
+            SignArgs::CTAP1(a) => self.sign_ctap1(timeout, a, status, callback),
+            SignArgs::CTAP2(a) => self.sign_ctap2(timeout, a, status, callback),
+        }
+    }
+
+    pub fn sign_ctap1(
+        &mut self,
+        timeout: u64,
+        args: SignArgsCtap1,
+        status: Sender<crate::StatusUpdate>,
+        callback: StateCallback<crate::Result<crate::SignResult>>,
+    ) -> crate::Result<()> {
+        if args.challenge.len() != PARAMETER_SIZE {
             return Err(AuthenticatorError::InvalidRelyingPartyInput);
         }
 
-        if app_ids.is_empty() {
+        if args.app_ids.is_empty() {
             return Err(AuthenticatorError::InvalidRelyingPartyInput);
         }
 
-        for app_id in &app_ids {
+        for app_id in &args.app_ids {
             if app_id.len() != PARAMETER_SIZE {
                 return Err(AuthenticatorError::InvalidRelyingPartyInput);
             }
         }
 
-        for key_handle in &key_handles {
+        for key_handle in &args.key_handles {
             if key_handle.credential.len() > 256 {
                 return Err(AuthenticatorError::InvalidRelyingPartyInput);
             }
@@ -189,11 +350,35 @@ impl AuthenticatorService {
             transports_to_cancel.remove(idx);
 
             transport_mutex.lock().unwrap().sign(
-                flags,
                 timeout,
-                challenge.clone(),
-                app_ids.clone(),
-                key_handles.clone(),
+                SignArgs::CTAP1(args.clone()),
+                status.clone(),
+                clone_and_configure_cancellation_callback(callback.clone(), transports_to_cancel),
+            )?;
+        }
+
+        Ok(())
+    }
+
+    pub fn sign_ctap2(
+        &mut self,
+        timeout: u64,
+        args: SignArgsCtap2,
+        status: Sender<crate::StatusUpdate>,
+        callback: StateCallback<crate::Result<crate::SignResult>>,
+    ) -> crate::Result<()> {
+        let iterable_transports = self.transports.clone();
+        if iterable_transports.is_empty() {
+            return Err(AuthenticatorError::NoConfiguredTransports);
+        }
+
+        for (idx, transport_mutex) in iterable_transports.iter().enumerate() {
+            let mut transports_to_cancel = iterable_transports.clone();
+            transports_to_cancel.remove(idx);
+
+            transport_mutex.lock().unwrap().sign(
+                timeout,
+                SignArgs::CTAP2(args.clone()),
                 status.clone(),
                 clone_and_configure_cancellation_callback(callback.clone(), transports_to_cancel),
             )?;
@@ -221,11 +406,15 @@ impl AuthenticatorService {
 
 #[cfg(test)]
 mod tests {
-    use super::{AuthenticatorService, AuthenticatorTransport};
+    use super::{
+        AuthenticatorService, AuthenticatorTransport, CtapVersion, RegisterArgs, RegisterArgsCtap1,
+        SignArgs, SignArgsCtap1,
+    };
     use crate::consts::Capability;
     use crate::consts::PARAMETER_SIZE;
     use crate::statecallback::StateCallback;
     use crate::{AuthenticatorTransports, KeyHandle, RegisterFlags, SignFlags, StatusUpdate};
+    use crate::{RegisterResult, SignResult};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc::{channel, Sender};
     use std::sync::Arc;
@@ -266,16 +455,13 @@ mod tests {
     impl AuthenticatorTransport for TestTransportDriver {
         fn register(
             &mut self,
-            _flags: crate::RegisterFlags,
             _timeout: u64,
-            _challenge: Vec<u8>,
-            _application: crate::AppId,
-            _key_handles: Vec<crate::KeyHandle>,
+            _args: RegisterArgs,
             _status: Sender<crate::StatusUpdate>,
             callback: StateCallback<crate::Result<crate::RegisterResult>>,
         ) -> crate::Result<()> {
             if self.consent {
-                let rv = Ok((vec![0u8; 16], self.dev_info()));
+                let rv = Ok(RegisterResult::CTAP1(vec![0u8; 16], self.dev_info()));
                 thread::spawn(move || callback.call(rv));
             }
             Ok(())
@@ -283,16 +469,18 @@ mod tests {
 
         fn sign(
             &mut self,
-            _flags: crate::SignFlags,
             _timeout: u64,
-            _challenge: Vec<u8>,
-            _app_ids: Vec<crate::AppId>,
-            _key_handles: Vec<crate::KeyHandle>,
+            _ctap_args: SignArgs,
             _status: Sender<crate::StatusUpdate>,
             callback: StateCallback<crate::Result<crate::SignResult>>,
         ) -> crate::Result<()> {
             if self.consent {
-                let rv = Ok((vec![0u8; 0], vec![0u8; 0], vec![0u8; 0], self.dev_info()));
+                let rv = Ok(SignResult::CTAP1(
+                    vec![0u8; 0],
+                    vec![0u8; 0],
+                    vec![0u8; 0],
+                    self.dev_info(),
+                ));
                 thread::spawn(move || callback.call(rv));
             }
             Ok(())
@@ -330,16 +518,19 @@ mod tests {
         init();
         let (status_tx, _) = channel::<StatusUpdate>();
 
-        let mut s = AuthenticatorService::new().unwrap();
+        let mut s = AuthenticatorService::new(CtapVersion::CTAP1).unwrap();
         s.add_transport(Box::new(TestTransportDriver::new(true).unwrap()));
 
         assert_matches!(
             s.register(
-                RegisterFlags::empty(),
                 1_000,
-                vec![],
-                mk_appid(),
-                vec![mk_key()],
+                RegisterArgsCtap1 {
+                    challenge: vec![],
+                    flags: RegisterFlags::empty(),
+                    application: mk_appid(),
+                    key_handles: vec![mk_key()],
+                }
+                .into(),
                 status_tx.clone(),
                 StateCallback::new(Box::new(move |_rv| {})),
             )
@@ -349,11 +540,14 @@ mod tests {
 
         assert_matches!(
             s.sign(
-                SignFlags::empty(),
                 1_000,
-                vec![],
-                vec![mk_appid()],
-                vec![mk_key()],
+                SignArgsCtap1 {
+                    flags: SignFlags::empty(),
+                    challenge: vec![],
+                    app_ids: vec![mk_appid()],
+                    key_handles: vec![mk_key()]
+                }
+                .into(),
                 status_tx,
                 StateCallback::new(Box::new(move |_rv| {})),
             )
@@ -367,16 +561,19 @@ mod tests {
         init();
         let (status_tx, _) = channel::<StatusUpdate>();
 
-        let mut s = AuthenticatorService::new().unwrap();
+        let mut s = AuthenticatorService::new(CtapVersion::CTAP1).unwrap();
         s.add_transport(Box::new(TestTransportDriver::new(true).unwrap()));
 
         assert_matches!(
             s.register(
-                RegisterFlags::empty(),
                 1_000,
-                mk_challenge(),
-                vec![],
-                vec![mk_key()],
+                RegisterArgsCtap1 {
+                    challenge: mk_challenge(),
+                    flags: RegisterFlags::empty(),
+                    application: vec![],
+                    key_handles: vec![mk_key()],
+                }
+                .into(),
                 status_tx.clone(),
                 StateCallback::new(Box::new(move |_rv| {})),
             )
@@ -386,11 +583,14 @@ mod tests {
 
         assert_matches!(
             s.sign(
-                SignFlags::empty(),
                 1_000,
-                mk_challenge(),
-                vec![],
-                vec![mk_key()],
+                SignArgsCtap1 {
+                    flags: SignFlags::empty(),
+                    challenge: mk_challenge(),
+                    app_ids: vec![],
+                    key_handles: vec![mk_key()]
+                }
+                .into(),
                 status_tx,
                 StateCallback::new(Box::new(move |_rv| {})),
             )
@@ -407,16 +607,19 @@ mod tests {
         // This test yields OKs.
         let (status_tx, _) = channel::<StatusUpdate>();
 
-        let mut s = AuthenticatorService::new().unwrap();
+        let mut s = AuthenticatorService::new(CtapVersion::CTAP1).unwrap();
         s.add_transport(Box::new(TestTransportDriver::new(true).unwrap()));
 
         assert_matches!(
             s.register(
-                RegisterFlags::empty(),
                 100,
-                mk_challenge(),
-                mk_appid(),
-                vec![],
+                RegisterArgsCtap1 {
+                    challenge: mk_challenge(),
+                    flags: RegisterFlags::empty(),
+                    application: mk_appid(),
+                    key_handles: vec![],
+                }
+                .into(),
                 status_tx.clone(),
                 StateCallback::new(Box::new(move |_rv| {})),
             ),
@@ -425,11 +628,14 @@ mod tests {
 
         assert_matches!(
             s.sign(
-                SignFlags::empty(),
                 100,
-                mk_challenge(),
-                vec![mk_appid()],
-                vec![],
+                SignArgsCtap1 {
+                    flags: SignFlags::empty(),
+                    challenge: mk_challenge(),
+                    app_ids: vec![mk_appid()],
+                    key_handles: vec![]
+                }
+                .into(),
                 status_tx,
                 StateCallback::new(Box::new(move |_rv| {})),
             ),
@@ -447,16 +653,19 @@ mod tests {
             transports: AuthenticatorTransports::USB,
         };
 
-        let mut s = AuthenticatorService::new().unwrap();
+        let mut s = AuthenticatorService::new(CtapVersion::CTAP1).unwrap();
         s.add_transport(Box::new(TestTransportDriver::new(true).unwrap()));
 
         assert_matches!(
             s.register(
-                RegisterFlags::empty(),
                 1_000,
-                mk_challenge(),
-                mk_appid(),
-                vec![large_key.clone()],
+                RegisterArgsCtap1 {
+                    challenge: mk_challenge(),
+                    flags: RegisterFlags::empty(),
+                    application: mk_appid(),
+                    key_handles: vec![large_key.clone()],
+                }
+                .into(),
                 status_tx.clone(),
                 StateCallback::new(Box::new(move |_rv| {})),
             )
@@ -466,11 +675,14 @@ mod tests {
 
         assert_matches!(
             s.sign(
-                SignFlags::empty(),
                 1_000,
-                mk_challenge(),
-                vec![mk_appid()],
-                vec![large_key],
+                SignArgsCtap1 {
+                    flags: SignFlags::empty(),
+                    challenge: mk_challenge(),
+                    app_ids: vec![mk_appid()],
+                    key_handles: vec![large_key]
+                }
+                .into(),
                 status_tx,
                 StateCallback::new(Box::new(move |_rv| {})),
             )
@@ -484,14 +696,17 @@ mod tests {
         init();
         let (status_tx, _) = channel::<StatusUpdate>();
 
-        let mut s = AuthenticatorService::new().unwrap();
+        let mut s = AuthenticatorService::new(CtapVersion::CTAP1).unwrap();
         assert_matches!(
             s.register(
-                RegisterFlags::empty(),
                 1_000,
-                mk_challenge(),
-                mk_appid(),
-                vec![mk_key()],
+                RegisterArgsCtap1 {
+                    challenge: mk_challenge(),
+                    flags: RegisterFlags::empty(),
+                    application: mk_appid(),
+                    key_handles: vec![mk_key()],
+                }
+                .into(),
                 status_tx.clone(),
                 StateCallback::new(Box::new(move |_rv| {})),
             )
@@ -501,11 +716,14 @@ mod tests {
 
         assert_matches!(
             s.sign(
-                SignFlags::empty(),
                 1_000,
-                mk_challenge(),
-                vec![mk_appid()],
-                vec![mk_key()],
+                SignArgsCtap1 {
+                    flags: SignFlags::empty(),
+                    challenge: mk_challenge(),
+                    app_ids: vec![mk_appid()],
+                    key_handles: vec![mk_key()]
+                }
+                .into(),
                 status_tx,
                 StateCallback::new(Box::new(move |_rv| {})),
             )
@@ -524,7 +742,7 @@ mod tests {
         init();
         let (status_tx, _) = channel::<StatusUpdate>();
 
-        let mut s = AuthenticatorService::new().unwrap();
+        let mut s = AuthenticatorService::new(CtapVersion::CTAP1).unwrap();
         let ttd_one = TestTransportDriver::new(true).unwrap();
         let ttd_two = TestTransportDriver::new(false).unwrap();
         let ttd_three = TestTransportDriver::new(false).unwrap();
@@ -540,11 +758,14 @@ mod tests {
         let callback = StateCallback::new(Box::new(move |_rv| {}));
         assert!(s
             .register(
-                RegisterFlags::empty(),
                 1_000,
-                mk_challenge(),
-                mk_appid(),
-                vec![],
+                RegisterArgsCtap1 {
+                    challenge: mk_challenge(),
+                    flags: RegisterFlags::empty(),
+                    application: mk_appid(),
+                    key_handles: vec![],
+                }
+                .into(),
                 status_tx,
                 callback.clone(),
             )
@@ -561,7 +782,7 @@ mod tests {
         init();
         let (status_tx, _) = channel::<StatusUpdate>();
 
-        let mut s = AuthenticatorService::new().unwrap();
+        let mut s = AuthenticatorService::new(CtapVersion::CTAP1).unwrap();
         let ttd_one = TestTransportDriver::new(true).unwrap();
         let ttd_two = TestTransportDriver::new(false).unwrap();
         let ttd_three = TestTransportDriver::new(false).unwrap();
@@ -577,11 +798,14 @@ mod tests {
         let callback = StateCallback::new(Box::new(move |_rv| {}));
         assert!(s
             .sign(
-                SignFlags::empty(),
                 1_000,
-                mk_challenge(),
-                vec![mk_appid()],
-                vec![mk_key()],
+                SignArgsCtap1 {
+                    flags: SignFlags::empty(),
+                    challenge: mk_challenge(),
+                    app_ids: vec![mk_appid()],
+                    key_handles: vec![mk_key()]
+                }
+                .into(),
                 status_tx,
                 callback.clone(),
             )
@@ -598,7 +822,7 @@ mod tests {
         init();
         let (status_tx, _) = channel::<StatusUpdate>();
 
-        let mut s = AuthenticatorService::new().unwrap();
+        let mut s = AuthenticatorService::new(CtapVersion::CTAP1).unwrap();
         // Let both of these race which one provides consent.
         let ttd_one = TestTransportDriver::new(true).unwrap();
         let ttd_two = TestTransportDriver::new(true).unwrap();
@@ -612,11 +836,14 @@ mod tests {
         let callback = StateCallback::new(Box::new(move |_rv| {}));
         assert!(s
             .register(
-                RegisterFlags::empty(),
                 1_000,
-                mk_challenge(),
-                mk_appid(),
-                vec![],
+                RegisterArgsCtap1 {
+                    challenge: mk_challenge(),
+                    flags: RegisterFlags::empty(),
+                    application: mk_appid(),
+                    key_handles: vec![],
+                }
+                .into(),
                 status_tx,
                 callback.clone(),
             )

@@ -1,7 +1,7 @@
 use crate::consts::Capability;
+use crate::crypto::ECDHSecret;
 use crate::ctap2::commands::get_info::AuthenticatorInfo;
 use crate::ctap2::commands::{Request, RequestCtap1, RequestCtap2};
-use crate::ctap2::crypto::ECDHSecret;
 use crate::u2ftypes::U2FDevice;
 use std::fmt;
 
@@ -48,7 +48,6 @@ pub mod platform;
 #[path = "stub/mod.rs"]
 pub mod platform;
 
-#[allow(dead_code)]
 #[derive(Debug)]
 pub enum Nonce {
     CreateRandom,
@@ -57,7 +56,7 @@ pub enum Nonce {
 
 // TODO(MS): This is the lazy way: FidoDevice currently only extends U2FDevice by more functions,
 //           but the goal is to remove U2FDevice entirely and copy over the trait-definition here
-pub(crate) trait FidoDevice: U2FDevice
+pub trait FidoDevice: U2FDevice
 where
     Self: fmt::Debug,
 {
@@ -68,7 +67,7 @@ where
             return Err(HIDError::DeviceNotInitialized);
         }
 
-        if self.supports_ctap2() {
+        if self.supports_ctap2() && msg.is_ctap2_request() {
             self.send_cbor(msg)
         } else {
             self.send_apdu(msg)

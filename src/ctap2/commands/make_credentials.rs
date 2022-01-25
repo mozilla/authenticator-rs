@@ -1,13 +1,17 @@
-use super::{Command, CommandError, Request, RequestCtap1, RequestCtap2, Retryable, StatusCode};
+use super::{
+    Command, CommandError, PinAuthCommand, Request, RequestCtap1, RequestCtap2, Retryable,
+    StatusCode,
+};
 use crate::consts::{PARAMETER_SIZE, U2F_REGISTER, U2F_REQUEST_USER_PRESENCE};
+use crate::crypto::{serialize_key, COSEAlgorithm, COSEEC2Key, COSEKey, COSEKeyType, ECDSACurve};
 use crate::ctap2::attestation::{
     AAGuid, AttestationObject, AttestationStatement, AttestedCredentialData, AuthenticatorData,
     AuthenticatorDataFlags,
 };
 use crate::ctap2::client_data::CollectedClientData;
-use crate::ctap2::commands::client_pin::PinAuth;
+use crate::ctap2::commands::client_pin::{Pin, PinAuth};
 use crate::ctap2::server::{
-    PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, User,
+    PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingPartyWrapper, User,
 };
 use crate::transport::errors::{ApduErrorStatus, HIDError};
 use crate::u2ftypes::{U2FAPDUHeader, U2FDevice};
@@ -19,9 +23,14 @@ use serde::{
     Serialize, Serializer,
 };
 use serde_cbor::{self, de::from_slice, ser, Value};
-use serde_json::{value as json_value, Map};
 use std::fmt;
 use std::io;
+
+#[derive(Debug)]
+pub enum MakeCredentialsResult {
+    CTAP1(Vec<u8>),
+    CTAP2(AttestationObject, CollectedClientData),
+}
 
 #[derive(Copy, Clone, Debug, Serialize)]
 #[cfg_attr(test, derive(Deserialize))]
@@ -29,31 +38,33 @@ pub struct MakeCredentialsOptions {
     #[serde(rename = "rk", skip_serializing_if = "Option::is_none")]
     pub resident_key: Option<bool>,
     #[serde(rename = "uv", skip_serializing_if = "Option::is_none")]
-    pub user_validation: Option<bool>,
+    pub user_verification: Option<bool>,
+    // TODO(MS): ctap2.1 supports user_presence, but ctap2.0 does not and tokens will error out
+    //           Commands need a version-flag to know what to de/serialize and what to ignore.
 }
 
 impl Default for MakeCredentialsOptions {
     fn default() -> Self {
         Self {
             resident_key: None,
-            user_validation: Some(true),
+            user_verification: None,
         }
     }
 }
 
 impl MakeCredentialsOptions {
     pub(crate) fn has_some(&self) -> bool {
-        self.resident_key.is_some() || self.user_validation.is_some()
+        self.resident_key.is_some() || self.user_verification.is_some()
     }
 }
 
-pub(crate) trait UserValidation {
-    fn ask_user_validation(&self) -> bool;
+pub(crate) trait UserVerification {
+    fn ask_user_verification(&self) -> bool;
 }
 
-impl UserValidation for MakeCredentialsOptions {
-    fn ask_user_validation(&self) -> bool {
-        if let Some(e) = self.user_validation {
+impl UserVerification for MakeCredentialsOptions {
+    fn ask_user_verification(&self) -> bool {
+        if let Some(e) = self.user_verification {
             e
         } else {
             false
@@ -61,14 +72,28 @@ impl UserValidation for MakeCredentialsOptions {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct MakeCredentialsExtensions {
+    #[serde(rename = "pinMinLength", skip_serializing_if = "Option::is_none")]
+    pub pin_min_length: Option<bool>,
+    #[serde(rename = "hmac-secret", skip_serializing_if = "Option::is_none")]
+    pub hmac_secret: Option<bool>,
+}
+
+impl MakeCredentialsExtensions {
+    fn has_extensions(&self) -> bool {
+        self.pin_min_length.or(self.hmac_secret).is_some()
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct MakeCredentials {
-    client_data: CollectedClientData,
-    rp: RelyingParty,
+    pub(crate) client_data: CollectedClientData,
+    pub(crate) rp: RelyingPartyWrapper,
     // Note(baloo): If none -> ctap1
-    user: Option<User>,
-    pub_cred_params: Vec<PublicKeyCredentialParameters>,
-    exclude_list: Vec<PublicKeyCredentialDescriptor>,
+    pub(crate) user: Option<User>,
+    pub(crate) pub_cred_params: Vec<PublicKeyCredentialParameters>,
+    pub(crate) exclude_list: Vec<PublicKeyCredentialDescriptor>,
 
     // https://www.w3.org/TR/webauthn/#client-extension-input
     // The client extension input, which is a value that can be encoded in JSON,
@@ -76,21 +101,23 @@ pub struct MakeCredentials {
     // create() call, while the CBOR authenticator extension input is passed
     // from the client to the authenticator for authenticator extensions during
     // the processing of these calls.
-    extensions: Map<String, json_value::Value>,
-    options: MakeCredentialsOptions,
-    pin_auth: Option<PinAuth>,
+    pub(crate) extensions: MakeCredentialsExtensions,
+    pub(crate) options: MakeCredentialsOptions,
+    pub(crate) pin: Option<Pin>,
+    pub(crate) pin_auth: Option<PinAuth>,
     // TODO(MS): pin_protocol
 }
 
 impl MakeCredentials {
     pub fn new(
         client_data: CollectedClientData,
-        rp: RelyingParty,
+        rp: RelyingPartyWrapper,
         user: Option<User>,
         pub_cred_params: Vec<PublicKeyCredentialParameters>,
         exclude_list: Vec<PublicKeyCredentialDescriptor>,
         options: MakeCredentialsOptions,
-        pin_auth: Option<PinAuth>,
+        extensions: MakeCredentialsExtensions,
+        pin: Option<Pin>,
     ) -> Self {
         Self {
             client_data,
@@ -98,11 +125,29 @@ impl MakeCredentials {
             user,
             pub_cred_params,
             exclude_list,
-            // TODO(baloo): need to sort those out once final api is in
-            extensions: Map::new(),
+            extensions,
             options,
-            pin_auth,
+            pin,
+            pin_auth: None,
         }
+    }
+}
+
+impl PinAuthCommand for MakeCredentials {
+    fn pin(&self) -> &Option<Pin> {
+        &self.pin
+    }
+
+    fn pin_auth(&self) -> &Option<PinAuth> {
+        &self.pin_auth
+    }
+
+    fn set_pin_auth(&mut self, pin_auth: Option<PinAuth>) {
+        self.pin_auth = pin_auth;
+    }
+
+    fn client_data(&self) -> &CollectedClientData {
+        &self.client_data
     }
 }
 
@@ -111,13 +156,14 @@ impl Serialize for MakeCredentials {
     where
         S: Serializer,
     {
+        debug!("Serialize MakeCredentials");
         // Need to define how many elements are going to be in the map
         // beforehand
         let mut map_len = 4;
         if !self.exclude_list.is_empty() {
             map_len += 1;
         }
-        if !self.extensions.is_empty() {
+        if self.extensions.has_extensions() {
             map_len += 1;
         }
         if self.options.has_some() {
@@ -133,13 +179,22 @@ impl Serialize for MakeCredentials {
             .hash()
             .map_err(|e| S::Error::custom(format!("error while hashing client data: {}", e)))?;
         map.serialize_entry(&1, &client_data_hash)?;
-        map.serialize_entry(&2, &self.rp)?;
+        match self.rp {
+            RelyingPartyWrapper::Data(ref d) => {
+                map.serialize_entry(&2, &d)?;
+            }
+            _ => {
+                return Err(S::Error::custom(
+                    "Can't serialize a RelyingParty::Hash for CTAP2",
+                ));
+            }
+        }
         map.serialize_entry(&3, &self.user)?;
         map.serialize_entry(&4, &self.pub_cred_params)?;
         if !self.exclude_list.is_empty() {
             map.serialize_entry(&5, &self.exclude_list)?;
         }
-        if !self.extensions.is_empty() {
+        if self.extensions.has_extensions() {
             map.serialize_entry(&6, &self.extensions)?;
         }
         if self.options.has_some() {
@@ -153,10 +208,14 @@ impl Serialize for MakeCredentials {
     }
 }
 
-impl Request<(AttestationObject, CollectedClientData)> for MakeCredentials {}
+impl Request<MakeCredentialsResult> for MakeCredentials {
+    fn is_ctap2_request(&self) -> bool {
+        self.user.is_some()
+    }
+}
 
 impl RequestCtap1 for MakeCredentials {
-    type Output = (AttestationObject, CollectedClientData);
+    type Output = MakeCredentialsResult;
 
     fn apdu_format<Dev>(&self, _dev: &mut Dev) -> Result<Vec<u8>, HIDError>
     where
@@ -169,19 +228,26 @@ impl RequestCtap1 for MakeCredentials {
         //  * Options must not include "rk" set to true.
         //  * Options must not include "uv" set to true.
 
-        let flags = if self.options.ask_user_validation() {
+        let flags = if self.options.ask_user_verification() {
             U2F_REQUEST_USER_PRESENCE
         } else {
             0
         };
 
         let mut register_data = Vec::with_capacity(2 * PARAMETER_SIZE);
-        register_data.extend_from_slice(
-            self.client_data
-                .hash()
-                .map_err(|e| HIDError::Command(CommandError::Json(e)))?
-                .as_ref(),
-        );
+        if self.is_ctap2_request() {
+            register_data.extend_from_slice(
+                self.client_data
+                    .hash()
+                    .map_err(|e| HIDError::Command(CommandError::Json(e)))?
+                    .as_ref(),
+            );
+        } else {
+            let decoded =
+                base64::decode_config(&self.client_data.challenge.0, base64::URL_SAFE_NO_PAD)
+                    .map_err(|_| HIDError::DeviceError)?; // We encoded it, so this should never fail
+            register_data.extend_from_slice(&decoded);
+        }
         register_data.extend_from_slice(self.rp.hash().as_ref());
         let cmd = U2F_REGISTER;
         let apdu = U2FAPDUHeader::serialize(cmd, flags, &register_data)?;
@@ -197,72 +263,90 @@ impl RequestCtap1 for MakeCredentials {
         if Err(ApduErrorStatus::ConditionsNotSatisfied) == status {
             return Err(Retryable::Retry);
         }
+        if let Err(err) = status {
+            return Err(Retryable::Error(HIDError::ApduStatus(err)));
+        }
 
-        named!(
-            parse_register<(&[u8], &[u8])>,
-            do_parse!(
-                reserved: tag!(&[0x05])
-                    >> public_key: take!(65)
-                    >> key_handle_len: be_u8
-                    >> key_handle: take!(key_handle_len)
-                    >> (public_key, key_handle)
-            )
-        );
+        if self.is_ctap2_request() {
+            named!(
+                parse_register<(&[u8], &[u8])>,
+                do_parse!(
+                    _reserved: tag!(&[0x05])
+                        >> public_key: take!(65)
+                        >> key_handle_len: be_u8
+                        >> key_handle: take!(key_handle_len)
+                        >> (public_key, key_handle)
+                )
+            );
 
-        let (rest, (public_key, key_handle)) = parse_register(input)
-            .map_err(|e| {
-                error!("error while parsing registration = {:?}", e);
-                io::Error::new(io::ErrorKind::Other, "unable to parse registration")
-            })
-            .map_err(|e| HIDError::IO(None, e))
-            .map_err(Retryable::Error)?;
+            let (rest, (public_key, key_handle)) = parse_register(input)
+                .map_err(|e| {
+                    error!("error while parsing registration = {:?}", e);
+                    io::Error::new(io::ErrorKind::Other, "unable to parse registration")
+                })
+                .map_err(|e| HIDError::IO(None, e))
+                .map_err(Retryable::Error)?;
 
-        // TODO(MS): This is currently not parsed within the crate, but outside by a user-provided function
-        //           See examples/main.rs: u2f_get_key_handle_from_register_response()
-        //           We would need to add a DER parser as a dependency, which I don't want to do right now.
-        // let (signature, cert) = der_parser::parse_der(rest)
-        //     .map_err(|e| {
-        //         error!("error while parsing cert = {:?}", e);
-        //         let err = io::Error::new(io::ErrorKind::Other, "Failed to parse x509 certificate");
-        //         let err = error::Error::from(err);
-        //         let err = CommandError::Deserializing(err);
-        //         let err = HIDError::Command(err);
-        //         Retryable::Error(err)
-        //     })
-        //     .map(|(sig, cert)| (sig, &rest[..rest.len() - sig.len()]))?;
+            // TODO(MS): This is currently not parsed within the crate, but outside by a user-provided function
+            //           See examples/main.rs: u2f_get_key_handle_from_register_response()
+            //           We would need to add a DER parser as a dependency, which I don't want to do right now.
+            // let (signature, cert) = der_parser::parse_der(rest)
+            //     .map_err(|e| {
+            //         error!("error while parsing cert = {:?}", e);
+            //         let err = io::Error::new(io::ErrorKind::Other, "Failed to parse x509 certificate");
+            //         let err = error::Error::from(err);
+            //         let err = CommandError::Deserializing(err);
+            //         let err = HIDError::Command(err);
+            //         Retryable::Error(err)
+            //     })
+            //     .map(|(sig, cert)| (sig, &rest[..rest.len() - sig.len()]))?;
+            let (x, y) = serialize_key(ECDSACurve::SECP256R1, public_key)
+                .map_err(|e| HIDError::Command(CommandError::Crypto(e.into())))
+                .map_err(Retryable::Error)?;
+            let credential_public_key = COSEKey {
+                alg: COSEAlgorithm::ES256,
+                key: COSEKeyType::EC2(COSEEC2Key {
+                    curve: ECDSACurve::SECP256R1,
+                    x: x.to_vec(),
+                    y: y.to_vec(),
+                }),
+            };
+            let auth_data = AuthenticatorData {
+                rp_id_hash: self.rp.hash(),
+                // https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html#u2f-authenticatorMakeCredential-interoperability
+                // "Let flags be a byte whose zeroth bit (bit 0, UP) is set, and whose sixth bit
+                // (bit 6, AT) is set, and all other bits are zero (bit zero is the least significant bit)"
+                flags: AuthenticatorDataFlags::USER_PRESENT | AuthenticatorDataFlags::ATTESTED,
+                counter: 0,
+                credential_data: Some(AttestedCredentialData {
+                    aaguid: AAGuid::default(),
+                    credential_id: Vec::from(key_handle),
+                    credential_public_key,
+                }),
+                extensions: Default::default(),
+            };
 
-        let auth_data = AuthenticatorData {
-            rp_id_hash: self.rp.hash(),
-            flags: AuthenticatorDataFlags::empty(),
-            counter: 0,
-            credential_data: Some(AttestedCredentialData {
-                aaguid: AAGuid::default(),
-                credential_id: Vec::from(key_handle),
-                // TODO(baloo): this is wrong, this is not the format expected by cose::PublicKey
-                // (or is it?)
-                // see This is the (uncompressed) x,y-representation of a curve point on the P-256 NIST elliptic curve.
-                // https://fidoalliance.org/specs/fido-u2f-v1.2-ps-20170411/fido-u2f-raw-message-formats-v1.2-ps-20170411.html
-                //credential_public_key: PublicKey::new(EllipticCurve::P256, Vec::from(public_key)),
-                credential_public_key: Vec::from(public_key),
-            }),
-            extensions: Vec::new(),
-        };
+            // TODO(MS)
+            // let att_statement_u2f = AttestationStatementFidoU2F::new(cert, signature);
+            let att_statement = AttestationStatement::Unparsed(rest.to_vec());
+            let attestation_object = AttestationObject {
+                auth_data,
+                att_statement,
+            };
+            let client_data = self.client_data.clone();
 
-        // TODO(MS)
-        // let att_statement_u2f = AttestationStatementFidoU2F::new(cert, signature);
-        let att_statement = AttestationStatement::Unparsed(rest.to_vec());
-        let attestation_object = AttestationObject {
-            auth_data,
-            att_statement,
-        };
-        let client_data = self.client_data.clone();
-
-        Ok((attestation_object, client_data))
+            Ok(MakeCredentialsResult::CTAP2(
+                attestation_object,
+                client_data,
+            ))
+        } else {
+            Ok(MakeCredentialsResult::CTAP1(input.to_vec()))
+        }
     }
 }
 
 impl RequestCtap2 for MakeCredentials {
-    type Output = (AttestationObject, CollectedClientData);
+    type Output = MakeCredentialsResult;
 
     fn command() -> Command {
         Command::MakeCredentials
@@ -272,7 +356,6 @@ impl RequestCtap2 for MakeCredentials {
     where
         Dev: U2FDevice + io::Read + io::Write + fmt::Debug,
     {
-        // TODO(MS): Add GetInfo-request here and others (See CommandDevice::new)
         Ok(ser::to_vec(&self).map_err(CommandError::Serializing)?)
     }
 
@@ -294,7 +377,7 @@ impl RequestCtap2 for MakeCredentials {
             if status.is_ok() {
                 let attestation = from_slice(&input[1..]).map_err(CommandError::Deserializing)?;
                 let client_data = self.client_data.clone();
-                Ok((attestation, client_data))
+                Ok(MakeCredentialsResult::CTAP2(attestation, client_data))
             } else {
                 let data: Value = from_slice(&input[1..]).map_err(CommandError::Deserializing)?;
                 Err(HIDError::Command(CommandError::StatusCode(
@@ -312,7 +395,8 @@ impl RequestCtap2 for MakeCredentials {
 
 #[cfg(test)]
 pub mod test {
-    use super::{MakeCredentials, MakeCredentialsOptions};
+    use super::{MakeCredentials, MakeCredentialsOptions, MakeCredentialsResult};
+    use crate::crypto::{COSEAlgorithm, COSEEC2Key, COSEKey, COSEKeyType, ECDSACurve};
     use crate::ctap2::attestation::{
         AAGuid, AttestationCertificate, AttestationObject, AttestationStatement,
         AttestationStatementPacked, AttestedCredentialData, AuthenticatorData,
@@ -321,7 +405,9 @@ pub mod test {
     use crate::ctap2::client_data::{Challenge, CollectedClientData, TokenBinding, WebauthnType};
     use crate::ctap2::commands::{RequestCtap1, RequestCtap2};
     use crate::ctap2::server::RpIdHash;
-    use crate::ctap2::server::{Alg, PublicKeyCredentialParameters, RelyingParty, User};
+    use crate::ctap2::server::{
+        PublicKeyCredentialParameters, RelyingParty, RelyingPartyWrapper, User,
+    };
     use crate::u2fprotocol::tests::platform::TestDevice;
     use serde_bytes::ByteBuf;
 
@@ -332,14 +418,14 @@ pub mod test {
                 webauthn_type: WebauthnType::Create,
                 challenge: Challenge::from(vec![0x00, 0x01, 0x02, 0x03]),
                 origin: String::from("example.com"),
-                cross_origin: None,
-                token_binding: Some(TokenBinding::Present(vec![0x00, 0x01, 0x02, 0x03])),
+                cross_origin: false,
+                token_binding: Some(TokenBinding::Present(String::from("AAECAw"))),
             },
-            RelyingParty {
+            RelyingPartyWrapper::Data(RelyingParty {
                 id: String::from("example.com"),
                 name: Some(String::from("Acme")),
                 icon: None,
-            },
+            }),
             Some(User {
                 id: base64::decode_config(
                     "MIIBkzCCATigAwIBAjCCAZMwggE4oAMCAQIwggGTMII=",
@@ -347,18 +433,23 @@ pub mod test {
                 )
                 .unwrap(),
                 icon: Some("https://pics.example.com/00/p/aBjjjpqPb.png".to_string()),
-                name: String::from("johnpsmith@example.com"),
+                name: Some(String::from("johnpsmith@example.com")),
                 display_name: Some(String::from("John P. Smith")),
             }),
             vec![
-                PublicKeyCredentialParameters { alg: Alg::ES256 },
-                PublicKeyCredentialParameters { alg: Alg::RS256 },
+                PublicKeyCredentialParameters {
+                    alg: COSEAlgorithm::ES256,
+                },
+                PublicKeyCredentialParameters {
+                    alg: COSEAlgorithm::RS256,
+                },
             ],
             Vec::new(),
             MakeCredentialsOptions {
                 resident_key: Some(true),
-                user_validation: None,
+                user_verification: None,
             },
+            Default::default(),
             None,
         );
 
@@ -367,9 +458,15 @@ pub mod test {
             .wire_format(&mut device)
             .expect("Failed to serialize MakeCredentials request");
         assert_eq!(req_serialized, MAKE_CREDENTIALS_SAMPLE_REQUEST_CTAP2);
-        let (attestation_object, _collected_client_data) = req
+        let (attestation_object, _collected_client_data) = match req
             .handle_response_ctap2(&mut device, &MAKE_CREDENTIALS_SAMPLE_RESPONSE_CTAP2)
-            .expect("Failed to handle CTAP2 response");
+            .expect("Failed to handle CTAP2 response")
+        {
+            MakeCredentialsResult::CTAP2(attestation_object, _collected_client_data) => {
+                (attestation_object, _collected_client_data)
+            }
+            _ => panic!("Got CTAP1 Result, but CTAP2 expected"),
+        };
 
         let expected = AttestationObject {
             auth_data: AuthenticatorData {
@@ -391,20 +488,27 @@ pub mod test {
                         0x89, 0x59, 0xce, 0xad, 0x5b, 0x5c, 0x48, 0x16, 0x4e, 0x8a, 0xbc, 0xd6,
                         0xd9, 0x43, 0x5c, 0x6f,
                     ],
-                    credential_public_key: vec![
-                        0xa3, 0x63, 0x61, 0x6c, 0x67, 0x65, 0x45, 0x53, 0x32, 0x35, 0x36, 0x61,
-                        0x78, 0x58, 0x20, 0xf7, 0xc4, 0xf4, 0xa6, 0xf1, 0xd7, 0x95, 0x38, 0xdf,
-                        0xa4, 0xc9, 0xac, 0x50, 0x84, 0x8d, 0xf7, 0x08, 0xbc, 0x1c, 0x99, 0xf5,
-                        0xe6, 0x0e, 0x51, 0xb4, 0x2a, 0x52, 0x1b, 0x35, 0xd3, 0xb6, 0x9a, 0x61,
-                        0x79, 0x58, 0x20, 0xde, 0x7b, 0x7d, 0x6c, 0xa5, 0x64, 0xe7, 0x0e, 0xa3,
-                        0x21, 0xa4, 0xd5, 0xd9, 0x6e, 0xa0, 0x0e, 0xf0, 0xe2, 0xdb, 0x89, 0xdd,
-                        0x61, 0xd4, 0x89, 0x4c, 0x15, 0xac, 0x58, 0x5b, 0xd2, 0x36, 0x84,
-                    ],
+                    credential_public_key: COSEKey {
+                        alg: COSEAlgorithm::ES256,
+                        key: COSEKeyType::EC2(COSEEC2Key {
+                            curve: ECDSACurve::SECP256R1,
+                            x: vec![
+                                0xA5, 0xFD, 0x5C, 0xE1, 0xB1, 0xC4, 0x58, 0xC5, 0x30, 0xA5, 0x4F,
+                                0xA6, 0x1B, 0x31, 0xBF, 0x6B, 0x04, 0xBE, 0x8B, 0x97, 0xAF, 0xDE,
+                                0x54, 0xDD, 0x8C, 0xBB, 0x69, 0x27, 0x5A, 0x8A, 0x1B, 0xE1,
+                            ],
+                            y: vec![
+                                0xFA, 0x3A, 0x32, 0x31, 0xDD, 0x9D, 0xEE, 0xD9, 0xD1, 0x89, 0x7B,
+                                0xE5, 0xA6, 0x22, 0x8C, 0x59, 0x50, 0x1E, 0x4B, 0xCD, 0x12, 0x97,
+                                0x5D, 0x3D, 0xFF, 0x73, 0x0F, 0x01, 0x27, 0x8E, 0xA6, 0x1C,
+                            ],
+                        }),
+                    },
                 }),
-                extensions: Vec::new(),
+                extensions: Default::default(),
             },
             att_statement: AttestationStatement::Packed(AttestationStatementPacked {
-                alg: Alg::ES256,
+                alg: COSEAlgorithm::ES256,
                 sig: Signature(ByteBuf::from([
                     0x30, 0x45, 0x02, 0x20, 0x13, 0xf7, 0x3c, 0x5d, 0x9d, 0x53, 0x0e, 0x8c, 0xc1,
                     0x5c, 0xc9, 0xbd, 0x96, 0xad, 0x58, 0x6d, 0x39, 0x36, 0x64, 0xe4, 0x62, 0xd5,
@@ -458,16 +562,16 @@ pub mod test {
         let req = MakeCredentials::new(
             CollectedClientData {
                 webauthn_type: WebauthnType::Create,
-                challenge: Challenge::from(vec![0x00, 0x01, 0x02, 0x03]),
+                challenge: Challenge::new(vec![0x00, 0x01, 0x02, 0x03]),
                 origin: String::from("example.com"),
-                cross_origin: None,
-                token_binding: Some(TokenBinding::Present(vec![0x00, 0x01, 0x02, 0x03])),
+                cross_origin: false,
+                token_binding: Some(TokenBinding::Present(String::from("AAECAw"))),
             },
-            RelyingParty {
+            RelyingPartyWrapper::Data(RelyingParty {
                 id: String::from("example.com"),
                 name: Some(String::from("Acme")),
                 icon: None,
-            },
+            }),
             Some(User {
                 id: base64::decode_config(
                     "MIIBkzCCATigAwIBAjCCAZMwggE4oAMCAQIwggGTMII=",
@@ -475,18 +579,23 @@ pub mod test {
                 )
                 .unwrap(),
                 icon: Some("https://pics.example.com/00/p/aBjjjpqPb.png".to_string()),
-                name: String::from("johnpsmith@example.com"),
+                name: Some(String::from("johnpsmith@example.com")),
                 display_name: Some(String::from("John P. Smith")),
             }),
             vec![
-                PublicKeyCredentialParameters { alg: Alg::ES256 },
-                PublicKeyCredentialParameters { alg: Alg::RS256 },
+                PublicKeyCredentialParameters {
+                    alg: COSEAlgorithm::ES256,
+                },
+                PublicKeyCredentialParameters {
+                    alg: COSEAlgorithm::RS256,
+                },
             ],
             Vec::new(),
             MakeCredentialsOptions {
                 resident_key: Some(true),
-                user_validation: None,
+                user_verification: None,
             },
+            Default::default(),
             None,
         );
 
@@ -499,9 +608,15 @@ pub mod test {
             "\nGot:      {:X?}\nExpected: {:X?}",
             req_serialized, MAKE_CREDENTIALS_SAMPLE_REQUEST_CTAP1
         );
-        let (attestation_object, _collected_client_data) = req
+        let (attestation_object, _collected_client_data) = match req
             .handle_response_ctap1(Ok(()), &MAKE_CREDENTIALS_SAMPLE_RESPONSE_CTAP1)
-            .expect("Failed to handle CTAP1 response");
+            .expect("Failed to handle CTAP1 response")
+        {
+            MakeCredentialsResult::CTAP2(attestation_object, _collected_client_data) => {
+                (attestation_object, _collected_client_data)
+            }
+            _ => panic!("Got CTAP1 Result, but CTAP2 expected"),
+        };
 
         let expected = AttestationObject {
             auth_data: AuthenticatorData {
@@ -511,7 +626,7 @@ pub mod test {
                     0x12, 0x55, 0x86, 0xCE, 0x19, 0x47,
                 ])
                 .unwrap(),
-                flags: AuthenticatorDataFlags::empty(),
+                flags: AuthenticatorDataFlags::USER_PRESENT | AuthenticatorDataFlags::ATTESTED,
                 counter: 0,
                 credential_data: Some(AttestedCredentialData {
                     aaguid: AAGuid::default(),
@@ -523,16 +638,24 @@ pub mod test {
                         0xF7, 0x8D, 0xA2, 0xC5, 0xF9, 0x62, 0x00, 0xCC, 0xD4, 0x15, 0xCD, 0x08,
                         0xFE, 0x42, 0x00, 0x38,
                     ],
-                    credential_public_key: vec![
-                        0x04, 0xE8, 0x76, 0x25, 0x89, 0x6E, 0xE4, 0xE4, 0x6D, 0xC0, 0x32, 0x76,
-                        0x6E, 0x80, 0x87, 0x96, 0x2F, 0x36, 0xDF, 0x9D, 0xFE, 0x8B, 0x56, 0x7F,
-                        0x37, 0x63, 0x01, 0x5B, 0x19, 0x90, 0xA6, 0x0E, 0x14, 0x27, 0xDE, 0x61,
-                        0x2D, 0x66, 0x41, 0x8B, 0xDA, 0x19, 0x50, 0x58, 0x1E, 0xBC, 0x5C, 0x8C,
-                        0x1D, 0xAD, 0x71, 0x0C, 0xB1, 0x4C, 0x22, 0xF8, 0xC9, 0x70, 0x45, 0xF4,
-                        0x61, 0x2F, 0xB2, 0x0C, 0x91,
-                    ],
+                    credential_public_key: COSEKey {
+                        alg: COSEAlgorithm::ES256,
+                        key: COSEKeyType::EC2(COSEEC2Key {
+                            curve: ECDSACurve::SECP256R1,
+                            x: vec![
+                                0xE8, 0x76, 0x25, 0x89, 0x6E, 0xE4, 0xE4, 0x6D, 0xC0, 0x32, 0x76,
+                                0x6E, 0x80, 0x87, 0x96, 0x2F, 0x36, 0xDF, 0x9D, 0xFE, 0x8B, 0x56,
+                                0x7F, 0x37, 0x63, 0x01, 0x5B, 0x19, 0x90, 0xA6, 0x0E, 0x14,
+                            ],
+                            y: vec![
+                                0x27, 0xDE, 0x61, 0x2D, 0x66, 0x41, 0x8B, 0xDA, 0x19, 0x50, 0x58,
+                                0x1E, 0xBC, 0x5C, 0x8C, 0x1D, 0xAD, 0x71, 0x0C, 0xB1, 0x4C, 0x22,
+                                0xF8, 0xC9, 0x70, 0x45, 0xF4, 0x61, 0x2F, 0xB2, 0x0C, 0x91,
+                            ],
+                        }),
+                    },
                 }),
-                extensions: Vec::new(),
+                extensions: Default::default(),
             },
             att_statement: AttestationStatement::Unparsed(vec![
                 0x30, 0x82, 0x02, 0x4A, 0x30, 0x82, 0x01, 0x32, 0xA0, 0x03, 0x02, 0x01, 0x02, 0x02,
@@ -633,14 +756,14 @@ pub mod test {
     }
 
     #[rustfmt::skip]
-    pub const MAKE_CREDENTIALS_SAMPLE_RESPONSE_CTAP2: [u8; 666] = [
+    pub const MAKE_CREDENTIALS_SAMPLE_RESPONSE_CTAP2: [u8; 660] = [
         0x00, // status = success
         0xa3, // map(3)
           0x01, // unsigned(1)
           0x66, // text(6)
             0x70, 0x61, 0x63, 0x6b, 0x65, 0x64, // "packed"
           0x02, // unsigned(2)
-          0x58, 0x9a, // bytes(154)
+          0x58, 0x94, // bytes(148)
             // authData
             0xc2, 0x89, 0xc5, 0xca, 0x9b, 0x04, 0x60, 0xf9, 0x34, 0x6a, 0xb4, 0xe4, 0x2d, 0x84, 0x27, // rp_id_hash
             0x43, 0x40, 0x4d, 0x31, 0xf4, 0x84, 0x68, 0x25, 0xa6, 0xd0, 0x65, 0xbe, 0x59, 0x7a, 0x87, // rp_id_hash
@@ -650,12 +773,12 @@ pub mod test {
             0xf8, 0xa0, 0x11, 0xf3, 0x8c, 0x0a, 0x4d, 0x15, 0x80, 0x06, 0x17, 0x11, 0x1f, 0x9e, 0xdc, 0x7d, // AAGUID
             0x00, 0x10, // credential id length
             0x89, 0x59, 0xce, 0xad, 0x5b, 0x5c, 0x48, 0x16, 0x4e, 0x8a, 0xbc, 0xd6, 0xd9, 0x43, 0x5c, 0x6f, // credential id
-            0xa3, 0x63, 0x61, 0x6c, 0x67, 0x65, 0x45, 0x53, 0x32, 0x35, 0x36, 0x61, 0x78, 0x58, 0x20, // credential public key
-            0xf7, 0xc4, 0xf4, 0xa6, 0xf1, 0xd7, 0x95, 0x38, 0xdf, 0xa4, 0xc9, 0xac, 0x50, 0x84, 0x8d,
-            0xf7, 0x08, 0xbc, 0x1c, 0x99, 0xf5, 0xe6, 0x0e, 0x51, 0xb4, 0x2a, 0x52, 0x1b, 0x35, 0xd3,
-            0xb6, 0x9a, 0x61, 0x79, 0x58, 0x20, 0xde, 0x7b, 0x7d, 0x6c, 0xa5, 0x64, 0xe7, 0x0e, 0xa3,
-            0x21, 0xa4, 0xd5, 0xd9, 0x6e, 0xa0, 0x0e, 0xf0, 0xe2, 0xdb, 0x89, 0xdd, 0x61, 0xd4, 0x89,
-            0x4c, 0x15, 0xac, 0x58, 0x5b, 0xd2, 0x36, 0x84,
+            // credential public key
+            0xa5, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01, 0x21, 0x58, 0x20, 0xa5, 0xfd, 0x5c, 0xe1, 0xb1, 0xc4,
+             0x58, 0xc5, 0x30, 0xa5, 0x4f, 0xa6, 0x1b, 0x31, 0xbf, 0x6b, 0x04, 0xbe, 0x8b, 0x97, 0xaf, 0xde,
+             0x54, 0xdd, 0x8c, 0xbb, 0x69, 0x27, 0x5a, 0x8a, 0x1b, 0xe1, 0x22, 0x58, 0x20, 0xfa, 0x3a, 0x32,
+             0x31, 0xdd, 0x9d, 0xee, 0xd9, 0xd1, 0x89, 0x7b, 0xe5, 0xa6, 0x22, 0x8c, 0x59, 0x50, 0x1e, 0x4b,
+             0xcd, 0x12, 0x97, 0x5d, 0x3d, 0xff, 0x73, 0x0f, 0x01, 0x27, 0x8e, 0xa6, 0x1c,
           0x03, // unsigned(3)
           0xa3, // map(3)
             0x63, // text(3)
@@ -707,13 +830,13 @@ pub mod test {
     pub const MAKE_CREDENTIALS_SAMPLE_REQUEST_CTAP2: [u8; 260] = [
         // NOTE: This has been taken from CTAP2.0 spec, but the clientDataHash has been replaced
         //       to be able to operate with known values for CollectedClientData (spec doesn't say
-        //       what values led to the provided example hash)
+        //       what values led to the provided example hash (see client_data.rs))
         0xa5, // map(5)
           0x01, // unsigned(1) - clientDataHash
           0x58, 0x20, // bytes(32)
-            0xc1, 0xdd, 0x35, 0x5f, 0x3c, 0x81, 0x69, 0x23, 0xe0, 0x57, 0xca, 0x03, 0x8d, // hash
-            0xba, 0xad, 0xb8, 0x5f, 0x95, 0x55, 0xcf, 0xc7, 0x62, 0x9b, 0x9d, 0x53, 0x66, // hash
-            0x97, 0x53, 0x80, 0xd7, 0x69, 0x4f, // hash
+            0x75, 0x35, 0x35, 0x7d, 0x49, 0x6e, 0x33, 0xc8, 0x18, 0x7f, 0xea, 0x8d, 0x11, // hash
+            0x32, 0x64, 0xaa, 0xa4, 0x52, 0x3e, 0x13, 0x40, 0x14, 0x9f, 0xbe, 0x00, 0x3f, // hash
+            0x10, 0x87, 0x54, 0xc3, 0x2d, 0x80, // hash
           0x02, // unsigned(2) - rp
             0xa2, // map(2) Replace line below with this one, once RelyingParty supports "name"
               0x62, // text(2)
@@ -785,9 +908,9 @@ pub mod test {
         //       to be able to operate with known values for CollectedClientData (spec doesn't say
         //       what values led to the provided example hash)
         // clientDataHash:
-        0xc1, 0xdd, 0x35, 0x5f, 0x3c, 0x81, 0x69, 0x23, 0xe0, 0x57, 0xca, 0x03, 0x8d, // hash
-        0xba, 0xad, 0xb8, 0x5f, 0x95, 0x55, 0xcf, 0xc7, 0x62, 0x9b, 0x9d, 0x53, 0x66, // hash
-        0x97, 0x53, 0x80, 0xd7, 0x69, 0x4f, // hash
+        0x75, 0x35, 0x35, 0x7d, 0x49, 0x6e, 0x33, 0xc8, 0x18, 0x7f, 0xea, 0x8d, 0x11, // hash
+        0x32, 0x64, 0xaa, 0xa4, 0x52, 0x3e, 0x13, 0x40, 0x14, 0x9f, 0xbe, 0x00, 0x3f, // hash
+        0x10, 0x87, 0x54, 0xc3, 0x2d, 0x80, // hash
         // rpIdHash:
         0xA3, 0x79, 0xA6, 0xF6, 0xEE, 0xAF, 0xB9, 0xA5, 0x5E, 0x37, 0x8C, 0x11, 0x80, 0x34, 0xE2,
         0x75, 0x1E, 0x68, 0x2F, 0xAB, 0x9F, 0x2D, 0x30, 0xAB, 0x13, 0xD2, 0x12, 0x55, 0x86, 0xCE,

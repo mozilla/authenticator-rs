@@ -1,8 +1,8 @@
 use crate::consts::{HIDCmd, CID_BROADCAST};
+use crate::crypto::ECDHSecret;
 use crate::ctap2::commands::get_info::{AuthenticatorInfo, GetInfo};
 use crate::ctap2::commands::get_version::GetVersion;
 use crate::ctap2::commands::{RequestCtap1, RequestCtap2, Retryable};
-use crate::ctap2::crypto::ECDHSecret;
 use crate::transport::{
     errors::{ApduErrorStatus, HIDError},
     FidoDevice, Nonce,
@@ -25,13 +25,14 @@ where
     type BuildParameters;
     type Id: fmt::Debug;
 
+    // Open device, verify that it is indeed a CTAP device and potentially read initial values
     fn new(parameters: Self::BuildParameters) -> Result<Self, HIDError>
     where
         Self::BuildParameters: Sized,
         Self: Sized;
 
     fn initialized(&self) -> bool;
-
+    // Currently only used for debugging to identify the device (e.g. /dev/some/path on Linux)
     fn id(&self) -> Self::Id;
 
     fn get_authenticator_info(&self) -> Option<&AuthenticatorInfo>;
@@ -39,6 +40,7 @@ where
     fn set_shared_secret(&mut self, secret: ECDHSecret);
     fn get_shared_secret(&self) -> Option<&ECDHSecret>;
 
+    // Initialize on a protocol-level
     fn initialize(&mut self, noncecmd: Nonce) -> Result<(), HIDError>
     where
         Self::Id: fmt::Debug,
@@ -64,7 +66,6 @@ where
         }
 
         let rsp = U2FHIDInitResp::read(&raw, &nonce)?;
-
         // Get the new Channel ID
         self.set_cid(rsp.cid);
 
@@ -221,7 +222,7 @@ where
     }
 
     fn init(&mut self, nonce: Nonce) -> Result<(), HIDError> {
-        let resp = <Self as HIDDevice>::initialize(self, nonce);
+        let resp = <Self as HIDDevice>::initialize(self, nonce)?;
         // TODO(baloo): this logic should be moved to
         //              transport/mod.rs::Device trait
         if self.supports_ctap2() {
@@ -236,7 +237,7 @@ where
             // We don't really use the result here
             self.send_apdu(&command)?;
         }
-        resp
+        Ok(resp)
     }
 
     fn initialized(&self) -> bool {

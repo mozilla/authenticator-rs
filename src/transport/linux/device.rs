@@ -4,32 +4,40 @@
 
 extern crate libc;
 
-use std::ffi::{CString, OsString};
-use std::io;
-use std::io::{Read, Write};
-use std::os::unix::prelude::*;
-
 use crate::consts::CID_BROADCAST;
+use crate::transport::hid::HIDDevice;
 use crate::transport::platform::{hidraw, monitor};
+use crate::transport::AuthenticatorInfo;
+use crate::transport::ECDHSecret;
+use crate::transport::HIDError;
 use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
 use crate::util::from_unix_result;
+use std::fs::OpenOptions;
+use std::io;
+use std::io::{Read, Write};
+use std::os::unix::io::AsRawFd;
+use std::path::PathBuf;
 
 #[derive(Debug)]
 pub struct Device {
-    path: OsString,
-    fd: libc::c_int,
+    path: PathBuf,
+    fd: std::fs::File,
     in_rpt_size: usize,
     out_rpt_size: usize,
     cid: [u8; 4],
     dev_info: Option<U2FDeviceInfo>,
+    secret: Option<ECDHSecret>,
+    authenticator_info: Option<AuthenticatorInfo>,
 }
 
 impl Device {
-    pub fn new(path: OsString) -> io::Result<Self> {
-        let cstr = CString::new(path.as_bytes())?;
-        let fd = unsafe { libc::open(cstr.as_ptr(), libc::O_RDWR) };
-        let fd = from_unix_result(fd)?;
-        let (in_rpt_size, out_rpt_size) = hidraw::read_hid_rpt_sizes_or_defaults(fd);
+    pub fn new(path: PathBuf) -> io::Result<Self> {
+        let fd = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path.clone())?;
+
+        let (in_rpt_size, out_rpt_size) = hidraw::read_hid_rpt_sizes_or_defaults(fd.as_raw_fd());
         Ok(Self {
             path,
             fd,
@@ -37,18 +45,20 @@ impl Device {
             out_rpt_size,
             cid: CID_BROADCAST,
             dev_info: None,
+            secret: None,
+            authenticator_info: None,
         })
     }
 
     pub fn is_u2f(&self) -> bool {
-        hidraw::is_u2f_device(self.fd)
+        hidraw::is_u2f_device(self.fd.as_raw_fd())
     }
 }
 
 impl Drop for Device {
     fn drop(&mut self) {
         // Close the fd, ignore any errors.
-        let _ = unsafe { libc::close(self.fd) };
+        let _ = unsafe { libc::close(self.fd.as_raw_fd()) };
     }
 }
 
@@ -61,7 +71,7 @@ impl PartialEq for Device {
 impl Read for Device {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let bufp = buf.as_mut_ptr() as *mut libc::c_void;
-        let rv = unsafe { libc::read(self.fd, bufp, buf.len()) };
+        let rv = unsafe { libc::read(self.fd.as_raw_fd(), bufp, buf.len()) };
         from_unix_result(rv as usize)
     }
 }
@@ -69,7 +79,7 @@ impl Read for Device {
 impl Write for Device {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let bufp = buf.as_ptr() as *const libc::c_void;
-        let rv = unsafe { libc::write(self.fd, bufp, buf.len()) };
+        let rv = unsafe { libc::write(self.fd.as_raw_fd(), bufp, buf.len()) };
         from_unix_result(rv as usize)
     }
 
@@ -108,5 +118,60 @@ impl U2FDevice for Device {
 
     fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {
         self.dev_info = Some(dev_info);
+    }
+}
+
+impl HIDDevice for Device {
+    type BuildParameters = PathBuf;
+    type Id = PathBuf;
+
+    fn new(path: PathBuf) -> Result<Self, HIDError> {
+        debug!("Opening device {:?}", path);
+        let fd = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path.clone())
+            .map_err(|e| HIDError::IO(Some(path.clone()), e))?;
+        let (in_rpt_size, out_rpt_size) = hidraw::read_hid_rpt_sizes_or_defaults(fd.as_raw_fd());
+        if hidraw::is_u2f_device(fd.as_raw_fd()) {
+            info!("new device {:?}", path);
+            Ok(Self {
+                path,
+                fd,
+                in_rpt_size,
+                out_rpt_size,
+                cid: CID_BROADCAST,
+                dev_info: None,
+                secret: None,
+                authenticator_info: None,
+            })
+        } else {
+            Err(HIDError::DeviceNotSupported)
+        }
+    }
+
+    fn initialized(&self) -> bool {
+        // During successful init, the broadcast channel id gets repplaced by an actual one
+        self.cid != CID_BROADCAST
+    }
+
+    fn id(&self) -> Self::Id {
+        self.path.clone()
+    }
+
+    fn get_shared_secret(&self) -> Option<&ECDHSecret> {
+        self.secret.as_ref()
+    }
+
+    fn set_shared_secret(&mut self, secret: ECDHSecret) {
+        self.secret = Some(secret);
+    }
+
+    fn get_authenticator_info(&self) -> Option<&AuthenticatorInfo> {
+        self.authenticator_info.as_ref()
+    }
+
+    fn set_authenticator_info(&mut self, authenticator_info: AuthenticatorInfo) {
+        self.authenticator_info = Some(authenticator_info);
     }
 }

@@ -36,11 +36,21 @@ mod capi;
 pub use crate::capi::*;
 
 pub mod ctap2;
+pub use ctap2::attestation::AttestationObject;
+pub use ctap2::client_data::CollectedClientData;
+pub use ctap2::commands::client_pin::Pin;
+pub use ctap2::AssertionObject;
+
+mod ctap2_capi;
+pub use crate::ctap2_capi::*;
 
 pub mod errors;
 pub mod statecallback;
 mod transport;
 mod virtualdevices;
+
+mod crypto;
+pub use crypto::COSEAlgorithm;
 
 // Keep this in sync with the constants in u2fhid-capi.h.
 bitflags! {
@@ -63,15 +73,23 @@ bitflags! {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct KeyHandle {
     pub credential: Vec<u8>,
     pub transports: AuthenticatorTransports,
 }
 
 pub type AppId = Vec<u8>;
-pub type RegisterResult = (Vec<u8>, u2ftypes::U2FDeviceInfo);
-pub type SignResult = (AppId, Vec<u8>, Vec<u8>, u2ftypes::U2FDeviceInfo);
+
+pub enum RegisterResult {
+    CTAP1(Vec<u8>, u2ftypes::U2FDeviceInfo),
+    CTAP2(AttestationObject, CollectedClientData),
+}
+
+pub enum SignResult {
+    CTAP1(AppId, Vec<u8>, Vec<u8>, u2ftypes::U2FDeviceInfo),
+    CTAP2(AssertionObject, CollectedClientData),
+}
 
 pub type Result<T> = std::result::Result<T, errors::AuthenticatorError>;
 

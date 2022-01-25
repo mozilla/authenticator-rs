@@ -62,7 +62,7 @@ fn main() {
         return;
     }
 
-    let mut manager = AuthenticatorService::new(CtapVersion::CTAP1)
+    let mut manager = AuthenticatorService::new(CtapVersion::CTAP2)
         .expect("The auth service should initialize safely");
 
     if !matches.opt_present("no-u2f-usb-hid") {
@@ -144,12 +144,16 @@ fn main() {
     let (register_data, device_info) = match register_result {
         Ok(RegisterResult::CTAP1(r, d)) => (r, d),
         Ok(RegisterResult::CTAP2(..)) => panic!("Did not request CTAP2, but got CTAP2 results!"),
-        Err(_) => panic!("Registration failed"),
+        Err(e) => panic!("Registration failed {:?}", e),
     };
 
     println!("Register result: {}", base64::encode(&register_data));
     println!("Device info: {}", &device_info);
+    println!("");
+    println!("*********************************************************************");
     println!("Asking a security key to sign now, with the data from the register...");
+    println!("*********************************************************************");
+
     let credential = u2f_get_key_handle_from_register_response(&register_data).unwrap();
     let key_handle = KeyHandle {
         credential,

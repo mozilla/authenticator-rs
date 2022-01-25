@@ -1,33 +1,85 @@
-use super::server::Alg;
 use super::utils::from_slice_stream;
+use crate::crypto::COSEAlgorithm;
+use crate::ctap2::commands::CommandError;
 use crate::ctap2::server::RpIdHash;
-#[cfg(test)]
-use byteorder::{BigEndian, WriteBytesExt};
+use crate::{crypto::COSEKey, errors::AuthenticatorError};
 use nom::{
-    combinator::rest,
     cond, do_parse, map, map_res, named,
     number::complete::{be_u16, be_u32, be_u8},
     take, Err as NomErr, IResult,
 };
+use serde::ser::{Error as SerError, SerializeMap, Serializer};
 use serde::{
     de::{Error as SerdeError, MapAccess, Visitor},
     Deserialize, Deserializer, Serialize,
 };
-#[cfg(test)]
-use serde::{
-    ser::{Error as SerError, SerializeMap},
-    Serializer,
-};
 use serde_bytes::ByteBuf;
+use serde_cbor;
 use std::fmt;
-#[cfg(test)]
-use std::io::{self, Write};
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Extension {}
+#[derive(Debug, PartialEq, Eq)]
+pub enum HmacSecretResponse {
+    /// This is returned by MakeCredential calls to display if CredRandom was
+    /// successfully generated
+    Confirmed(bool),
+    /// This is returned by GetAssertion:
+    /// AES256-CBC(shared_secret, HMAC-SHA265(CredRandom, salt1) || HMAC-SHA265(CredRandom, salt2))
+    Secret(Vec<u8>),
+}
+
+impl Serialize for HmacSecretResponse {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            HmacSecretResponse::Confirmed(x) => serializer.serialize_bool(*x),
+            HmacSecretResponse::Secret(x) => serializer.serialize_bytes(&x),
+        }
+    }
+}
+impl<'de> Deserialize<'de> for HmacSecretResponse {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct HmacSecretResponseVisitor;
+
+        impl<'de> Visitor<'de> for HmacSecretResponseVisitor {
+            type Value = HmacSecretResponse;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a byte array or a boolean")
+            }
+
+            fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+            where
+                E: SerdeError,
+            {
+                Ok(HmacSecretResponse::Secret(v.to_vec()))
+            }
+
+            fn visit_bool<E>(self, v: bool) -> Result<Self::Value, E>
+            where
+                E: SerdeError,
+            {
+                Ok(HmacSecretResponse::Confirmed(v))
+            }
+        }
+        deserializer.deserialize_any(HmacSecretResponseVisitor)
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct Extension {
+    #[serde(rename = "pinMinLength", skip_serializing_if = "Option::is_none")]
+    pub pin_min_length: Option<u64>,
+    #[serde(rename = "hmac-secret", skip_serializing_if = "Option::is_none")]
+    pub hmac_secret: Option<HmacSecretResponse>,
+}
 
 named!(
-    parse_extensions<Vec<Extension>>,
+    parse_extensions<Extension>,
     do_parse!(extensions: serde_to_nom >> (extensions))
 );
 
@@ -108,9 +160,7 @@ impl<'de> Deserialize<'de> for AAGuid {
 pub struct AttestedCredentialData {
     pub aaguid: AAGuid,
     pub credential_id: Vec<u8>,
-    // TODO(MS): unimplemented!
-    // pub credential_public_key: crate::ctap2::commands::client_pin::PublicKey,
-    pub credential_public_key: Vec<u8>,
+    pub credential_public_key: COSEKey,
 }
 
 fn serde_to_nom<'a, Output>(input: &'a [u8]) -> IResult<&'a [u8], Output>
@@ -130,12 +180,11 @@ named!(
         aaguid: map_res!(take!(16), AAGuid::from)
             >> cred_len: be_u16
             >> credential_id: map!(take!(cred_len), Vec::from)
-            >> credential_public_key: rest
-            // >> credential_public_key: serde_to_nom
+            >> credential_public_key: serde_to_nom
             >> (AttestedCredentialData {
                 aaguid,
                 credential_id,
-                credential_public_key: credential_public_key.to_vec(),
+                credential_public_key: credential_public_key,
             })
     )
 );
@@ -155,7 +204,7 @@ pub struct AuthenticatorData {
     pub flags: AuthenticatorDataFlags,
     pub counter: u32,
     pub credential_data: Option<AttestedCredentialData>,
-    pub extensions: Vec<Extension>,
+    pub extensions: Extension,
 }
 
 named!(
@@ -219,26 +268,25 @@ impl<'de> Deserialize<'de> for AuthenticatorData {
     }
 }
 
-#[cfg(test)]
-impl Serialize for AuthenticatorData {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut data = io::Cursor::new(Vec::new());
-        data.write_all(&self.rp_id_hash.0)
-            .map_err(|e| S::Error::custom(format!("io error: {:?}", e)))?;
-        data.write_all(&[self.flags.bits()])
-            .map_err(|e| S::Error::custom(format!("io error: {:?}", e)))?;
-        data.write_u32::<BigEndian>(self.counter)
-            .map_err(|e| S::Error::custom(format!("io error: {:?}", e)))?;
+impl AuthenticatorData {
+    pub fn to_vec(&self) -> Result<Vec<u8>, AuthenticatorError> {
+        let mut data = Vec::new();
+        data.extend(&self.rp_id_hash.0);
+        data.extend(&[self.flags.bits()]);
+        data.extend(&self.counter.to_be_bytes());
 
         // TODO(baloo): need to yield credential_data and extensions, but that dependends on flags,
         //              should we consider another type system?
-
-        data.set_position(0);
-        let data = data.into_inner();
-        serde_bytes::serialize(&data, serializer)
+        if let Some(cred) = &self.credential_data {
+            data.extend(&cred.aaguid.0);
+            data.extend(&(cred.credential_id.len() as u16).to_be_bytes());
+            data.extend(&cred.credential_id);
+            data.extend(
+                &serde_cbor::to_vec(&cred.credential_public_key)
+                    .map_err(CommandError::Serializing)?,
+            );
+        }
+        Ok(data)
     }
 }
 
@@ -253,7 +301,7 @@ impl AsRef<[u8]> for AttestationCertificate {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq)]
-pub struct Signature(pub(crate) ByteBuf);
+pub struct Signature(#[serde(with = "serde_bytes")] pub(crate) ByteBuf);
 
 impl fmt::Debug for Signature {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -283,6 +331,43 @@ pub enum AttestationStatement {
     Unparsed(Vec<u8>),
 }
 
+// Not all crypto-backends currently provide "crypto::verify()", so we do not implement it yet.
+// Also not sure, if we really need it. Would be a sanity-check only, to verify the signature is valid,
+// before sendig it out.
+// impl AttestationStatement {
+//     pub fn verify(&self, data: &[u8]) -> Result<bool, AuthenticatorError> {
+//         match self {
+//             AttestationStatement::None => Ok(true),
+//             AttestationStatement::Unparsed(_) => Err(AuthenticatorError::Custom(
+//                 "Unparsed attestation object can't be used to verify signature.".to_string(),
+//             )),
+//             AttestationStatement::FidoU2F(att) => {
+//                 let res = crypto::verify(
+//                     crypto::SignatureAlgorithm::ES256,
+//                     &att.attestation_cert[0].as_ref(),
+//                     att.sig.as_ref(),
+//                     data,
+//                 )?;
+//                 Ok(res)
+//             }
+//             AttestationStatement::Packed(att) => {
+//                 if att.alg != Alg::ES256 {
+//                     return Err(AuthenticatorError::Custom(
+//                         "Verification only supported for ES256".to_string(),
+//                     ));
+//                 }
+//                 let res = crypto::verify(
+//                     crypto::SignatureAlgorithm::ES256,
+//                     att.attestation_cert[0].as_ref(),
+//                     att.sig.as_ref(),
+//                     data,
+//                 )?;
+//                 Ok(res)
+//             }
+//         }
+//     }
+// }
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 // See https://www.w3.org/TR/webauthn/#fido-u2f-attestation
 pub struct AttestationStatementFidoU2F {
@@ -307,7 +392,7 @@ impl AttestationStatementFidoU2F {
 // TODO(baloo): there is a couple other options than x5c:
 //              https://www.w3.org/TR/webauthn/#packed-attestation
 pub struct AttestationStatementPacked {
-    pub alg: Alg,
+    pub alg: COSEAlgorithm,
     pub sig: Signature,
 
     #[serde(rename = "x5c")]
@@ -415,12 +500,12 @@ impl<'de> Deserialize<'de> for AttestationObject {
     }
 }
 
-#[cfg(test)]
 impl Serialize for AttestationObject {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
+        // serializer.serialize_bytes(&v)
         let mut map_len = 2;
         if self.att_statement != AttestationStatement::None {
             map_len += 1;
@@ -428,8 +513,13 @@ impl Serialize for AttestationObject {
 
         let mut map = serializer.serialize_map(Some(map_len))?;
 
-        map.serialize_entry(&2, &self.auth_data)?;
-
+        map.serialize_entry(
+            &2,
+            &self
+                .auth_data
+                .to_vec()
+                .map_err(|_| SerError::custom("Failed to serialize auth_data"))?,
+        )?;
         match self.att_statement {
             AttestationStatement::None => {
                 map.serialize_entry(&1, &"none")?;
@@ -438,8 +528,14 @@ impl Serialize for AttestationObject {
                 map.serialize_entry(&1, &"packed")?;
                 map.serialize_entry(&3, v)?;
             }
-            AttestationStatement::FidoU2F(_) | AttestationStatement::Unparsed(_) => {
-                unimplemented!();
+            AttestationStatement::FidoU2F(ref v) => {
+                map.serialize_entry(&1, &"fido-u2f")?;
+                map.serialize_entry(&3, v)?;
+            }
+            AttestationStatement::Unparsed(ref v) => {
+                // Unparsed is currently only used in the fido1.0/u2f-case
+                map.serialize_entry(&1, &"fido-u2f")?;
+                map.serialize_entry(&3, v)?;
             }
         }
 
@@ -450,8 +546,7 @@ impl Serialize for AttestationObject {
 #[cfg(test)]
 mod test {
     use super::super::utils::from_slice_stream;
-    use super::AttestationCertificate;
-    use super::AttestationObject;
+    use super::*;
     use serde_cbor::from_slice;
 
     const SAMPLE_ATTESTATION: [u8; 1006] = [
@@ -572,6 +667,69 @@ mod test {
         0x3a, 0xef, 0x27, 0x4b, 0xed, 0xbf, 0xde, 0x3f, 0xcb, 0xbd, 0x42, 0xea, 0xd6, 0x79,
     ];
 
+    const SAMPLE_AUTH_DATA_MAKE_CREDENTIAL: [u8; 164] = [
+        0x58, 0xA2, // bytes(162)
+        // authData
+        0xc2, 0x89, 0xc5, 0xca, 0x9b, 0x04, 0x60, 0xf9, 0x34, 0x6a, 0xb4, 0xe4, 0x2d, 0x84,
+        0x27, // rp_id_hash
+        0x43, 0x40, 0x4d, 0x31, 0xf4, 0x84, 0x68, 0x25, 0xa6, 0xd0, 0x65, 0xbe, 0x59, 0x7a,
+        0x87, // rp_id_hash
+        0x05, 0x1d, // rp_id_hash
+        0xC1, // authData Flags
+        0x00, 0x00, 0x00, 0x0b, // authData counter
+        0xf8, 0xa0, 0x11, 0xf3, 0x8c, 0x0a, 0x4d, 0x15, 0x80, 0x06, 0x17, 0x11, 0x1f, 0x9e, 0xdc,
+        0x7d, // AAGUID
+        0x00, 0x10, // credential id length
+        0x89, 0x59, 0xce, 0xad, 0x5b, 0x5c, 0x48, 0x16, 0x4e, 0x8a, 0xbc, 0xd6, 0xd9, 0x43, 0x5c,
+        0x6f, // credential id
+        // credential public key
+        0xa5, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01, 0x21, 0x58, 0x20, 0xa5, 0xfd, 0x5c, 0xe1, 0xb1,
+        0xc4, 0x58, 0xc5, 0x30, 0xa5, 0x4f, 0xa6, 0x1b, 0x31, 0xbf, 0x6b, 0x04, 0xbe, 0x8b, 0x97,
+        0xaf, 0xde, 0x54, 0xdd, 0x8c, 0xbb, 0x69, 0x27, 0x5a, 0x8a, 0x1b, 0xe1, 0x22, 0x58, 0x20,
+        0xfa, 0x3a, 0x32, 0x31, 0xdd, 0x9d, 0xee, 0xd9, 0xd1, 0x89, 0x7b, 0xe5, 0xa6, 0x22, 0x8c,
+        0x59, 0x50, 0x1e, 0x4b, 0xcd, 0x12, 0x97, 0x5d, 0x3d, 0xff, 0x73, 0x0f, 0x01, 0x27, 0x8e,
+        0xa6, 0x1c, // pub key end
+        // Extensions
+        0xA1, // map(1)
+        0x6B, // text(11)
+        0x68, 0x6D, 0x61, 0x63, 0x2D, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74, // "hmac-secret"
+        0xF5, // true
+    ];
+
+    const SAMPLE_AUTH_DATA_GET_ASSERTION: [u8; 229] = [
+        0x58, 0xE3, // bytes(227)
+        // authData
+        0xc2, 0x89, 0xc5, 0xca, 0x9b, 0x04, 0x60, 0xf9, 0x34, 0x6a, 0xb4, 0xe4, 0x2d, 0x84,
+        0x27, // rp_id_hash
+        0x43, 0x40, 0x4d, 0x31, 0xf4, 0x84, 0x68, 0x25, 0xa6, 0xd0, 0x65, 0xbe, 0x59, 0x7a,
+        0x87, // rp_id_hash
+        0x05, 0x1d, // rp_id_hash
+        0xC1, // authData Flags
+        0x00, 0x00, 0x00, 0x0b, // authData counter
+        0xf8, 0xa0, 0x11, 0xf3, 0x8c, 0x0a, 0x4d, 0x15, 0x80, 0x06, 0x17, 0x11, 0x1f, 0x9e, 0xdc,
+        0x7d, // AAGUID
+        0x00, 0x10, // credential id length
+        0x89, 0x59, 0xce, 0xad, 0x5b, 0x5c, 0x48, 0x16, 0x4e, 0x8a, 0xbc, 0xd6, 0xd9, 0x43, 0x5c,
+        0x6f, // credential id
+        // credential public key
+        0xa5, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01, 0x21, 0x58, 0x20, 0xa5, 0xfd, 0x5c, 0xe1, 0xb1,
+        0xc4, 0x58, 0xc5, 0x30, 0xa5, 0x4f, 0xa6, 0x1b, 0x31, 0xbf, 0x6b, 0x04, 0xbe, 0x8b, 0x97,
+        0xaf, 0xde, 0x54, 0xdd, 0x8c, 0xbb, 0x69, 0x27, 0x5a, 0x8a, 0x1b, 0xe1, 0x22, 0x58, 0x20,
+        0xfa, 0x3a, 0x32, 0x31, 0xdd, 0x9d, 0xee, 0xd9, 0xd1, 0x89, 0x7b, 0xe5, 0xa6, 0x22, 0x8c,
+        0x59, 0x50, 0x1e, 0x4b, 0xcd, 0x12, 0x97, 0x5d, 0x3d, 0xff, 0x73, 0x0f, 0x01, 0x27, 0x8e,
+        0xa6, 0x1c, // pub key end
+        // Extensions
+        0xA1, // map(1)
+        0x6B, // text(11)
+        0x68, 0x6D, 0x61, 0x63, 0x2D, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74, // "hmac-secret"
+        0x58, 0x40, // bytes(64)
+        0x1F, 0x91, 0x52, 0x6C, 0xAE, 0x45, 0x6E, 0x4C, 0xBB, 0x71, 0xC4, 0xDD, 0xE7, 0xBB, 0x87,
+        0x71, 0x57, 0xE6, 0xE5, 0x4D, 0xFE, 0xD3, 0x01, 0x5D, 0x7D, 0x4D, 0xBB, 0x22, 0x69, 0xAF,
+        0xCD, 0xE6, 0xA9, 0x1B, 0x8D, 0x26, 0x7E, 0xBB, 0xF8, 0x48, 0xEB, 0x95, 0xA6, 0x8E, 0x79,
+        0xC7, 0xAC, 0x70, 0x5E, 0x35, 0x1D, 0x54, 0x3D, 0xB0, 0x16, 0x58, 0x87, 0xD6, 0x29, 0x0F,
+        0xD4, 0x7A, 0x40, 0xC4,
+    ];
+
     #[test]
     fn parse_cert_chain() {
         let cert: AttestationCertificate = from_slice(&SAMPLE_CERT_CHAIN[1..]).unwrap();
@@ -599,5 +757,25 @@ mod test {
         let (rest, value): (&[u8], String) = from_slice_stream(rest).unwrap();
         assert_eq!(value, "foobar");
         assert!(rest.is_empty());
+    }
+
+    #[test]
+    fn parse_extensions() {
+        let auth_make: AuthenticatorData = from_slice(&SAMPLE_AUTH_DATA_MAKE_CREDENTIAL).unwrap();
+        assert_eq!(
+            auth_make.extensions.hmac_secret,
+            Some(HmacSecretResponse::Confirmed(true))
+        );
+        let auth_get: AuthenticatorData = from_slice(&SAMPLE_AUTH_DATA_GET_ASSERTION).unwrap();
+        assert_eq!(
+            auth_get.extensions.hmac_secret,
+            Some(HmacSecretResponse::Secret(vec![
+                0x1F, 0x91, 0x52, 0x6C, 0xAE, 0x45, 0x6E, 0x4C, 0xBB, 0x71, 0xC4, 0xDD, 0xE7, 0xBB,
+                0x87, 0x71, 0x57, 0xE6, 0xE5, 0x4D, 0xFE, 0xD3, 0x01, 0x5D, 0x7D, 0x4D, 0xBB, 0x22,
+                0x69, 0xAF, 0xCD, 0xE6, 0xA9, 0x1B, 0x8D, 0x26, 0x7E, 0xBB, 0xF8, 0x48, 0xEB, 0x95,
+                0xA6, 0x8E, 0x79, 0xC7, 0xAC, 0x70, 0x5E, 0x35, 0x1D, 0x54, 0x3D, 0xB0, 0x16, 0x58,
+                0x87, 0xD6, 0x29, 0x0F, 0xD4, 0x7A, 0x40, 0xC4,
+            ]))
+        );
     }
 }
