@@ -20,6 +20,7 @@ pub enum AuthenticatorError {
     InternalError(String),
     U2FToken(U2FTokenError),
     Custom(String),
+    CryptoError,
 }
 
 impl AuthenticatorError {
@@ -50,6 +51,9 @@ impl fmt::Display for AuthenticatorError {
                 write!(f, "A u2f token error occurred {:?}", err)
             }
             AuthenticatorError::Custom(ref err) => write!(f, "A custom error occurred {:?}", err),
+            AuthenticatorError::CryptoError => {
+                write!(f, "The cryptography implementation encountered an error")
+            }
         }
     }
 }
@@ -63,6 +67,18 @@ impl From<io::Error> for AuthenticatorError {
 impl<T> From<mpsc::SendError<T>> for AuthenticatorError {
     fn from(err: mpsc::SendError<T>) -> AuthenticatorError {
         AuthenticatorError::InternalError(err.to_string())
+    }
+}
+
+impl From<ring::error::Unspecified> for AuthenticatorError {
+    fn from(_: ring::error::Unspecified) -> Self {
+        AuthenticatorError::CryptoError
+    }
+}
+
+impl From<ring::error::KeyRejected> for AuthenticatorError {
+    fn from(_: ring::error::KeyRejected) -> Self {
+        AuthenticatorError::CryptoError
     }
 }
 
