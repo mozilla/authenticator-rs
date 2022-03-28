@@ -259,4 +259,10 @@ where
     fn get_shared_secret(&self) -> Option<&ECDHSecret> {
         <Self as HIDDevice>::get_shared_secret(self)
     }
+
+    fn cancel(&mut self) -> Result<(), HIDError> {
+        let cancel: u8 = HIDCmd::Cancel.into();
+        self.u2f_write(cancel, &[])?;
+        return Ok(());
+    }
 }

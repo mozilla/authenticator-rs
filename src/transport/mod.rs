@@ -105,4 +105,5 @@ where
     fn set_authenticator_info(&mut self, authenticator_info: AuthenticatorInfo);
     fn set_shared_secret(&mut self, secret: ECDHSecret);
     fn get_shared_secret(&self) -> Option<&ECDHSecret>;
+    fn cancel(&mut self) -> Result<(), HIDError>;
 }
