@@ -138,6 +138,10 @@ impl PinAuthCommand for MakeCredentials {
         &self.pin
     }
 
+    fn set_pin(&mut self, pin: Option<Pin>) {
+        self.pin = pin;
+    }
+
     fn pin_auth(&self) -> &Option<PinAuth> {
         &self.pin_auth
     }

@@ -6,7 +6,7 @@ use crate::consts::PARAMETER_SIZE;
 use crate::ctap2::commands::get_assertion::{GetAssertion, GetAssertionResult};
 use crate::ctap2::commands::make_credentials::{MakeCredentials, MakeCredentialsResult};
 use crate::ctap2::commands::{CommandError, PinAuthCommand, Request, StatusCode};
-use crate::errors::{self, AuthenticatorError, UnsupportedOption};
+use crate::errors::{self, AuthenticatorError, PinError, UnsupportedOption};
 use crate::statecallback::StateCallback;
 use crate::transport::device_selector::{
     BlinkResult, Device, DeviceBuildParameters, DeviceCommand, DeviceID, DeviceSelectorEvent,
@@ -372,6 +372,45 @@ impl StateMachineCtap2 {
         Some(dev)
     }
 
+    fn determine_pin_auth<T: PinAuthCommand, U>(
+        cmd: &mut T,
+        dev: &mut Device,
+        status_mutex: &Mutex<Sender<StatusUpdate>>,
+        callback: &StateCallback<crate::Result<U>>,
+    ) -> Result<(), ()> {
+        loop {
+            match cmd.determine_pin_auth(dev) {
+                Ok(_) => {
+                    break;
+                }
+                Err(AuthenticatorError::PinError(e)) => {
+                    error!("PIN Error detected. Sending it back and waiting for a reply");
+                    let (tx, rx) = channel();
+                    send_status(&status_mutex, crate::StatusUpdate::PinError(e, tx));
+                    match rx.recv() {
+                        Ok(pin) => {
+                            cmd.set_pin(Some(pin));
+                            continue;
+                        }
+                        Err(e) => {
+                            error!("Error when determining pinAuth: {:?}", e);
+                            callback.call(Err(AuthenticatorError::InternalError(String::from(
+                                "Pin callback returned error",
+                            ))));
+                            return Err(());
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Error when determining pinAuth: {:?}", e);
+                    callback.call(Err(e));
+                    return Err(());
+                }
+            };
+        }
+        Ok(())
+    }
+
     pub fn register(
         &mut self,
         timeout: u64,
@@ -432,14 +471,7 @@ impl StateMachineCtap2 {
                     }
 
                     // Second, ask for PIN and get the shared secret
-                    match makecred.determine_pin_auth(&mut dev) {
-                        Ok(x) => x,
-                        Err(e) => {
-                            error!("Error when determining pinAuth: {:?}", e);
-                            callback.call(Err(e));
-                            return;
-                        }
-                    };
+                    Self::determine_pin_auth(&mut makecred, &mut dev, &status_mutex, &callback);
                 }
                 debug!("------------------------------------------------------------------");
                 debug!("{:?}", makecred);
@@ -523,13 +555,7 @@ impl StateMachineCtap2 {
                     }
 
                     // Second, ask for PIN and get the shared secret
-                    match getassertion.determine_pin_auth(&mut dev) {
-                        Ok(x) => x,
-                        Err(e) => {
-                            callback.call(Err(e));
-                            return;
-                        }
-                    };
+                    Self::determine_pin_auth(&mut getassertion, &mut dev, &status_mutex, &callback);
 
                     // Third, use the shared secret in the extensions, if requested
                     if let Some(extension) = getassertion.extensions.hmac_secret.as_mut() {

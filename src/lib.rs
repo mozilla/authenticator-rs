@@ -5,6 +5,8 @@
 #[macro_use]
 mod util;
 
+use std::sync::mpsc::Sender;
+
 #[cfg(any(target_os = "linux"))]
 extern crate libudev;
 
@@ -38,7 +40,7 @@ pub use crate::capi::*;
 pub mod ctap2;
 pub use ctap2::attestation::AttestationObject;
 pub use ctap2::client_data::CollectedClientData;
-pub use ctap2::commands::client_pin::Pin;
+pub use ctap2::commands::client_pin::{Pin, PinError};
 pub use ctap2::AssertionObject;
 
 mod ctap2_capi;
@@ -93,11 +95,12 @@ pub enum SignResult {
 
 pub type Result<T> = std::result::Result<T, errors::AuthenticatorError>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum StatusUpdate {
     DeviceAvailable { dev_info: u2ftypes::U2FDeviceInfo },
     DeviceUnavailable { dev_info: u2ftypes::U2FDeviceInfo },
     Success { dev_info: u2ftypes::U2FDeviceInfo },
+    PinError(PinError, Sender<Pin>),
 }
 
 #[cfg(test)]

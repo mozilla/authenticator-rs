@@ -88,6 +88,7 @@ pub trait RequestCtap2: fmt::Debug {
 
 pub(crate) trait PinAuthCommand {
     fn pin(&self) -> &Option<Pin>;
+    fn set_pin(&mut self, pin: Option<Pin>);
     fn pin_auth(&self) -> &Option<PinAuth>;
     fn set_pin_auth(&mut self, pin_auth: Option<PinAuth>);
     fn client_data(&self) -> &CollectedClientData;
@@ -437,15 +438,12 @@ where
                 None,
             )))?;
 
-        let shared_secret = if let Some(shared_secret) = dev.get_shared_secret().cloned() {
-            shared_secret
-        } else {
-            let pin_command = GetKeyAgreement::new(&info)?;
-            let device_key_agreement = dev.send_cbor(&pin_command)?;
-            let shared_secret = device_key_agreement.shared_secret()?;
-            dev.set_shared_secret(shared_secret.clone());
-            shared_secret
-        };
+        // Not reusing the shared secret here, if it exists, since we might start again
+        // with a different PIN (e.g. if the last one was wrong)
+        let pin_command = GetKeyAgreement::new(&info)?;
+        let device_key_agreement = dev.send_cbor(&pin_command)?;
+        let shared_secret = device_key_agreement.shared_secret()?;
+        dev.set_shared_secret(shared_secret.clone());
 
         let pin_command = GetPinToken::new(&info, &shared_secret, &pin)?;
         let pin_token = dev.send_cbor(&pin_command)?;

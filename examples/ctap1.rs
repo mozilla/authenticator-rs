@@ -116,6 +116,9 @@ fn main() {
             Ok(StatusUpdate::Success { dev_info }) => {
                 println!("STATUS: success using device: {}", dev_info);
             }
+            Ok(StatusUpdate::PinError(..)) => {
+                panic!("STATUS: This can't happen for CTAP1!");
+            }
             Err(RecvError) => {
                 println!("STATUS: end");
                 return;
