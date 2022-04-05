@@ -397,7 +397,7 @@ impl PinToken {
         let mut out = [0u8; 16];
         out.copy_from_slice(&hmac[0..16]);
 
-        Ok(PinAuth(out))
+        Ok(PinAuth(out.to_vec()))
     }
 }
 
@@ -409,7 +409,13 @@ impl AsRef<[u8]> for PinToken {
 
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(Deserialize))]
-pub struct PinAuth([u8; 16]);
+pub struct PinAuth(Vec<u8>);
+
+impl PinAuth {
+    pub(crate) fn empty_pin_auth() -> Self {
+        PinAuth(vec![])
+    }
+}
 
 impl AsRef<[u8]> for PinAuth {
     fn as_ref(&self) -> &[u8] {
@@ -448,7 +454,7 @@ impl Pin {
         let len = output.len();
         output.copy_from_slice(&hasher.result().as_slice()[..len]);
 
-        PinAuth(output)
+        PinAuth(output.to_vec())
     }
 }
 

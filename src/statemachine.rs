@@ -8,12 +8,15 @@ use crate::ctap2::commands::make_credentials::{MakeCredentials, MakeCredentialsR
 use crate::ctap2::commands::{CommandError, PinAuthCommand, Request, StatusCode};
 use crate::errors::{self, AuthenticatorError, UnsupportedOption};
 use crate::statecallback::StateCallback;
-use crate::transport::platform::{device::Device, transaction::Transaction};
+use crate::transport::device_selector::{
+    BlinkResult, Device, DeviceBuildParameters, DeviceCommand, DeviceID, DeviceSelectorEvent,
+};
+use crate::transport::platform::transaction::Transaction;
 use crate::transport::{errors::HIDError, FidoDevice, Nonce};
 use crate::u2fprotocol::{u2f_init_device, u2f_is_keyhandle_valid, u2f_register, u2f_sign};
 use crate::u2ftypes::U2FDevice;
-use crate::{RegisterResult, SignResult};
-use std::sync::mpsc::Sender;
+use crate::{RegisterResult, SignResult, StatusUpdate};
+use std::sync::mpsc::{channel, Sender};
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
@@ -85,7 +88,7 @@ impl StateMachine {
         let cbc = callback.clone();
         let status_mutex = Mutex::new(status);
 
-        let transaction = Transaction::new(timeout, cbc.clone(), move |info, alive| {
+        let transaction = Transaction::new(timeout, cbc.clone(), move |info, _, _, alive| {
             // Create a new device.
             let dev = &mut match Device::new(info) {
                 Ok(dev) => dev,
@@ -177,7 +180,7 @@ impl StateMachine {
 
         let status_mutex = Mutex::new(status);
 
-        let transaction = Transaction::new(timeout, cbc.clone(), move |info, alive| {
+        let transaction = Transaction::new(timeout, cbc.clone(), move |info, _, _, alive| {
             // Create a new device.
             let dev = &mut match Device::new(info) {
                 Ok(dev) => dev,
@@ -296,6 +299,79 @@ impl StateMachineCtap2 {
         Default::default()
     }
 
+    fn init_and_select(
+        info: DeviceBuildParameters,
+        id: DeviceID,
+        selector: Sender<DeviceSelectorEvent>,
+        status_mutex: &Mutex<Sender<StatusUpdate>>,
+    ) -> Option<Device> {
+        // Create a new device.
+        let mut dev = match Device::new(info.clone()) {
+            Ok(dev) => dev,
+            Err(e) => {
+                info!("error happened with device: {}", e);
+                selector.send(DeviceSelectorEvent::NotAToken(id));
+                return None;
+            }
+        };
+
+        // Try initializing it.
+        if let Err(e) = dev.init(Nonce::CreateRandom) {
+            warn!("error while initializing device: {}", e);
+            selector.send(DeviceSelectorEvent::NotAToken(dev.id()));
+            return None;
+        }
+
+        let write_only_clone = match dev.clone_device_as_write_only() {
+            Ok(x) => x,
+            Err(_) => {
+                // There is probably something seriously wrong here, if this happens.
+                // So `NotAToken()` is probably too weak a response here.
+                warn!("error while cloning device: {:?}", dev.id());
+                selector.send(DeviceSelectorEvent::NotAToken(dev.id()));
+                return None;
+            }
+        };
+        let (tx, rx) = channel();
+        selector.send(DeviceSelectorEvent::ImAToken((write_only_clone, tx)));
+
+        send_status(
+            &status_mutex,
+            crate::StatusUpdate::DeviceAvailable {
+                dev_info: dev.get_device_info(),
+            },
+        );
+        // Blocking recv. DeviceSelector will tell us what to do
+        loop {
+            match rx.recv() {
+                Ok(DeviceCommand::Blink) => match dev.block_and_blick() {
+                    BlinkResult::DeviceSelected => {
+                        // User selected us. Let DeviceSelector know, so it can cancel all other
+                        // outstanding open blink-requests.
+                        selector.send(DeviceSelectorEvent::SelectedToken(dev.id()));
+                        break;
+                    }
+                    BlinkResult::Cancelled => {
+                        info!("Device {:?} was not selected", dev.id());
+                        return None;
+                    }
+                },
+                Ok(DeviceCommand::Removed) => {
+                    info!("Device {:?} was removed", dev.id());
+                    return None;
+                }
+                Ok(DeviceCommand::Continue) => {
+                    break;
+                }
+                Err(_) => {
+                    warn!("Error when trying to receive messages from DeviceSelector! Exiting.");
+                    return None;
+                }
+            }
+        }
+        Some(dev)
+    }
+
     pub fn register(
         &mut self,
         timeout: u64,
@@ -307,109 +383,101 @@ impl StateMachineCtap2 {
         self.cancel();
         let cbc = callback.clone();
         let status_mutex = Mutex::new(status);
-        let transaction = Transaction::new(timeout, cbc.clone(), move |info, _alive| {
-            // TODO(baloo): what is alive about? have to ask jcj
-            // Create a new device.
-            let dev = &mut match Device::new(info) {
-                Ok(dev) => dev,
-                Err(e) => {
-                    info!("error happened with device: {}", e);
-                    return;
-                }
-            };
-
-            // Try initializing it.
-            if let Err(e) = dev.init(Nonce::CreateRandom) {
-                warn!("error while initializing device: {}", e);
-                return;
-            }
-            send_status(
-                &status_mutex,
-                crate::StatusUpdate::DeviceAvailable {
-                    dev_info: dev.get_device_info(),
-                },
-            );
-            // TODO(baloo): not sure about this, have to ask
-            // We currently support none of the authenticator selection
-            // criteria because we can't ask tokens whether they do support
-            // those features. If flags are set, ignore all tokens for now.
-            //
-            // Technically, this is a ConstraintError because we shouldn't talk
-            // to this authenticator in the first place. But the result is the
-            // same anyway.
-            //if !flags.is_empty() {
-            //    return;
-            //}
-
-            // TODO(baloo): not sure about this, have to ask
-            // Iterate the exclude list and see if there are any matches.
-            // If so, we'll keep polling the device anyway to test for user
-            // consent, to be consistent with CTAP2 device behavior.
-            //let excluded = key_handles.iter().any(|key_handle| {
-            //    is_valid_transport(key_handle.transports)
-            //        && u2f_is_keyhandle_valid(dev, &challenge, &application, &key_handle.credential)
-            //            .unwrap_or(false) /* no match on failure */
-            //});
-
-            // TODO(MS): This is wasteful, but the current setup with read only-functions doesn't allow me
-            //           to modify "params" directly.
-            let mut makecred = params.clone();
-            if params.is_ctap2_request() {
-                // First check if extensions have been requested that are not supported by the device
-                if let Some(true) = params.extensions.hmac_secret {
-                    if let Some(auth) = dev.get_authenticator_info() {
-                        if !auth.supports_hmac_secret() {
-                            callback.call(Err(AuthenticatorError::UnsupportedOption(
-                                UnsupportedOption::HmacSecret,
-                            )));
-                            return;
-                        }
-                    }
-                }
-
-                // Second, ask for PIN and get the shared secret
-                match makecred.determine_pin_auth(dev) {
-                    Ok(x) => x,
-                    Err(e) => {
-                        callback.call(Err(e));
+        let transaction =
+            Transaction::new(timeout, cbc.clone(), move |info, id, selector, _alive| {
+                let mut dev = match Self::init_and_select(info, id, selector, &status_mutex) {
+                    None => {
                         return;
                     }
+                    Some(dev) => dev,
                 };
-            }
-            debug!("------------------------------------------------------------------");
-            debug!("{:?}", makecred);
-            debug!("------------------------------------------------------------------");
-            let resp = dev.send_msg(&makecred);
-            if resp.is_ok() {
+
+                info!("Device {:?} continues with the register process", dev.id());
+                // TODO(baloo): not sure about this, have to ask
+                // We currently support none of the authenticator selection
+                // criteria because we can't ask tokens whether they do support
+                // those features. If flags are set, ignore all tokens for now.
+                //
+                // Technically, this is a ConstraintError because we shouldn't talk
+                // to this authenticator in the first place. But the result is the
+                // same anyway.
+                //if !flags.is_empty() {
+                //    return;
+                //}
+
+                // TODO(baloo): not sure about this, have to ask
+                // Iterate the exclude list and see if there are any matches.
+                // If so, we'll keep polling the device anyway to test for user
+                // consent, to be consistent with CTAP2 device behavior.
+                //let excluded = key_handles.iter().any(|key_handle| {
+                //    is_valid_transport(key_handle.transports)
+                //        && u2f_is_keyhandle_valid(dev, &challenge, &application, &key_handle.credential)
+                //            .unwrap_or(false) /* no match on failure */
+                //});
+
+                // TODO(MS): This is wasteful, but the current setup with read only-functions doesn't allow me
+                //           to modify "params" directly.
+                let mut makecred = params.clone();
+                if params.is_ctap2_request() {
+                    // First check if extensions have been requested that are not supported by the device
+                    if let Some(true) = params.extensions.hmac_secret {
+                        if let Some(auth) = dev.get_authenticator_info() {
+                            if !auth.supports_hmac_secret() {
+                                callback.call(Err(AuthenticatorError::UnsupportedOption(
+                                    UnsupportedOption::HmacSecret,
+                                )));
+                                return;
+                            }
+                        }
+                    }
+
+                    // Second, ask for PIN and get the shared secret
+                    match makecred.determine_pin_auth(&mut dev) {
+                        Ok(x) => x,
+                        Err(e) => {
+                            error!("Error when determining pinAuth: {:?}", e);
+                            callback.call(Err(e));
+                            return;
+                        }
+                    };
+                }
+                debug!("------------------------------------------------------------------");
+                debug!("{:?}", makecred);
+                debug!("------------------------------------------------------------------");
+                let resp = dev.send_msg(&makecred);
+                if resp.is_ok() {
+                    send_status(
+                        &status_mutex,
+                        crate::StatusUpdate::Success {
+                            dev_info: dev.get_device_info(),
+                        },
+                    );
+                }
+                match resp {
+                    Ok(MakeCredentialsResult::CTAP2(attestation, client_data)) => {
+                        callback.call(Ok(RegisterResult::CTAP2(attestation, client_data)))
+                    }
+                    Ok(MakeCredentialsResult::CTAP1(data)) => {
+                        callback.call(Ok(RegisterResult::CTAP1(data, dev.get_device_info())))
+                    }
+
+                    Err(HIDError::DeviceNotSupported) | Err(HIDError::UnsupportedCommand) => {}
+                    Err(HIDError::Command(CommandError::StatusCode(
+                        StatusCode::ChannelBusy,
+                        _,
+                    ))) => {}
+                    Err(e) => {
+                        warn!("error happened: {}", e);
+                        callback.call(Err(AuthenticatorError::HIDError(e)));
+                    }
+                }
                 send_status(
                     &status_mutex,
-                    crate::StatusUpdate::Success {
+                    crate::StatusUpdate::DeviceUnavailable {
                         dev_info: dev.get_device_info(),
                     },
                 );
-            }
-            match resp {
-                Ok(MakeCredentialsResult::CTAP2(attestation, client_data)) => {
-                    callback.call(Ok(RegisterResult::CTAP2(attestation, client_data)))
-                }
-                Ok(MakeCredentialsResult::CTAP1(data)) => {
-                    callback.call(Ok(RegisterResult::CTAP1(data, dev.get_device_info())))
-                }
-
-                Err(HIDError::DeviceNotSupported) | Err(HIDError::UnsupportedCommand) => {}
-                Err(HIDError::Command(CommandError::StatusCode(StatusCode::ChannelBusy, _))) => {}
-                Err(e) => {
-                    warn!("error happened: {}", e);
-                    callback.call(Err(AuthenticatorError::HIDError(e)));
-                }
-            }
-            send_status(
-                &status_mutex,
-                crate::StatusUpdate::DeviceUnavailable {
-                    dev_info: dev.get_device_info(),
-                },
-            );
-        });
+            });
 
         self.transaction = Some(try_or!(transaction, |e| cbc.call(Err(e))));
     }
@@ -426,98 +494,93 @@ impl StateMachineCtap2 {
         let cbc = callback.clone();
         let status_mutex = Mutex::new(status);
 
-        let transaction = Transaction::new(timeout, callback.clone(), move |info, _alive| {
-            let dev = &mut match Device::new(info) {
-                Ok(dev) => dev,
-                Err(e) => {
-                    info!("error happened with device: {}", e);
-                    return;
-                }
-            };
-
-            // Try initializing it.
-            if let Err(e) = dev.init(Nonce::CreateRandom) {
-                warn!("error while initializing device: {}", e);
-                return;
-            }
-            send_status(
-                &status_mutex,
-                crate::StatusUpdate::DeviceAvailable {
-                    dev_info: dev.get_device_info(),
-                },
-            );
-
-            // TODO(MS): This is wasteful, but the current setup with read only-functions doesn't allow me
-            //           to modify "params" directly.
-            let mut getassertion = params.clone();
-            if params.is_ctap2_request() {
-                // First check if extensions have been requested that are not supported by the device
-                if let Some(_) = params.extensions.hmac_secret {
-                    if let Some(auth) = dev.get_authenticator_info() {
-                        if !auth.supports_hmac_secret() {
-                            callback.call(Err(AuthenticatorError::UnsupportedOption(
-                                UnsupportedOption::HmacSecret,
-                            )));
-                            return;
-                        }
-                    }
-                }
-
-                // Second, ask for PIN and get the shared secret
-                match getassertion.determine_pin_auth(dev) {
-                    Ok(x) => x,
-                    Err(e) => {
-                        callback.call(Err(e));
+        let transaction = Transaction::new(
+            timeout,
+            callback.clone(),
+            move |info, id, selector, _alive| {
+                let mut dev = match Self::init_and_select(info, id, selector, &status_mutex) {
+                    None => {
                         return;
                     }
+                    Some(dev) => dev,
                 };
 
-                // Third, use the shared secret in the extensions, if requested
-                if let Some(extension) = getassertion.extensions.hmac_secret.as_mut() {
-                    if let Some(secret) = dev.get_shared_secret() {
-                        match extension.calculate(secret) {
-                            Ok(x) => x,
-                            Err(e) => {
-                                callback.call(Err(e));
+                info!("Device {:?} continues with the signing process", dev.id());
+                // TODO(MS): This is wasteful, but the current setup with read only-functions doesn't allow me
+                //           to modify "params" directly.
+                let mut getassertion = params.clone();
+                if params.is_ctap2_request() {
+                    // First check if extensions have been requested that are not supported by the device
+                    if let Some(_) = params.extensions.hmac_secret {
+                        if let Some(auth) = dev.get_authenticator_info() {
+                            if !auth.supports_hmac_secret() {
+                                callback.call(Err(AuthenticatorError::UnsupportedOption(
+                                    UnsupportedOption::HmacSecret,
+                                )));
                                 return;
                             }
                         }
                     }
-                }
-            }
 
-            debug!("------------------------------------------------------------------");
-            debug!("{:?}", getassertion);
-            debug!("------------------------------------------------------------------");
+                    // Second, ask for PIN and get the shared secret
+                    match getassertion.determine_pin_auth(&mut dev) {
+                        Ok(x) => x,
+                        Err(e) => {
+                            callback.call(Err(e));
+                            return;
+                        }
+                    };
 
-            let resp = dev.send_msg(&getassertion);
-            match resp {
-                Ok(GetAssertionResult::CTAP1(resp)) => {
-                    let app_id = getassertion.rp.hash().as_ref().to_vec();
-                    let key_handle = getassertion.allow_list[0].id.clone();
+                    // Third, use the shared secret in the extensions, if requested
+                    if let Some(extension) = getassertion.extensions.hmac_secret.as_mut() {
+                        if let Some(secret) = dev.get_shared_secret() {
+                            match extension.calculate(secret) {
+                                Ok(x) => x,
+                                Err(e) => {
+                                    callback.call(Err(e));
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
 
-                    callback.call(Ok(SignResult::CTAP1(
-                        app_id,
-                        key_handle,
-                        resp,
-                        dev.get_device_info(),
-                    )))
+                debug!("------------------------------------------------------------------");
+                debug!("{:?}", getassertion);
+                debug!("------------------------------------------------------------------");
+
+                let resp = dev.send_msg(&getassertion);
+                match resp {
+                    Ok(GetAssertionResult::CTAP1(resp)) => {
+                        let app_id = getassertion.rp.hash().as_ref().to_vec();
+                        let key_handle = getassertion.allow_list[0].id.clone();
+
+                        callback.call(Ok(SignResult::CTAP1(
+                            app_id,
+                            key_handle,
+                            resp,
+                            dev.get_device_info(),
+                        )))
+                    }
+                    Ok(GetAssertionResult::CTAP2(assertion, client_data)) => {
+                        callback.call(Ok(SignResult::CTAP2(assertion, client_data)))
+                    }
+                    // TODO(baloo): if key_handle is invalid for this device, it
+                    //              should reply something like:
+                    //              CTAP2_ERR_INVALID_CREDENTIAL
+                    //              have to check
+                    Err(HIDError::DeviceNotSupported) | Err(HIDError::UnsupportedCommand) => {}
+                    Err(HIDError::Command(CommandError::StatusCode(
+                        StatusCode::ChannelBusy,
+                        _,
+                    ))) => {}
+                    Err(e) => {
+                        warn!("error happened: {}", e);
+                        callback.call(Err(AuthenticatorError::HIDError(e)));
+                    }
                 }
-                Ok(GetAssertionResult::CTAP2(assertion, client_data)) => {
-                    callback.call(Ok(SignResult::CTAP2(assertion, client_data)))
-                }
-                // TODO(baloo): if key_handle is invalid for this device, it
-                //              should reply something like:
-                //              CTAP2_ERR_INVALID_CREDENTIAL
-                //              have to check
-                Err(HIDError::DeviceNotSupported) | Err(HIDError::UnsupportedCommand) => {}
-                Err(HIDError::Command(CommandError::StatusCode(StatusCode::ChannelBusy, _))) => {}
-                Err(e) => {
-                    warn!("error happened: {}", e);
-                    callback.call(Err(AuthenticatorError::HIDError(e)));
-                }
-            }
-        });
+            },
+        );
 
         self.transaction = Some(try_or!(transaction, move |e| cbc.call(Err(e))));
     }
@@ -525,6 +588,7 @@ impl StateMachineCtap2 {
     // This blocks.
     pub fn cancel(&mut self) {
         if let Some(mut transaction) = self.transaction.take() {
+            info!("Statemachine was cancelled. Cancelling transaction now.");
             transaction.cancel();
         }
     }

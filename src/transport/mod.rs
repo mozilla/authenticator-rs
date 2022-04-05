@@ -2,9 +2,11 @@ use crate::consts::Capability;
 use crate::crypto::ECDHSecret;
 use crate::ctap2::commands::get_info::AuthenticatorInfo;
 use crate::ctap2::commands::{Request, RequestCtap1, RequestCtap2};
+use crate::transport::device_selector::BlinkResult;
 use crate::u2ftypes::U2FDevice;
 use std::fmt;
 
+pub mod device_selector;
 pub mod errors;
 pub mod hid;
 
@@ -61,6 +63,7 @@ where
     Self: fmt::Debug,
 {
     type BuildParameters;
+    type Id: fmt::Debug;
 
     fn send_msg<'msg, Out, Req: Request<Out>>(&mut self, msg: &'msg Req) -> Result<Out, HIDError> {
         if !self.initialized() {
@@ -106,4 +109,6 @@ where
     fn set_shared_secret(&mut self, secret: ECDHSecret);
     fn get_shared_secret(&self) -> Option<&ECDHSecret>;
     fn cancel(&mut self) -> Result<(), HIDError>;
+    fn id(&self) -> Self::Id;
+    fn block_and_blick(&mut self) -> BlinkResult;
 }

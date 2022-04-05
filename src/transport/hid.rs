@@ -1,14 +1,27 @@
 use crate::consts::{HIDCmd, CID_BROADCAST};
 use crate::crypto::ECDHSecret;
+use crate::ctap2::client_data::{Challenge, WebauthnType};
+use crate::ctap2::commands::client_pin::PinAuth;
 use crate::ctap2::commands::get_info::{AuthenticatorInfo, GetInfo};
 use crate::ctap2::commands::get_version::GetVersion;
-use crate::ctap2::commands::{RequestCtap1, RequestCtap2, Retryable};
+use crate::ctap2::commands::make_credentials::{
+    MakeCredentials, MakeCredentialsExtensions, MakeCredentialsOptions,
+};
+use crate::ctap2::commands::{
+    CommandError, PinAuthCommand, RequestCtap1, RequestCtap2, Retryable, StatusCode,
+};
+use crate::ctap2::server::{
+    PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty,
+    RelyingPartyWrapper, User,
+};
+use crate::transport::device_selector::BlinkResult;
 use crate::transport::{
     errors::{ApduErrorStatus, HIDError},
     FidoDevice, Nonce,
 };
 use crate::u2ftypes::{U2FDevice, U2FDeviceInfo, U2FHIDCont, U2FHIDInit, U2FHIDInitResp};
 use crate::util::io_err;
+use crate::CollectedClientData;
 use rand::{thread_rng, RngCore};
 use std::fmt;
 use std::io;
@@ -155,6 +168,7 @@ where
     <T as HIDDevice>::Id: fmt::Debug,
 {
     type BuildParameters = <Self as HIDDevice>::BuildParameters;
+    type Id = <Self as HIDDevice>::Id;
 
     fn send_cbor<'msg, Req: RequestCtap2>(
         &mut self,
@@ -264,5 +278,72 @@ where
         let cancel: u8 = HIDCmd::Cancel.into();
         self.u2f_write(cancel, &[])?;
         return Ok(());
+    }
+
+    fn id(&self) -> Self::Id {
+        <Self as HIDDevice>::id(self)
+    }
+
+    fn block_and_blick(&mut self) -> BlinkResult {
+        // if let Some(info) = self.get_authenticator_info() {
+        //     if info.versions.contains("FIDO_2_1") || info.versions.contains("FIDO_2_1_PRE") { /* TODO: Use blink request */
+        //     }
+        // } else {
+        // We need to fake a blink-request, because FIDO2.0 forgot to specify one
+        // See: https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html#using-pinToken-in-authenticatorMakeCredential
+        let mut msg = MakeCredentials::new(
+            CollectedClientData {
+                webauthn_type: WebauthnType::Create,
+                challenge: Challenge::new(vec![0, 1, 2, 3, 4]),
+                origin: String::new(),
+                cross_origin: false,
+                token_binding: None,
+            },
+            RelyingPartyWrapper::Data(RelyingParty {
+                id: String::from("make.me.blink"),
+                ..Default::default()
+            }),
+            Some(User {
+                id: vec![0],
+                name: Some(String::from("make.me.blink")),
+                ..Default::default()
+            }),
+            vec![PublicKeyCredentialParameters {
+                alg: crate::COSEAlgorithm::ES256,
+            }],
+            vec![],
+            MakeCredentialsOptions::default(),
+            MakeCredentialsExtensions::default(),
+            None,
+        );
+        // Using a zero-length pinAuth will trigger the device to blink
+        // For CTAP1, this gets ignored anyways and we do a 'normal' register
+        // command, which also just blinks.
+        msg.set_pin_auth(Some(PinAuth::empty_pin_auth()));
+        info!("Trying to blink: {:?}", &msg);
+
+        match self.send_msg(&msg) {
+            // Spec only says PinInvalid or PinNotSet should be returned on the fake touch-request,
+            // but Yubikeys for example return PinAuthInvalid. A successful return is also possible
+            // for CTAP1-tokens so we catch those here as well.
+            Ok(_)
+            | Err(HIDError::Command(CommandError::StatusCode(StatusCode::PinInvalid, _)))
+            | Err(HIDError::Command(CommandError::StatusCode(StatusCode::PinAuthInvalid, _)))
+            | Err(HIDError::Command(CommandError::StatusCode(StatusCode::PinNotSet, _))) => {
+                BlinkResult::DeviceSelected
+            }
+            // We cancelled the receive, because another device was selected.
+            Err(HIDError::Command(CommandError::StatusCode(StatusCode::KeepaliveCancel, _))) => {
+                debug!("Device {:?} got cancelled", &self);
+                BlinkResult::Cancelled
+            }
+            // Something unexpected happened, so we assume this device is not usable and interpreting
+            // this equivalent to being cancelled.
+            e => {
+                error!("Device {:?} received unexpected answer, so we assume an error occurred and we are NOT using this device (assuming the request was cancelled): {:?}", &self, e);
+                BlinkResult::Cancelled
+            }
+        }
+        // }
     }
 }

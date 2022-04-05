@@ -12,6 +12,7 @@ use crate::transport::HIDError;
 use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
 use crate::util::from_unix_result;
 use std::fs::OpenOptions;
+use std::hash::{Hash, Hasher};
 use std::io;
 use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;
@@ -77,7 +78,19 @@ impl Drop for Device {
 
 impl PartialEq for Device {
     fn eq(&self, other: &Device) -> bool {
+        // The path should be the only identifying member for a device
+        // If the path is the same, its the same device
         self.path == other.path
+    }
+}
+
+impl Eq for Device {}
+
+impl Hash for Device {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // The path should be the only identifying member for a device
+        // If the path is the same, its the same device
+        self.path.hash(state);
     }
 }
 

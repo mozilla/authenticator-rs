@@ -4,13 +4,17 @@
 
 use crate::errors;
 use crate::statecallback::StateCallback;
+use crate::transport::device_selector::{
+    DeviceBuildParameters, DeviceID, DeviceSelector, DeviceSelectorEvent,
+};
 use crate::transport::platform::monitor::Monitor;
 use runloop::RunLoop;
-use std::path::PathBuf;
+use std::sync::mpsc::Sender;
 
 pub struct Transaction {
     // Handle to the thread loop.
-    thread: Option<RunLoop>,
+    thread: RunLoop,
+    device_selector: DeviceSelector,
 }
 
 impl Transaction {
@@ -20,13 +24,18 @@ impl Transaction {
         new_device_cb: F,
     ) -> crate::Result<Self>
     where
-        F: Fn(PathBuf, &dyn Fn() -> bool) + Sync + Send + 'static,
+        F: Fn(DeviceBuildParameters, DeviceID, Sender<DeviceSelectorEvent>, &dyn Fn() -> bool)
+            + Sync
+            + Send
+            + 'static,
         T: 'static,
     {
+        let device_selector = DeviceSelector::run();
+        let selector_sender = device_selector.clone_sender();
         let thread = RunLoop::new_with_timeout(
             move |alive| {
                 // Create a new device monitor.
-                let mut monitor = Monitor::new(new_device_cb);
+                let mut monitor = Monitor::new(new_device_cb, selector_sender);
 
                 // Start polling for new devices.
                 try_or!(monitor.run(alive), |_| callback
@@ -42,12 +51,13 @@ impl Transaction {
         .map_err(|_| errors::AuthenticatorError::Platform)?;
 
         Ok(Self {
-            thread: Some(thread),
+            thread,
+            device_selector,
         })
     }
 
     pub fn cancel(&mut self) {
-        // This must never be None.
-        self.thread.take().unwrap().cancel();
+        info!("Transaction was cancelled.");
+        self.thread.cancel();
     }
 }

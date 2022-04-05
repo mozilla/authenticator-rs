@@ -39,7 +39,7 @@ impl RpIdHash {
     }
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, Default)]
 #[cfg_attr(test, derive(Deserialize))]
 pub struct RelyingParty {
     // TODO(baloo): spec is wrong !!!!111
@@ -80,7 +80,7 @@ impl RelyingPartyWrapper {
 }
 
 // TODO(baloo): should we rename this PublicKeyCredentialUserEntity ?
-#[derive(Debug, Serialize, Clone, Eq, PartialEq, Deserialize)]
+#[derive(Debug, Serialize, Clone, Eq, PartialEq, Deserialize, Default)]
 pub struct User {
     #[serde(with = "serde_bytes")]
     pub id: Vec<u8>,
