@@ -110,5 +110,5 @@ where
     fn get_shared_secret(&self) -> Option<&ECDHSecret>;
     fn cancel(&mut self) -> Result<(), HIDError>;
     fn id(&self) -> Self::Id;
-    fn block_and_blick(&mut self) -> BlinkResult;
+    fn block_and_blink(&mut self) -> BlinkResult;
 }

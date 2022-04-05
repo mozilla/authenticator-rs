@@ -344,7 +344,7 @@ impl StateMachineCtap2 {
         // Blocking recv. DeviceSelector will tell us what to do
         loop {
             match rx.recv() {
-                Ok(DeviceCommand::Blink) => match dev.block_and_blick() {
+                Ok(DeviceCommand::Blink) => match dev.block_and_blink() {
                     BlinkResult::DeviceSelected => {
                         // User selected us. Let DeviceSelector know, so it can cancel all other
                         // outstanding open blink-requests.

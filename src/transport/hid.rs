@@ -284,7 +284,7 @@ where
         <Self as HIDDevice>::id(self)
     }
 
-    fn block_and_blick(&mut self) -> BlinkResult {
+    fn block_and_blink(&mut self) -> BlinkResult {
         // if let Some(info) = self.get_authenticator_info() {
         //     if info.versions.contains("FIDO_2_1") || info.versions.contains("FIDO_2_1_PRE") { /* TODO: Use blink request */
         //     }
