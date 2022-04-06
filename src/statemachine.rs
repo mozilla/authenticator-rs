@@ -408,6 +408,14 @@ impl StateMachineCtap2 {
                 }
             };
         }
+
+        // CTAP 2.0 spec is a bit vague here, but CTAP 2.1 is very specific, that the request
+        // should either include pinAuth OR uv=true, but not both at the same time.
+        // Do not set user_verification, if pinAuth is provided
+        if cmd.pin_auth().is_some() {
+            cmd.unset_uv_option();
+        }
+
         Ok(())
     }
 

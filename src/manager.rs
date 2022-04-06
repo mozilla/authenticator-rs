@@ -329,11 +329,6 @@ impl AuthenticatorTransport for Manager {
                     token_binding: None,
                 };
 
-                // Do not set user_verification, if pin is provided
-                if args.pin.is_some() {
-                    args.options.user_verification = None;
-                }
-
                 MakeCredentials::new(
                     client_data,
                     RelyingPartyWrapper::Data(args.relying_party),
@@ -457,11 +452,6 @@ impl AuthenticatorTransport for Manager {
                     cross_origin: false,
                     token_binding: None,
                 };
-
-                // Do not set user_verification, if pin is provided
-                if args.pin.is_some() {
-                    args.options.user_verification = None;
-                }
 
                 let get_assertion = GetAssertion::new(
                     client_data.clone(),

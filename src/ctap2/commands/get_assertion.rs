@@ -235,6 +235,10 @@ impl PinAuthCommand for GetAssertion {
     fn client_data(&self) -> &CollectedClientData {
         &self.client_data
     }
+
+    fn unset_uv_option(&mut self) {
+        self.options.user_verification = None;
+    }
 }
 
 impl Serialize for GetAssertion {

@@ -92,6 +92,7 @@ pub(crate) trait PinAuthCommand {
     fn pin_auth(&self) -> &Option<PinAuth>;
     fn set_pin_auth(&mut self, pin_auth: Option<PinAuth>);
     fn client_data(&self) -> &CollectedClientData;
+    fn unset_uv_option(&mut self);
     fn determine_pin_auth<D: FidoDevice>(&mut self, dev: &mut D) -> Result<(), AuthenticatorError> {
         if !dev.supports_ctap2() {
             self.set_pin_auth(None);
