@@ -31,22 +31,42 @@ fn poll(fds: &mut Vec<::libc::pollfd>) -> io::Result<()> {
 
 pub struct Monitor<F>
 where
-    F: Fn(PathBuf, PathBuf, Sender<DeviceSelectorEvent>, &dyn Fn() -> bool) + Sync,
+    F: Fn(
+            PathBuf,
+            PathBuf,
+            Sender<DeviceSelectorEvent>,
+            Sender<crate::StatusUpdate>,
+            &dyn Fn() -> bool,
+        ) + Sync,
 {
     runloops: HashMap<PathBuf, RunLoop>,
     new_device_cb: Arc<F>,
     selector_sender: Sender<DeviceSelectorEvent>,
+    status_sender: Sender<crate::StatusUpdate>,
 }
 
 impl<F> Monitor<F>
 where
-    F: Fn(PathBuf, PathBuf, Sender<DeviceSelectorEvent>, &dyn Fn() -> bool) + Send + Sync + 'static,
+    F: Fn(
+            PathBuf,
+            PathBuf,
+            Sender<DeviceSelectorEvent>,
+            Sender<crate::StatusUpdate>,
+            &dyn Fn() -> bool,
+        ) + Send
+        + Sync
+        + 'static,
 {
-    pub fn new(new_device_cb: F, selector_sender: Sender<DeviceSelectorEvent>) -> Self {
+    pub fn new(
+        new_device_cb: F,
+        selector_sender: Sender<DeviceSelectorEvent>,
+        status_sender: Sender<crate::StatusUpdate>,
+    ) -> Self {
         Self {
             runloops: HashMap::new(),
             new_device_cb: Arc::new(new_device_cb),
             selector_sender,
+            status_sender,
         }
     }
 
@@ -118,13 +138,14 @@ where
         let f = self.new_device_cb.clone();
         let key = path.clone();
         let selector_sender = self.selector_sender.clone();
+        let status_sender = self.status_sender.clone();
         debug!("Adding device {}", path.to_string_lossy());
 
         let runloop = RunLoop::new(move |alive| {
             if alive() {
                 // Yes, we have to send the path twice, because BuildParameters and
                 // Device::Id are the same thing here, but for Mac, it is not.
-                f(path.clone(), path, selector_sender, alive);
+                f(path.clone(), path, selector_sender, status_sender, alive);
             }
         });
 

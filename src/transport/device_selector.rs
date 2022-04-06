@@ -1,3 +1,4 @@
+use crate::send_status;
 pub use crate::transport::platform::device::Device;
 use crate::transport::FidoDevice;
 use runloop::RunLoop;
@@ -38,7 +39,7 @@ pub struct DeviceSelector {
 }
 
 impl DeviceSelector {
-    pub fn run() -> Self {
+    pub fn run(status: Sender<crate::StatusUpdate>) -> Self {
         let (selector_send, selector_rec) = channel();
         // let new_device_callback = Arc::new(new_device_cb);
         let runloop = RunLoop::new(move |alive| {
@@ -151,6 +152,7 @@ impl DeviceSelector {
                         tokens.values().for_each(|tx| {
                             let _ = tx.send(DeviceCommand::Blink);
                         });
+                        send_status(&status, crate::StatusUpdate::SelectDeviceNotice);
                     }
                 }
             }

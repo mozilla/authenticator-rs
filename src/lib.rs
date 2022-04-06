@@ -101,6 +101,14 @@ pub enum StatusUpdate {
     DeviceUnavailable { dev_info: u2ftypes::U2FDeviceInfo },
     Success { dev_info: u2ftypes::U2FDeviceInfo },
     PinError(PinError, Sender<Pin>),
+    SelectDeviceNotice,
+}
+
+pub(crate) fn send_status(status: &Sender<StatusUpdate>, msg: StatusUpdate) {
+    match status.send(msg) {
+        Ok(_) => {}
+        Err(e) => error!("Couldn't send status: {:?}", e),
+    };
 }
 
 #[cfg(test)]

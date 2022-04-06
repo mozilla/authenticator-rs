@@ -65,6 +65,9 @@ fn register_user(manager: &mut AuthenticatorService, username: &str, timeout_ms:
             Ok(StatusUpdate::Success { dev_info }) => {
                 println!("STATUS: success using device: {}", dev_info);
             }
+            Ok(StatusUpdate::SelectDeviceNotice) => {
+                println!("STATUS: Please select a device by touching one of them.");
+            }
             Ok(StatusUpdate::PinError(error, sender)) => match error {
                 PinError::PinRequired => {
                     let raw_pin = rpassword::prompt_password_stderr("Enter PIN: ")
@@ -247,6 +250,9 @@ fn main() {
             }
             Ok(StatusUpdate::Success { dev_info }) => {
                 println!("STATUS: success using device: {}", dev_info);
+            }
+            Ok(StatusUpdate::SelectDeviceNotice) => {
+                println!("STATUS: Please select a device by touching one of them.");
             }
             Ok(StatusUpdate::PinError(error, sender)) => match error {
                 PinError::PinRequired => {

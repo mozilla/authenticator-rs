@@ -21,21 +21,28 @@ impl Transaction {
     pub fn new<F, T>(
         timeout: u64,
         callback: StateCallback<crate::Result<T>>,
+        status: Sender<crate::StatusUpdate>,
         new_device_cb: F,
     ) -> crate::Result<Self>
     where
-        F: Fn(DeviceBuildParameters, DeviceID, Sender<DeviceSelectorEvent>, &dyn Fn() -> bool)
-            + Sync
+        F: Fn(
+                DeviceBuildParameters,
+                DeviceID,
+                Sender<DeviceSelectorEvent>,
+                Sender<crate::StatusUpdate>,
+                &dyn Fn() -> bool,
+            ) + Sync
             + Send
             + 'static,
         T: 'static,
     {
-        let device_selector = DeviceSelector::run();
+        let status_sender = status.clone();
+        let device_selector = DeviceSelector::run(status);
         let selector_sender = device_selector.clone_sender();
         let thread = RunLoop::new_with_timeout(
             move |alive| {
                 // Create a new device monitor.
-                let mut monitor = Monitor::new(new_device_cb, selector_sender);
+                let mut monitor = Monitor::new(new_device_cb, selector_sender, status_sender);
 
                 // Start polling for new devices.
                 try_or!(monitor.run(alive), |_| callback
