@@ -2,14 +2,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+use super::winapi::DeviceCapabilities;
+use crate::consts::{CID_BROADCAST, FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID, MAX_HID_RPT_SIZE};
+use crate::transport::hid::HIDDevice;
+use crate::transport::{AuthenticatorInfo, ECDHSecret, FidoDevice, HIDError};
+use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::io::{Read, Write};
 use std::os::windows::io::AsRawHandle;
-
-use super::winapi::DeviceCapabilities;
-use crate::consts::{CID_BROADCAST, FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID, MAX_HID_RPT_SIZE};
-use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
 
 #[derive(Debug)]
 pub struct Device {
@@ -154,3 +155,5 @@ impl HIDDevice for Device {
         self.authenticator_info = Some(authenticator_info);
     }
 }
+
+impl FidoDevice for Device {}

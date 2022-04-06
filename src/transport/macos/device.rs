@@ -7,9 +7,7 @@ extern crate log;
 use crate::consts::{CID_BROADCAST, MAX_HID_RPT_SIZE};
 use crate::transport::hid::HIDDevice;
 use crate::transport::platform::iokit::*;
-use crate::transport::AuthenticatorInfo;
-use crate::transport::ECDHSecret;
-use crate::transport::HIDError;
+use crate::transport::{AuthenticatorInfo, ECDHSecret, FidoDevice, HIDError};
 use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
 use core_foundation::base::*;
 use core_foundation::string::*;
@@ -212,3 +210,5 @@ impl HIDDevice for Device {
         self.authenticator_info = Some(authenticator_info);
     }
 }
+
+impl FidoDevice for Device {}
