@@ -1,13 +1,13 @@
 use crate::send_status;
+use crate::transport::hid::HIDDevice;
 pub use crate::transport::platform::device::Device;
-use crate::transport::FidoDevice;
 use runloop::RunLoop;
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::time::Duration;
 
-pub type DeviceID = <Device as FidoDevice>::Id;
-pub type DeviceBuildParameters = <Device as FidoDevice>::BuildParameters;
+pub type DeviceID = <Device as HIDDevice>::Id;
+pub type DeviceBuildParameters = <Device as HIDDevice>::BuildParameters;
 
 trait DeviceSelectorEventMarker {}
 

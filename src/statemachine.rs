@@ -12,7 +12,7 @@ use crate::transport::device_selector::{
     BlinkResult, Device, DeviceBuildParameters, DeviceCommand, DeviceID, DeviceSelectorEvent,
 };
 use crate::transport::platform::transaction::Transaction;
-use crate::transport::{errors::HIDError, FidoDevice, Nonce};
+use crate::transport::{errors::HIDError, hid::HIDDevice, FidoDevice, Nonce};
 use crate::u2fprotocol::{u2f_init_device, u2f_is_keyhandle_valid, u2f_register, u2f_sign};
 use crate::u2ftypes::U2FDevice;
 use crate::{send_status, RegisterResult, SignResult, StatusUpdate};
@@ -306,7 +306,7 @@ impl StateMachineCtap2 {
         status: &Sender<StatusUpdate>,
     ) -> Option<Device> {
         // Create a new device.
-        let mut dev = match Device::new(info.clone()) {
+        let mut dev = match Device::new(info) {
             Ok(dev) => dev,
             Err(e) => {
                 info!("error happened with device: {}", e);
@@ -340,7 +340,7 @@ impl StateMachineCtap2 {
             .ok()?;
 
         send_status(
-            &status,
+            status,
             crate::StatusUpdate::DeviceAvailable {
                 dev_info: dev.get_device_info(),
             },
@@ -392,7 +392,7 @@ impl StateMachineCtap2 {
                 Err(AuthenticatorError::PinError(e)) => {
                     info!("PIN Error detected. Sending it back and waiting for a reply");
                     let (tx, rx) = channel();
-                    send_status(&status, crate::StatusUpdate::PinError(e, tx));
+                    send_status(status, crate::StatusUpdate::PinError(e, tx));
                     match rx.recv() {
                         Ok(pin) => {
                             cmd.set_pin(Some(pin));
@@ -564,7 +564,7 @@ impl StateMachineCtap2 {
                 let mut getassertion = params.clone();
                 if params.is_ctap2_request() {
                     // First check if extensions have been requested that are not supported by the device
-                    if let Some(_) = params.extensions.hmac_secret {
+                    if params.extensions.hmac_secret.is_some() {
                         if let Some(auth) = dev.get_authenticator_info() {
                             if !auth.supports_hmac_secret() {
                                 callback.call(Err(AuthenticatorError::UnsupportedOption(

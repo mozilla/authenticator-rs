@@ -6,9 +6,7 @@ extern crate libc;
 use crate::consts::CID_BROADCAST;
 use crate::transport::hid::HIDDevice;
 use crate::transport::platform::{hidraw, monitor};
-use crate::transport::AuthenticatorInfo;
-use crate::transport::ECDHSecret;
-use crate::transport::HIDError;
+use crate::transport::{AuthenticatorInfo, ECDHSecret, FidoDevice, HIDError};
 use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
 use crate::util::from_unix_result;
 use std::fs::OpenOptions;
@@ -59,9 +57,9 @@ impl Device {
         Ok(Self {
             path: self.path.clone(),
             fd,
-            in_rpt_size: self.in_rpt_size.clone(),
-            out_rpt_size: self.out_rpt_size.clone(),
-            cid: self.cid.clone(),
+            in_rpt_size: self.in_rpt_size,
+            out_rpt_size: self.out_rpt_size,
+            cid: self.cid,
             dev_info: self.dev_info.clone(),
             secret: self.secret.clone(),
             authenticator_info: self.authenticator_info.clone(),
@@ -201,3 +199,5 @@ impl HIDDevice for Device {
         self.authenticator_info = Some(authenticator_info);
     }
 }
+
+impl FidoDevice for Device {}
