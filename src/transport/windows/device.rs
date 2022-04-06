@@ -27,6 +27,8 @@ impl Device {
             file,
             cid: CID_BROADCAST,
             dev_info: None,
+            secret: None,
+            authenticator_info: None,
         })
     }
 
@@ -41,6 +43,16 @@ impl Device {
 impl PartialEq for Device {
     fn eq(&self, other: &Device) -> bool {
         self.path == other.path
+    }
+}
+
+impl Eq for Device {}
+
+impl Hash for Device {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // The path should be the only identifying member for a device
+        // If the path is the same, its the same device
+        self.path.hash(state);
     }
 }
 
@@ -65,7 +77,7 @@ impl Write for Device {
 }
 
 impl U2FDevice for Device {
-    fn get_cid<'a>(&'a self) -> &'a [u8; 4] {
+    fn get_cid(&self) -> &[u8; 4] {
         &self.cid
     }
 
@@ -93,5 +105,52 @@ impl U2FDevice for Device {
 
     fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {
         self.dev_info = Some(dev_info);
+    }
+}
+
+impl HIDDevice for Device {
+    type BuildParameters = String;
+    type Id = String;
+
+    fn new(path: String) -> Result<Self, HIDError> {
+        debug!("Opening device {:?}", path);
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .map_err(|e| HIDError::IO(Some(path.clone()), e))?;
+        Ok(Self {
+            path,
+            file,
+            cid: CID_BROADCAST,
+            dev_info: None,
+            secret: None,
+            authenticator_info: None,
+        })
+    }
+
+    fn initialized(&self) -> bool {
+        // During successful init, the broadcast channel id gets repplaced by an actual one
+        self.cid != CID_BROADCAST
+    }
+
+    fn id(&self) -> Self::Id {
+        self.path.clone()
+    }
+
+    fn get_shared_secret(&self) -> Option<&ECDHSecret> {
+        self.secret.as_ref()
+    }
+
+    fn set_shared_secret(&mut self, secret: ECDHSecret) {
+        self.secret = Some(secret);
+    }
+
+    fn get_authenticator_info(&self) -> Option<&AuthenticatorInfo> {
+        self.authenticator_info.as_ref()
+    }
+
+    fn set_authenticator_info(&mut self, authenticator_info: AuthenticatorInfo) {
+        self.authenticator_info = Some(authenticator_info);
     }
 }

@@ -2,31 +2,54 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+use crate::transport::device_selector::DeviceSelectorEvent;
 use crate::transport::platform::winapi::DeviceInfoSet;
 use runloop::RunLoop;
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::iter::FromIterator;
-use std::sync::Arc;
+use std::sync::{mpsc::Sender, Arc};
 use std::thread;
 use std::time::Duration;
 
 pub struct Monitor<F>
 where
-    F: Fn(String, &dyn Fn() -> bool) + Sync,
+    F: Fn(
+            String,
+            String,
+            Sender<DeviceSelectorEvent>,
+            Sender<crate::StatusUpdate>,
+            &dyn Fn() -> bool,
+        ) + Sync,
 {
     runloops: HashMap<String, RunLoop>,
     new_device_cb: Arc<F>,
+    selector_sender: Sender<DeviceSelectorEvent>,
+    status_sender: Sender<crate::StatusUpdate>,
 }
 
 impl<F> Monitor<F>
 where
-    F: Fn(String, &dyn Fn() -> bool) + Send + Sync + 'static,
+    F: Fn(
+            String,
+            String,
+            Sender<DeviceSelectorEvent>,
+            Sender<crate::StatusUpdate>,
+            &dyn Fn() -> bool,
+        ) + Send
+        + Sync
+        + 'static,
 {
-    pub fn new(new_device_cb: F) -> Self {
+    pub fn new(
+        new_device_cb: F,
+        selector_sender: Sender<DeviceSelectorEvent>,
+        status_sender: Sender<crate::StatusUpdate>,
+    ) -> Self {
         Self {
             runloops: HashMap::new(),
             new_device_cb: Arc::new(new_device_cb),
+            selector_sender,
+            status_sender,
         }
     }
 
@@ -42,8 +65,11 @@ where
                 self.remove_device(path);
             }
 
+            let paths : Vec<_> = devices.difference(&stored).collect();
+            self.selector_sender
+                 .send(DeviceSelectorEvent::DevicesAdded(paths.clone()))?;
             // Add devices that were plugged in.
-            for path in devices.difference(&stored) {
+            for path in paths {
                 self.add_device(path);
             }
 
@@ -64,10 +90,15 @@ where
         let f = self.new_device_cb.clone();
         let path = path.clone();
         let key = path.clone();
+        let selector_sender = self.selector_sender.clone();
+        let status_sender = self.status_sender.clone();
+        debug!("Adding device {}", path.to_string_lossy());
 
         let runloop = RunLoop::new(move |alive| {
             if alive() {
-                f(path, alive);
+                // Yes, we have to send the path twice, because BuildParameters and
+                // Device::Id are the same thing here, but for Mac, it is not.
+                f(path.clone(), path, selector_sender, status_sender, alive);
             }
         });
 
@@ -77,6 +108,11 @@ where
     }
 
     fn remove_device(&mut self, path: &String) {
+        let _ = self
+            .selector_sender
+            .send(DeviceSelectorEvent::DeviceRemoved(path.clone()));
+
+        debug!("Removing device {}", path);
         if let Some(runloop) = self.runloops.remove(path) {
             runloop.cancel();
         }

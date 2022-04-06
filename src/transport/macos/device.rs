@@ -89,6 +89,16 @@ impl PartialEq for Device {
     }
 }
 
+impl Eq for Device {}
+
+impl Hash for Device {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // The path should be the only identifying member for a device
+        // If the path is the same, its the same device
+        self.device_ref.hash(state);
+    }
+}
+
 impl Read for Device {
     fn read(&mut self, mut bytes: &mut [u8]) -> io::Result<usize> {
         let timeout = Duration::from_secs(READ_TIMEOUT);
@@ -172,7 +182,7 @@ impl U2FDevice for Device {
 
 impl HIDDevice for Device {
     type BuildParameters = (IOHIDDeviceRef, Receiver<Vec<u8>>);
-    type Id = [u8; 4];
+    type Id = IOHIDDeviceRef;
 
     fn new(dev_ids: Self::BuildParameters) -> Result<Self, HIDError> {
         Device::new(dev_ids).map_err(|_| HIDError::DeviceNotInitialized)
@@ -183,7 +193,7 @@ impl HIDDevice for Device {
     }
 
     fn id(&self) -> Self::Id {
-        self.cid
+        self.device_ref
     }
 
     fn get_shared_secret(&self) -> Option<&ECDHSecret> {
