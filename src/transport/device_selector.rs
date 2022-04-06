@@ -116,11 +116,15 @@ impl DeviceSelector {
                         waiting_for_response.remove(&id);
                     }
                     DeviceSelectorEvent::ImAToken((dev, tx)) => {
-                        let thread = waiting_for_response.remove(&dev.id());
+                        let id = dev.id();
+                        let _ = waiting_for_response.remove(&id);
                         tokens.insert(dev, tx.clone());
                         if blinking {
                             // We are already blinking, so this new device should blink too.
-                            tx.send(DeviceCommand::Blink);
+                            if tx.send(DeviceCommand::Blink).is_err() {
+                                // Device thread died in the meantime (which shouldn't happen)
+                                tokens.retain(|dev, _| dev.id() != id);
+                            }
                             continue;
                         }
                     }
@@ -130,7 +134,11 @@ impl DeviceSelector {
                 if waiting_for_response.is_empty() && !tokens.is_empty() {
                     if tokens.len() == 1 {
                         let (dev, tx) = tokens.drain().next().unwrap(); // We just checked that it can't be empty
-                        tx.send(DeviceCommand::Continue);
+                        if tx.send(DeviceCommand::Continue).is_err() {
+                            // Device thread died in the meantime (which shouldn't happen).
+                            // Tokens is empty, so we just start over again
+                            continue;
+                        }
                         Self::cancel_all(tokens, Some(&dev.id()));
                         break; // We are done here
                     } else {
@@ -162,5 +170,9 @@ impl DeviceSelector {
             .into_keys()
             .filter(|x| exclude.map_or(true, |y| y != &x.id()))
             .for_each(|mut dev| dev.cancel().unwrap()); // TODO
+    }
+
+    pub fn stop(&mut self) {
+        self.runloop.cancel();
     }
 }

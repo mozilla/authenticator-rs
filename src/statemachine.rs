@@ -6,7 +6,7 @@ use crate::consts::PARAMETER_SIZE;
 use crate::ctap2::commands::get_assertion::{GetAssertion, GetAssertionResult};
 use crate::ctap2::commands::make_credentials::{MakeCredentials, MakeCredentialsResult};
 use crate::ctap2::commands::{CommandError, PinAuthCommand, Request, StatusCode};
-use crate::errors::{self, AuthenticatorError, PinError, UnsupportedOption};
+use crate::errors::{self, AuthenticatorError, UnsupportedOption};
 use crate::statecallback::StateCallback;
 use crate::transport::device_selector::{
     BlinkResult, Device, DeviceBuildParameters, DeviceCommand, DeviceID, DeviceSelectorEvent,
@@ -310,7 +310,7 @@ impl StateMachineCtap2 {
             Ok(dev) => dev,
             Err(e) => {
                 info!("error happened with device: {}", e);
-                selector.send(DeviceSelectorEvent::NotAToken(id));
+                selector.send(DeviceSelectorEvent::NotAToken(id)).ok()?;
                 return None;
             }
         };
@@ -318,7 +318,7 @@ impl StateMachineCtap2 {
         // Try initializing it.
         if let Err(e) = dev.init(Nonce::CreateRandom) {
             warn!("error while initializing device: {}", e);
-            selector.send(DeviceSelectorEvent::NotAToken(dev.id()));
+            selector.send(DeviceSelectorEvent::NotAToken(dev.id())).ok();
             return None;
         }
 
@@ -328,12 +328,16 @@ impl StateMachineCtap2 {
                 // There is probably something seriously wrong here, if this happens.
                 // So `NotAToken()` is probably too weak a response here.
                 warn!("error while cloning device: {:?}", dev.id());
-                selector.send(DeviceSelectorEvent::NotAToken(dev.id()));
+                selector
+                    .send(DeviceSelectorEvent::NotAToken(dev.id()))
+                    .ok()?;
                 return None;
             }
         };
         let (tx, rx) = channel();
-        selector.send(DeviceSelectorEvent::ImAToken((write_only_clone, tx)));
+        selector
+            .send(DeviceSelectorEvent::ImAToken((write_only_clone, tx)))
+            .ok()?;
 
         send_status(
             &status_mutex,
@@ -348,7 +352,9 @@ impl StateMachineCtap2 {
                     BlinkResult::DeviceSelected => {
                         // User selected us. Let DeviceSelector know, so it can cancel all other
                         // outstanding open blink-requests.
-                        selector.send(DeviceSelectorEvent::SelectedToken(dev.id()));
+                        selector
+                            .send(DeviceSelectorEvent::SelectedToken(dev.id()))
+                            .ok()?;
                         break;
                     }
                     BlinkResult::Cancelled => {
@@ -479,7 +485,11 @@ impl StateMachineCtap2 {
                     }
 
                     // Second, ask for PIN and get the shared secret
-                    Self::determine_pin_auth(&mut makecred, &mut dev, &status_mutex, &callback);
+                    if Self::determine_pin_auth(&mut makecred, &mut dev, &status_mutex, &callback)
+                        .is_err()
+                    {
+                        return;
+                    }
                 }
                 debug!("------------------------------------------------------------------");
                 debug!("{:?}", makecred);
@@ -563,7 +573,16 @@ impl StateMachineCtap2 {
                     }
 
                     // Second, ask for PIN and get the shared secret
-                    Self::determine_pin_auth(&mut getassertion, &mut dev, &status_mutex, &callback);
+                    if Self::determine_pin_auth(
+                        &mut getassertion,
+                        &mut dev,
+                        &status_mutex,
+                        &callback,
+                    )
+                    .is_err()
+                    {
+                        return;
+                    }
 
                     // Third, use the shared secret in the extensions, if requested
                     if let Some(extension) = getassertion.extensions.hmac_secret.as_mut() {

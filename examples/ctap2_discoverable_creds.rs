@@ -10,7 +10,7 @@ use authenticator::{
     ctap2::server::{
         PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, Transport, User,
     },
-    errors::{AuthenticatorError, PinError},
+    errors::PinError,
     statecallback::StateCallback,
     COSEAlgorithm, Pin, RegisterResult, SignResult, StatusUpdate,
 };
@@ -69,7 +69,7 @@ fn register_user(manager: &mut AuthenticatorService, username: &str, timeout_ms:
                 PinError::PinRequired => {
                     let raw_pin = rpassword::prompt_password_stderr("Enter PIN: ")
                         .expect("Failed to read PIN");
-                    sender.send(Pin::new(&raw_pin));
+                    sender.send(Pin::new(&raw_pin)).expect("Failed to send PIN");
                     continue;
                 }
                 PinError::InvalidPin(attempts) => {
@@ -82,7 +82,7 @@ fn register_user(manager: &mut AuthenticatorService, username: &str, timeout_ms:
                     );
                     let raw_pin = rpassword::prompt_password_stderr("Enter PIN: ")
                         .expect("Failed to read PIN");
-                    sender.send(Pin::new(&raw_pin));
+                    sender.send(Pin::new(&raw_pin)).expect("Failed to send PIN");
                     continue;
                 }
                 PinError::PinAuthBlocked => {
@@ -109,7 +109,7 @@ fn register_user(manager: &mut AuthenticatorService, username: &str, timeout_ms:
         display_name: None,
     };
     let origin = "https://example.com".to_string();
-    let mut ctap_args = RegisterArgsCtap2 {
+    let ctap_args = RegisterArgsCtap2 {
         challenge: chall_bytes.clone(),
         relying_party: RelyingParty {
             id: "example.com".to_string(),
@@ -252,7 +252,7 @@ fn main() {
                 PinError::PinRequired => {
                     let raw_pin = rpassword::prompt_password_stderr("Enter PIN: ")
                         .expect("Failed to read PIN");
-                    sender.send(Pin::new(&raw_pin));
+                    sender.send(Pin::new(&raw_pin)).expect("Failed to send PIN");
                     continue;
                 }
                 PinError::InvalidPin(attempts) => {
@@ -265,7 +265,7 @@ fn main() {
                     );
                     let raw_pin = rpassword::prompt_password_stderr("Enter PIN: ")
                         .expect("Failed to read PIN");
-                    sender.send(Pin::new(&raw_pin));
+                    sender.send(Pin::new(&raw_pin)).expect("Failed to send PIN");
                     continue;
                 }
                 PinError::PinAuthBlocked => {
@@ -288,7 +288,7 @@ fn main() {
     let mut challenge = Sha256::default();
     challenge.input(challenge_str.as_bytes());
     let chall_bytes = challenge.result().to_vec();
-    let mut ctap_args = SignArgsCtap2 {
+    let ctap_args = SignArgsCtap2 {
         challenge: chall_bytes,
         origin,
         relying_party_id: "example.com".to_string(),

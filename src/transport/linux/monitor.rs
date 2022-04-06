@@ -7,6 +7,7 @@ use libc::{c_int, c_short, c_ulong};
 use libudev::EventType;
 use runloop::RunLoop;
 use std::collections::HashMap;
+use std::error::Error;
 use std::io;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
@@ -49,7 +50,7 @@ where
         }
     }
 
-    pub fn run(&mut self, alive: &dyn Fn() -> bool) -> io::Result<()> {
+    pub fn run(&mut self, alive: &dyn Fn() -> bool) -> Result<(), Box<dyn Error>> {
         let ctx = libudev::Context::new()?;
 
         let mut enumerator = libudev::Enumerator::new(&ctx)?;
@@ -65,7 +66,7 @@ where
         // (8 devices should be added, but the first returns already before all
         // others are known to DeviceSelector)
         self.selector_sender
-            .send(DeviceSelectorEvent::DevicesAdded(paths.clone()));
+            .send(DeviceSelectorEvent::DevicesAdded(paths.clone()))?;
         for path in paths {
             self.add_device(path);
         }
@@ -101,7 +102,8 @@ where
 
         match (event.event_type(), path) {
             (EventType::Add, Some(path)) => {
-                self.selector_sender
+                let _ = self
+                    .selector_sender
                     .send(DeviceSelectorEvent::DevicesAdded(vec![path.clone()]));
                 self.add_device(path);
             }
@@ -132,7 +134,8 @@ where
     }
 
     fn remove_device(&mut self, path: &PathBuf) {
-        self.selector_sender
+        let _ = self
+            .selector_sender
             .send(DeviceSelectorEvent::DeviceRemoved(path.clone()));
 
         debug!("Removing device {}", path.to_string_lossy());

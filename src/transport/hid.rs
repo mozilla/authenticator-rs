@@ -11,8 +11,7 @@ use crate::ctap2::commands::{
     CommandError, PinAuthCommand, RequestCtap1, RequestCtap2, Retryable, StatusCode,
 };
 use crate::ctap2::server::{
-    PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty,
-    RelyingPartyWrapper, User,
+    PublicKeyCredentialParameters, RelyingParty, RelyingPartyWrapper, User,
 };
 use crate::transport::device_selector::BlinkResult;
 use crate::transport::{
