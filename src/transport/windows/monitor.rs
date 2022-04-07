@@ -14,13 +14,8 @@ use std::time::Duration;
 
 pub struct Monitor<F>
 where
-    F: Fn(
-            String,
-            String,
-            Sender<DeviceSelectorEvent>,
-            Sender<crate::StatusUpdate>,
-            &dyn Fn() -> bool,
-        ) + Sync,
+    F: Fn(String, Sender<DeviceSelectorEvent>, Sender<crate::StatusUpdate>, &dyn Fn() -> bool)
+        + Sync,
 {
     runloops: HashMap<String, RunLoop>,
     new_device_cb: Arc<F>,
@@ -30,13 +25,8 @@ where
 
 impl<F> Monitor<F>
 where
-    F: Fn(
-            String,
-            String,
-            Sender<DeviceSelectorEvent>,
-            Sender<crate::StatusUpdate>,
-            &dyn Fn() -> bool,
-        ) + Send
+    F: Fn(String, Sender<DeviceSelectorEvent>, Sender<crate::StatusUpdate>, &dyn Fn() -> bool)
+        + Send
         + Sync
         + 'static,
 {
@@ -53,7 +43,7 @@ where
         }
     }
 
-    pub fn run(&mut self, alive: &dyn Fn() -> bool) -> io::Result<()> {
+    pub fn run(&mut self, alive: &dyn Fn() -> bool) -> Result<(), Box<dyn Error>> {
         let mut stored = HashSet::new();
 
         while alive() {
@@ -65,9 +55,9 @@ where
                 self.remove_device(path);
             }
 
-            let paths : Vec<_> = devices.difference(&stored).collect();
+            let paths: Vec<_> = devices.difference(&stored).collect();
             self.selector_sender
-                 .send(DeviceSelectorEvent::DevicesAdded(paths.clone()))?;
+                .send(DeviceSelectorEvent::DevicesAdded(paths.clone()))?;
             // Add devices that were plugged in.
             for path in paths {
                 self.add_device(path);
@@ -92,13 +82,11 @@ where
         let key = path.clone();
         let selector_sender = self.selector_sender.clone();
         let status_sender = self.status_sender.clone();
-        debug!("Adding device {}", path.to_string_lossy());
+        debug!("Adding device {}", path);
 
         let runloop = RunLoop::new(move |alive| {
             if alive() {
-                // Yes, we have to send the path twice, because BuildParameters and
-                // Device::Id are the same thing here, but for Mac, it is not.
-                f(path.clone(), path, selector_sender, status_sender, alive);
+                f(path, selector_sender, status_sender, alive);
             }
         });
 

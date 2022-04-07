@@ -24,7 +24,6 @@ pub struct Monitor<F>
 where
     F: Fn(
             (IOHIDDeviceRef, Receiver<Vec<u8>>,
-            IOHIDDeviceRef,
             Sender<DeviceSelectorEvent>,
             Sender<crate::StatusUpdate>,
             &dyn Fn() -> bool,
@@ -45,7 +44,6 @@ impl<F> Monitor<F>
 where
     F: Fn(
             (IOHIDDeviceRef, Receiver<Vec<u8>>,
-            IOHIDDeviceRef,
             Sender<DeviceSelectorEvent>,
             Sender<crate::StatusUpdate>,
             &dyn Fn() -> bool,
@@ -174,7 +172,7 @@ where
         let runloop = RunLoop::new(move |alive| {
             // Ensure that the runloop is still alive.
             if alive() {
-                f((device_ref, rx), device_ref, selector_sender, status_sender, alive);
+                f((device_ref, rx), selector_sender, status_sender, alive);
             }
         });
 

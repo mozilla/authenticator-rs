@@ -31,13 +31,8 @@ fn poll(fds: &mut Vec<::libc::pollfd>) -> io::Result<()> {
 
 pub struct Monitor<F>
 where
-    F: Fn(
-            PathBuf,
-            PathBuf,
-            Sender<DeviceSelectorEvent>,
-            Sender<crate::StatusUpdate>,
-            &dyn Fn() -> bool,
-        ) + Sync,
+    F: Fn(PathBuf, Sender<DeviceSelectorEvent>, Sender<crate::StatusUpdate>, &dyn Fn() -> bool)
+        + Sync,
 {
     runloops: HashMap<PathBuf, RunLoop>,
     new_device_cb: Arc<F>,
@@ -47,13 +42,8 @@ where
 
 impl<F> Monitor<F>
 where
-    F: Fn(
-            PathBuf,
-            PathBuf,
-            Sender<DeviceSelectorEvent>,
-            Sender<crate::StatusUpdate>,
-            &dyn Fn() -> bool,
-        ) + Send
+    F: Fn(PathBuf, Sender<DeviceSelectorEvent>, Sender<crate::StatusUpdate>, &dyn Fn() -> bool)
+        + Send
         + Sync
         + 'static,
 {
@@ -143,9 +133,7 @@ where
 
         let runloop = RunLoop::new(move |alive| {
             if alive() {
-                // Yes, we have to send the path twice, because BuildParameters and
-                // Device::Id are the same thing here, but for Mac, it is not.
-                f(path.clone(), path, selector_sender, status_sender, alive);
+                f(path, selector_sender, status_sender, alive);
             }
         });
 

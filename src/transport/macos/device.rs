@@ -23,25 +23,13 @@ const READ_TIMEOUT: u64 = 15;
 pub struct Device {
     device_ref: IOHIDDeviceRef,
     cid: [u8; 4],
-    report_rx: Receiver<Vec<u8>>,
+    report_rx: Option<Receiver<Vec<u8>>>,
     dev_info: Option<U2FDeviceInfo>,
     secret: Option<ECDHSecret>,
     authenticator_info: Option<AuthenticatorInfo>,
 }
 
 impl Device {
-    pub fn new(dev_ids: (IOHIDDeviceRef, Receiver<Vec<u8>>)) -> io::Result<Self> {
-        let (device_ref, report_rx) = dev_ids;
-        Ok(Self {
-            device_ref,
-            cid: CID_BROADCAST,
-            report_rx,
-            dev_info: None,
-            secret: None,
-            authenticator_info: None,
-        })
-    }
-
     pub fn is_u2f(&self) -> bool {
         true
     }
@@ -99,17 +87,21 @@ impl Hash for Device {
 
 impl Read for Device {
     fn read(&mut self, mut bytes: &mut [u8]) -> io::Result<usize> {
-        let timeout = Duration::from_secs(READ_TIMEOUT);
-        let data = match self.report_rx.recv_timeout(timeout) {
-            Ok(v) => v,
-            Err(e) if e == RecvTimeoutError::Timeout => {
-                return Err(io::Error::new(io::ErrorKind::TimedOut, e));
-            }
-            Err(e) => {
-                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, e));
-            }
-        };
-        bytes.write(&data)
+        if let Some(rx) = self.report_rx {
+            let timeout = Duration::from_secs(READ_TIMEOUT);
+            let data = match rx.recv_timeout(timeout) {
+                Ok(v) => v,
+                Err(e) if e == RecvTimeoutError::Timeout => {
+                    return Err(io::Error::new(io::ErrorKind::TimedOut, e));
+                }
+                Err(e) => {
+                    return Err(io::Error::new(io::ErrorKind::UnexpectedEof, e));
+                }
+            };
+            bytes.write(&data)
+        } else {
+            Err(io::ErrorKind::Unsupported)
+        }
     }
 }
 
@@ -182,8 +174,16 @@ impl HIDDevice for Device {
     type BuildParameters = (IOHIDDeviceRef, Receiver<Vec<u8>>);
     type Id = IOHIDDeviceRef;
 
-    fn new(dev_ids: Self::BuildParameters) -> Result<Self, HIDError> {
-        Device::new(dev_ids).map_err(|_| HIDError::DeviceNotInitialized)
+    fn new(dev_ids: Self::BuildParameters) -> Result<Self, (HIDError, Self::Id)> {
+        let (device_ref, report_rx) = dev_ids;
+        Ok(Self {
+            device_ref,
+            cid: CID_BROADCAST,
+            report_rx,
+            dev_info: None,
+            secret: None,
+            authenticator_info: None,
+        })
     }
 
     fn initialized(&self) -> bool {
@@ -208,6 +208,19 @@ impl HIDDevice for Device {
 
     fn set_authenticator_info(&mut self, authenticator_info: AuthenticatorInfo) {
         self.authenticator_info = Some(authenticator_info);
+    }
+
+    /// This is used for cancellation of blocking read()-requests.
+    /// With this, we can clone the Device, pass it to another thread and call "cancel()" on that.
+    fn clone_device_as_write_only(&self) -> Result<Self, HIDError> {
+        Ok(Self {
+            device_ref: self.device_ref,
+            cid: self.cid,
+            report_rx: None,
+            dev_info: self.dev_info.clone(),
+            secret: self.secret.clone(),
+            authenticator_info: self.authenticator_info.clone(),
+        })
     }
 }
 

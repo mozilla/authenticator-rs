@@ -9,7 +9,7 @@ use crate::ctap2::commands::{CommandError, PinAuthCommand, Request, StatusCode};
 use crate::errors::{self, AuthenticatorError, UnsupportedOption};
 use crate::statecallback::StateCallback;
 use crate::transport::device_selector::{
-    BlinkResult, Device, DeviceBuildParameters, DeviceCommand, DeviceID, DeviceSelectorEvent,
+    BlinkResult, Device, DeviceBuildParameters, DeviceCommand, DeviceSelectorEvent,
 };
 use crate::transport::platform::transaction::Transaction;
 use crate::transport::{errors::HIDError, hid::HIDDevice, FidoDevice, Nonce};
@@ -78,7 +78,7 @@ impl StateMachine {
             timeout,
             cbc.clone(),
             status,
-            move |info, _, _, status, alive| {
+            move |info, _, status, alive| {
                 // Create a new device.
                 let dev = &mut match Device::new(info) {
                     Ok(dev) => dev,
@@ -178,7 +178,7 @@ impl StateMachine {
             timeout,
             cbc.clone(),
             status,
-            move |info, _, _, status, alive| {
+            move |info, _, status, alive| {
                 // Create a new device.
                 let dev = &mut match Device::new(info) {
                     Ok(dev) => dev,
@@ -301,14 +301,13 @@ impl StateMachineCtap2 {
 
     fn init_and_select(
         info: DeviceBuildParameters,
-        id: DeviceID,
         selector: Sender<DeviceSelectorEvent>,
         status: &Sender<StatusUpdate>,
     ) -> Option<Device> {
         // Create a new device.
         let mut dev = match Device::new(info) {
             Ok(dev) => dev,
-            Err(e) => {
+            Err((e, id)) => {
                 info!("error happened with device: {}", e);
                 selector.send(DeviceSelectorEvent::NotAToken(id)).ok()?;
                 return None;
@@ -439,8 +438,8 @@ impl StateMachineCtap2 {
             timeout,
             cbc.clone(),
             status,
-            move |info, id, selector, status, _alive| {
-                let mut dev = match Self::init_and_select(info, id, selector, &status) {
+            move |info, selector, status, _alive| {
+                let mut dev = match Self::init_and_select(info, selector, &status) {
                     None => {
                         return;
                     }
@@ -550,8 +549,8 @@ impl StateMachineCtap2 {
             timeout,
             callback.clone(),
             status,
-            move |info, id, selector, status, _alive| {
-                let mut dev = match Self::init_and_select(info, id, selector, &status) {
+            move |info, selector, status, _alive| {
+                let mut dev = match Self::init_and_select(info, selector, &status) {
                     None => {
                         return;
                     }

@@ -4,7 +4,9 @@ use crate::ctap2::commands::get_info::AuthenticatorInfo;
 use crate::transport::{errors::HIDError, Nonce};
 use crate::u2ftypes::{U2FDevice, U2FDeviceInfo, U2FHIDCont, U2FHIDInit, U2FHIDInitResp};
 use rand::{thread_rng, RngCore};
+use std::cmp::Eq;
 use std::fmt;
+use std::hash::Hash;
 use std::io;
 
 pub trait HIDDevice
@@ -15,29 +17,21 @@ where
     Self: Sized,
     Self: fmt::Debug,
 {
-    type BuildParameters;
-    type Id: fmt::Debug;
+    type BuildParameters: Sized;
+    type Id: fmt::Debug + PartialEq + Eq + Hash + Sized;
 
     // Open device, verify that it is indeed a CTAP device and potentially read initial values
-    fn new(parameters: Self::BuildParameters) -> Result<Self, HIDError>
-    where
-        Self::BuildParameters: Sized,
-        Self: Sized;
-
-    fn initialized(&self) -> bool;
-    // Currently only used for debugging to identify the device (e.g. /dev/some/path on Linux)
+    fn new(parameters: Self::BuildParameters) -> Result<Self, (HIDError, Self::Id)>;
     fn id(&self) -> Self::Id;
-
+    fn initialized(&self) -> bool;
     fn get_authenticator_info(&self) -> Option<&AuthenticatorInfo>;
     fn set_authenticator_info(&mut self, authenticator_info: AuthenticatorInfo);
     fn set_shared_secret(&mut self, secret: ECDHSecret);
     fn get_shared_secret(&self) -> Option<&ECDHSecret>;
+    fn clone_device_as_write_only(&self) -> Result<Self, HIDError>;
 
     // Initialize on a protocol-level
-    fn initialize(&mut self, noncecmd: Nonce) -> Result<(), HIDError>
-    where
-        Self::Id: fmt::Debug,
-    {
+    fn initialize(&mut self, noncecmd: Nonce) -> Result<(), HIDError> {
         if self.initialized() {
             return Ok(());
         }
@@ -88,10 +82,7 @@ where
         Ok(())
     }
 
-    fn sendrecv(&mut self, cmd: HIDCmd, send: &[u8]) -> io::Result<(HIDCmd, Vec<u8>)>
-    where
-        Self::Id: fmt::Debug,
-    {
+    fn sendrecv(&mut self, cmd: HIDCmd, send: &[u8]) -> io::Result<(HIDCmd, Vec<u8>)> {
         let cmd: u8 = cmd.into();
         self.u2f_write(cmd, send)?;
         loop {
@@ -102,10 +93,7 @@ where
         }
     }
 
-    fn u2f_write(&mut self, cmd: u8, send: &[u8]) -> io::Result<()>
-    where
-        Self::Id: fmt::Debug,
-    {
+    fn u2f_write(&mut self, cmd: u8, send: &[u8]) -> io::Result<()> {
         let mut count = U2FHIDInit::write(self, cmd, send)?;
 
         // Send continuation packets.
@@ -118,10 +106,7 @@ where
         Ok(())
     }
 
-    fn u2f_read(&mut self) -> io::Result<(HIDCmd, Vec<u8>)>
-    where
-        Self::Id: fmt::Debug,
-    {
+    fn u2f_read(&mut self) -> io::Result<(HIDCmd, Vec<u8>)> {
         // Now we read. This happens in 2 chunks: The initial packet, which has
         // the size we expect overall, then continuation packets, which will
         // fill in data until we have everything.

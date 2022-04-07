@@ -5,7 +5,7 @@
 use crate::errors;
 use crate::statecallback::StateCallback;
 use crate::transport::device_selector::{
-    DeviceBuildParameters, DeviceID, DeviceSelector, DeviceSelectorEvent,
+    DeviceBuildParameters, DeviceSelector, DeviceSelectorEvent,
 };
 use crate::transport::platform::monitor::Monitor;
 use runloop::RunLoop;
@@ -27,7 +27,6 @@ impl Transaction {
     where
         F: Fn(
                 DeviceBuildParameters,
-                DeviceID,
                 Sender<DeviceSelectorEvent>,
                 Sender<crate::StatusUpdate>,
                 &dyn Fn() -> bool,

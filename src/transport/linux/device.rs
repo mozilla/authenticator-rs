@@ -29,41 +29,8 @@ pub struct Device {
 }
 
 impl Device {
-    pub fn new(path: PathBuf) -> io::Result<Self> {
-        let fd = OpenOptions::new().read(true).write(true).open(&path)?;
-
-        let (in_rpt_size, out_rpt_size) = hidraw::read_hid_rpt_sizes_or_defaults(fd.as_raw_fd());
-        Ok(Self {
-            path,
-            fd,
-            in_rpt_size,
-            out_rpt_size,
-            cid: CID_BROADCAST,
-            dev_info: None,
-            secret: None,
-            authenticator_info: None,
-        })
-    }
-
     pub fn is_u2f(&self) -> bool {
         hidraw::is_u2f_device(self.fd.as_raw_fd())
-    }
-
-    /// This is used for cancellation of blocking read()-requests.
-    /// With this, we can clone the Device, pass it to another thread and call "cancel()" on that.
-    pub fn clone_device_as_write_only(&self) -> io::Result<Self> {
-        let fd = OpenOptions::new().write(true).open(&self.path)?;
-
-        Ok(Self {
-            path: self.path.clone(),
-            fd,
-            in_rpt_size: self.in_rpt_size,
-            out_rpt_size: self.out_rpt_size,
-            cid: self.cid,
-            dev_info: self.dev_info.clone(),
-            secret: self.secret.clone(),
-            authenticator_info: self.authenticator_info.clone(),
-        })
     }
 }
 
@@ -149,28 +116,29 @@ impl HIDDevice for Device {
     type BuildParameters = PathBuf;
     type Id = PathBuf;
 
-    fn new(path: PathBuf) -> Result<Self, HIDError> {
+    fn new(path: PathBuf) -> Result<Self, (HIDError, Self::Id)> {
         debug!("Opening device {:?}", path);
         let fd = OpenOptions::new()
             .read(true)
             .write(true)
             .open(&path)
-            .map_err(|e| HIDError::IO(Some(path.clone()), e))?;
+            .map_err(|e| (HIDError::IO(Some(path.clone()), e), path.clone()))?;
         let (in_rpt_size, out_rpt_size) = hidraw::read_hid_rpt_sizes_or_defaults(fd.as_raw_fd());
-        if hidraw::is_u2f_device(fd.as_raw_fd()) {
-            info!("new device {:?}", path);
-            Ok(Self {
-                path,
-                fd,
-                in_rpt_size,
-                out_rpt_size,
-                cid: CID_BROADCAST,
-                dev_info: None,
-                secret: None,
-                authenticator_info: None,
-            })
+        let res = Self {
+            path,
+            fd,
+            in_rpt_size,
+            out_rpt_size,
+            cid: CID_BROADCAST,
+            dev_info: None,
+            secret: None,
+            authenticator_info: None,
+        };
+        if res.is_u2f() {
+            info!("new device {:?}", res.path);
+            Ok(res)
         } else {
-            Err(HIDError::DeviceNotSupported)
+            Err((HIDError::DeviceNotSupported, res.path.clone()))
         }
     }
 
@@ -197,6 +165,26 @@ impl HIDDevice for Device {
 
     fn set_authenticator_info(&mut self, authenticator_info: AuthenticatorInfo) {
         self.authenticator_info = Some(authenticator_info);
+    }
+
+    /// This is used for cancellation of blocking read()-requests.
+    /// With this, we can clone the Device, pass it to another thread and call "cancel()" on that.
+    fn clone_device_as_write_only(&self) -> Result<Self, HIDError> {
+        let fd = OpenOptions::new()
+            .write(true)
+            .open(&self.path)
+            .map_err(|e| (HIDError::IO(Some(self.path.clone()), e)))?;
+
+        Ok(Self {
+            path: self.path.clone(),
+            fd,
+            in_rpt_size: self.in_rpt_size,
+            out_rpt_size: self.out_rpt_size,
+            cid: self.cid,
+            dev_info: self.dev_info.clone(),
+            secret: self.secret.clone(),
+            authenticator_info: self.authenticator_info.clone(),
+        })
     }
 }
 

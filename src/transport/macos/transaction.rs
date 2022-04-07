@@ -7,7 +7,7 @@ extern crate libc;
 use crate::errors;
 use crate::statecallback::StateCallback;
 use crate::transport::device_selector::{
-    DeviceBuildParameters, DeviceID, DeviceSelector, DeviceSelectorEvent,
+    DeviceBuildParameters, DeviceSelector, DeviceSelectorEvent,
 };
 use crate::transport::platform::iokit::{CFRunLoopEntryObserver, IOHIDDeviceRef, SendableRunLoop};
 use crate::transport::platform::monitor::Monitor;
@@ -36,7 +36,6 @@ impl Transaction {
     where
         F: Fn(
                 (IOHIDDeviceRef, Receiver<Vec<u8>>,
-                IOHIDDeviceRef,
                 Sender<DeviceSelectorEvent>,
                 Sender<crate::StatusUpdate>,
                 &dyn Fn() -> bool,

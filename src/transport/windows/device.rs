@@ -21,18 +21,6 @@ pub struct Device {
 }
 
 impl Device {
-    pub fn new(path: String) -> io::Result<Self> {
-        let file = OpenOptions::new().read(true).write(true).open(&path)?;
-        Ok(Self {
-            path,
-            file,
-            cid: CID_BROADCAST,
-            dev_info: None,
-            secret: None,
-            authenticator_info: None,
-        })
-    }
-
     pub fn is_u2f(&self) -> bool {
         match DeviceCapabilities::new(self.file.as_raw_handle()) {
             Ok(caps) => caps.usage() == FIDO_USAGE_U2FHID && caps.usage_page() == FIDO_USAGE_PAGE,
@@ -113,21 +101,27 @@ impl HIDDevice for Device {
     type BuildParameters = String;
     type Id = String;
 
-    fn new(path: String) -> Result<Self, HIDError> {
+    fn new(path: String) -> Result<Self, (HIDError, Self::Id)> {
         debug!("Opening device {:?}", path);
         let file = OpenOptions::new()
             .read(true)
             .write(true)
             .open(&path)
-            .map_err(|e| HIDError::IO(Some(path.clone()), e))?;
-        Ok(Self {
+            .map_err(|e| (HIDError::IO(Some(path.clone()), e)), path.clone())?;
+        let res = Self {
             path,
             file,
             cid: CID_BROADCAST,
             dev_info: None,
             secret: None,
             authenticator_info: None,
-        })
+        };
+        if res.is_u2f() {
+            info!("new device {:?}", res.path);
+            Ok(res)
+        } else {
+            Err((HIDError::DeviceNotSupported, res.path.clone()))
+        }
     }
 
     fn initialized(&self) -> bool {
@@ -153,6 +147,24 @@ impl HIDDevice for Device {
 
     fn set_authenticator_info(&mut self, authenticator_info: AuthenticatorInfo) {
         self.authenticator_info = Some(authenticator_info);
+    }
+
+    /// This is used for cancellation of blocking read()-requests.
+    /// With this, we can clone the Device, pass it to another thread and call "cancel()" on that.
+    fn clone_device_as_write_only(&self) -> Result<Self, HIDError> {
+        let fd = OpenOptions::new()
+            .write(true)
+            .open(&self.path)
+            .map_err(|e| (HIDError::IO(Some(self.path.clone()), e)))?;
+
+        Ok(Self {
+            path: self.path.clone(),
+            fd,
+            cid: self.cid,
+            dev_info: self.dev_info.clone(),
+            secret: self.secret.clone(),
+            authenticator_info: self.authenticator_info.clone(),
+        })
     }
 }
 
