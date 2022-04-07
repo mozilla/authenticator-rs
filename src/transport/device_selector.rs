@@ -11,17 +11,20 @@ pub type DeviceBuildParameters = <Device as HIDDevice>::BuildParameters;
 
 trait DeviceSelectorEventMarker {}
 
+#[derive(Debug, Clone, Copy)]
 pub enum BlinkResult {
     DeviceSelected,
     Cancelled,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum DeviceCommand {
     Blink,
     Continue,
     Removed,
 }
 
+#[derive(Debug)]
 pub enum DeviceSelectorEvent {
     Timeout,
     DevicesAdded(Vec<DeviceID>),
@@ -143,14 +146,29 @@ impl DeviceSelector {
                         Self::cancel_all(tokens, Some(&dev.id()));
                         break; // We are done here
                     } else {
-                        // TODO: Only blink if at least one token has a PIN or uv support, otherwise we can just
-                        //       send the regular request to all tokens (like we did for CTAP1) because that will
-                        //       just blink anyways, so we can skip one additional touch by the user.
-                        blinking = true;
+                        // We blink only, if the token either has a PIN set or some other
+                        // kind of user verification. If so, we can't send the request straight to them
+                        // because that could result in PIN-prompts from multiple devices, so then they
+                        // have to blink first.
+                        // BUT if they are either CTAP1 tokens or CTAP2 without uv, we can send the normal
+                        // request to them, and skip one additional user-interaction (touch).
+                        let needs_to_blink = tokens
+                            .keys()
+                            .filter_map(|d| d.get_authenticator_info())
+                            .any(|i| {
+                                matches!(i.options.user_verification, Some(true))
+                                    || matches!(i.options.client_pin, Some(true))
+                            });
+                        let cmd = if needs_to_blink {
+                            blinking = true;
+                            DeviceCommand::Blink
+                        } else {
+                            DeviceCommand::Continue
+                        };
                         // A send operation can only fail if the receiving end of a channel is disconnected, implying that the data could never be received.
                         // We ignore errors here for now, but should probably remove the device in such a case (even though it theoretically can't happen)
                         tokens.values().for_each(|tx| {
-                            let _ = tx.send(DeviceCommand::Blink);
+                            let _ = tx.send(cmd);
                         });
                         send_status(&status, crate::StatusUpdate::SelectDeviceNotice);
                     }

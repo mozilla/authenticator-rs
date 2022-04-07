@@ -301,7 +301,7 @@ impl StateMachineCtap2 {
 
     fn init_and_select(
         info: DeviceBuildParameters,
-        selector: Sender<DeviceSelectorEvent>,
+        selector: &Sender<DeviceSelectorEvent>,
         status: &Sender<StatusUpdate>,
     ) -> Option<Device> {
         // Create a new device.
@@ -439,7 +439,7 @@ impl StateMachineCtap2 {
             cbc.clone(),
             status,
             move |info, selector, status, _alive| {
-                let mut dev = match Self::init_and_select(info, selector, &status) {
+                let mut dev = match Self::init_and_select(info, &selector, &status) {
                     None => {
                         return;
                     }
@@ -503,6 +503,11 @@ impl StateMachineCtap2 {
                             dev_info: dev.get_device_info(),
                         },
                     );
+                    // The DeviceSelector could already be dead, but it might also wait
+                    // for us to respond, in order to cancel all other tokens in case
+                    // we skipped the "blinking"-action and went straight for the actual
+                    // request.
+                    let _ = selector.send(DeviceSelectorEvent::SelectedToken(dev.id()));
                 }
                 match resp {
                     Ok(MakeCredentialsResult::CTAP2(attestation, client_data)) => {
@@ -550,7 +555,7 @@ impl StateMachineCtap2 {
             callback.clone(),
             status,
             move |info, selector, status, _alive| {
-                let mut dev = match Self::init_and_select(info, selector, &status) {
+                let mut dev = match Self::init_and_select(info, &selector, &status) {
                     None => {
                         return;
                     }
@@ -600,6 +605,19 @@ impl StateMachineCtap2 {
                 debug!("------------------------------------------------------------------");
 
                 let resp = dev.send_msg(&getassertion);
+                if resp.is_ok() {
+                    send_status(
+                        &status,
+                        crate::StatusUpdate::Success {
+                            dev_info: dev.get_device_info(),
+                        },
+                    );
+                    // The DeviceSelector could already be dead, but it might also wait
+                    // for us to respond, in order to cancel all other tokens in case
+                    // we skipped the "blinking"-action and went straight for the actual
+                    // request.
+                    let _ = selector.send(DeviceSelectorEvent::SelectedToken(dev.id()));
+                }
                 match resp {
                     Ok(GetAssertionResult::CTAP1(resp)) => {
                         let app_id = getassertion.rp.hash().as_ref().to_vec();
