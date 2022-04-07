@@ -19,6 +19,7 @@ pub(crate) mod get_info;
 pub(crate) mod get_next_assertion;
 pub(crate) mod get_version;
 pub(crate) mod make_credentials;
+pub(crate) mod selection;
 
 pub trait Request<T>
 where
@@ -144,6 +145,7 @@ pub(crate) trait PinAuthCommand {
 }
 
 // Spec: https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html#authenticator-api
+// and: https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-20210615.html#authenticator-api
 #[repr(u8)]
 #[derive(Debug)]
 pub enum Command {
@@ -153,6 +155,7 @@ pub enum Command {
     ClientPin = 0x06,
     Reset = 0x07,
     GetNextAssertion = 0x08,
+    Selection = 0x0B,
 }
 
 impl Command {

@@ -7,6 +7,7 @@ use crate::ctap2::commands::get_version::GetVersion;
 use crate::ctap2::commands::make_credentials::{
     MakeCredentials, MakeCredentialsExtensions, MakeCredentialsOptions,
 };
+use crate::ctap2::commands::selection::Selection;
 use crate::ctap2::commands::{
     CommandError, PinAuthCommand, Request, RequestCtap1, RequestCtap2, Retryable, StatusCode,
 };
@@ -162,44 +163,50 @@ pub trait FidoDevice: HIDDevice {
     }
 
     fn block_and_blink(&mut self) -> BlinkResult {
-        // if let Some(info) = self.get_authenticator_info() {
-        //     if info.versions.contains("FIDO_2_1") || info.versions.contains("FIDO_2_1_PRE") { /* TODO: Use blink request */
-        //     }
-        // } else {
-        // We need to fake a blink-request, because FIDO2.0 forgot to specify one
-        // See: https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html#using-pinToken-in-authenticatorMakeCredential
-        let mut msg = MakeCredentials::new(
-            CollectedClientData {
-                webauthn_type: WebauthnType::Create,
-                challenge: Challenge::new(vec![0, 1, 2, 3, 4]),
-                origin: String::new(),
-                cross_origin: false,
-                token_binding: None,
-            },
-            RelyingPartyWrapper::Data(RelyingParty {
-                id: String::from("make.me.blink"),
-                ..Default::default()
-            }),
-            Some(User {
-                id: vec![0],
-                name: Some(String::from("make.me.blink")),
-                ..Default::default()
-            }),
-            vec![PublicKeyCredentialParameters {
-                alg: crate::COSEAlgorithm::ES256,
-            }],
-            vec![],
-            MakeCredentialsOptions::default(),
-            MakeCredentialsExtensions::default(),
-            None,
-        );
-        // Using a zero-length pinAuth will trigger the device to blink
-        // For CTAP1, this gets ignored anyways and we do a 'normal' register
-        // command, which also just blinks.
-        msg.set_pin_auth(Some(PinAuth::empty_pin_auth()));
-        info!("Trying to blink: {:?}", &msg);
-
-        match self.send_msg(&msg) {
+        let resp;
+        let supports_select_cmd = self
+            .get_authenticator_info()
+            .map_or(false, |i| i.versions.contains(&String::from("FIDO_2_1")));
+        if supports_select_cmd {
+            let msg = Selection {};
+            resp = self.send_cbor(&msg);
+        } else {
+            // We need to fake a blink-request, because FIDO2.0 forgot to specify one
+            // See: https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html#using-pinToken-in-authenticatorMakeCredential
+            let mut msg = MakeCredentials::new(
+                CollectedClientData {
+                    webauthn_type: WebauthnType::Create,
+                    challenge: Challenge::new(vec![0, 1, 2, 3, 4]),
+                    origin: String::new(),
+                    cross_origin: false,
+                    token_binding: None,
+                },
+                RelyingPartyWrapper::Data(RelyingParty {
+                    id: String::from("make.me.blink"),
+                    ..Default::default()
+                }),
+                Some(User {
+                    id: vec![0],
+                    name: Some(String::from("make.me.blink")),
+                    ..Default::default()
+                }),
+                vec![PublicKeyCredentialParameters {
+                    alg: crate::COSEAlgorithm::ES256,
+                }],
+                vec![],
+                MakeCredentialsOptions::default(),
+                MakeCredentialsExtensions::default(),
+                None,
+            );
+            // Using a zero-length pinAuth will trigger the device to blink
+            // For CTAP1, this gets ignored anyways and we do a 'normal' register
+            // command, which also just blinks.
+            msg.set_pin_auth(Some(PinAuth::empty_pin_auth()));
+            info!("Trying to blink: {:?}", &msg);
+            // We don't care about the Ok-value, just if it is Ok or not
+            resp = self.send_msg(&msg).map(|_| ());
+        }
+        match resp {
             // Spec only says PinInvalid or PinNotSet should be returned on the fake touch-request,
             // but Yubikeys for example return PinAuthInvalid. A successful return is also possible
             // for CTAP1-tokens so we catch those here as well.
@@ -210,7 +217,10 @@ pub trait FidoDevice: HIDDevice {
                 BlinkResult::DeviceSelected
             }
             // We cancelled the receive, because another device was selected.
-            Err(HIDError::Command(CommandError::StatusCode(StatusCode::KeepaliveCancel, _))) => {
+            Err(HIDError::Command(CommandError::StatusCode(StatusCode::KeepaliveCancel, _)))
+            | Err(HIDError::Command(CommandError::StatusCode(StatusCode::OperationDenied, _)))
+            | Err(HIDError::Command(CommandError::StatusCode(StatusCode::UserActionTimeout, _))) => {
+                // TODO: Repeat the request, if it is a UserActionTimeout?
                 debug!("Device {:?} got cancelled", &self);
                 BlinkResult::Cancelled
             }
@@ -221,7 +231,6 @@ pub trait FidoDevice: HIDDevice {
                 BlinkResult::Cancelled
             }
         }
-        // }
     }
     fn supports_ctap1(&self) -> bool {
         // CAPABILITY_NMSG:
