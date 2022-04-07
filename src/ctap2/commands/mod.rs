@@ -467,7 +467,7 @@ pub mod tests {
     use crate::consts::CID_BROADCAST;
     use crate::crypto::ECDHSecret;
     use crate::ctap2::commands::get_info::AuthenticatorInfo;
-    use crate::transport::hid::HIDDevice;
+    use crate::transport::{hid::HIDDevice, FidoDevice};
     use crate::u2fprotocol::tests::platform::TestDevice;
     use crate::u2ftypes::U2FDevice;
 
@@ -490,11 +490,7 @@ pub mod tests {
             None
         }
 
-        fn new(_: Self::BuildParameters) -> Result<Self, HIDError>
-        where
-            Self::BuildParameters: Sized,
-            Self: Sized,
-        {
+        fn new(_: Self::BuildParameters) -> Result<Self, (HIDError, Self::Id)> {
             Ok(TestDevice {
                 cid: CID_BROADCAST,
                 reads: vec![],
@@ -511,5 +507,17 @@ pub mod tests {
         fn id(&self) -> Self::Id {
             "TestDevice".to_string()
         }
+
+        fn clone_device_as_write_only(&self) -> Result<Self, HIDError> {
+            Ok(TestDevice {
+                cid: self.cid,
+                reads: self.reads.clone(),
+                writes: self.writes.clone(),
+                dev_info: self.dev_info.clone(),
+                authenticator_info: self.authenticator_info.clone(),
+            })
+        }
     }
+
+    impl FidoDevice for TestDevice {}
 }

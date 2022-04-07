@@ -267,7 +267,7 @@ impl<'de> Deserialize<'de> for AuthenticatorInfo {
 pub mod tests {
     use super::*;
     use crate::consts::{Capability, HIDCmd, CID_BROADCAST};
-    use crate::transport::{FidoDevice, Nonce};
+    use crate::transport::{hid::HIDDevice, FidoDevice, Nonce};
     use crate::u2fprotocol::tests::platform::{TestDevice, IN_HID_RPT_SIZE};
     use crate::u2ftypes::U2FDevice;
     use rand::{thread_rng, RngCore};
@@ -372,8 +372,9 @@ pub mod tests {
             Capability::WINK | Capability::CBOR | Capability::NMSG
         );
 
-        let result =
-            FidoDevice::get_authenticator_info(&device).expect("Didn't get any authenticator_info");
+        let result = device
+            .get_authenticator_info()
+            .expect("Didn't get any authenticator_info");
         let expected = AuthenticatorInfo {
             versions: vec!["U2F_V2".to_string(), "FIDO_2_0".to_string()],
             extensions: vec!["uvm".to_string(), "hmac-secret".to_string()],

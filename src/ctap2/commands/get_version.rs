@@ -57,7 +57,7 @@ impl RequestCtap1 for GetVersion {
 #[cfg(test)]
 pub mod tests {
     use crate::consts::{Capability, HIDCmd, CID_BROADCAST, SW_NO_ERROR};
-    use crate::transport::{FidoDevice, Nonce};
+    use crate::transport::{hid::HIDDevice, FidoDevice, Nonce};
     use crate::u2fprotocol::tests::platform::TestDevice;
     use crate::u2ftypes::U2FDevice;
     use rand::{thread_rng, RngCore};
@@ -112,7 +112,7 @@ pub mod tests {
         let dev_info = device.get_device_info();
         assert_eq!(dev_info.cap_flags, Capability::WINK);
 
-        let result = FidoDevice::get_authenticator_info(&device);
+        let result = device.get_authenticator_info();
         assert!(result.is_none());
     }
 }
