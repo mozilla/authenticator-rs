@@ -1,6 +1,6 @@
 use crate::send_status;
-use crate::transport::hid::HIDDevice;
 pub use crate::transport::platform::device::Device;
+use crate::transport::{hid::HIDDevice, FidoDevice};
 use runloop::RunLoop;
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
@@ -11,13 +11,13 @@ pub type DeviceBuildParameters = <Device as HIDDevice>::BuildParameters;
 
 trait DeviceSelectorEventMarker {}
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BlinkResult {
     DeviceSelected,
     Cancelled,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DeviceCommand {
     Blink,
     Continue,
@@ -187,5 +187,278 @@ impl DeviceSelector {
 
     pub fn stop(&mut self) {
         self.runloop.cancel();
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use crate::{
+        ctap2::commands::get_info::{AuthenticatorInfo, AuthenticatorOptions},
+        StatusUpdate,
+    };
+
+    use super::*;
+
+    fn make_device_simple_u2f(dev: &mut Device) {
+        dev.create_channel();
+    }
+
+    fn make_device_with_pin(dev: &mut Device) {
+        dev.create_channel();
+        let info = AuthenticatorInfo {
+            options: AuthenticatorOptions {
+                client_pin: Some(true),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        dev.set_authenticator_info(info.clone());
+    }
+
+    fn send_i_am_token(dev: &Device, selector: &DeviceSelector) {
+        selector
+            .sender
+            .send(DeviceSelectorEvent::ImAToken((
+                dev.clone_device_as_write_only().unwrap(),
+                dev.sender.clone().unwrap(),
+            )))
+            .unwrap();
+    }
+
+    fn send_no_token(dev: &Device, selector: &DeviceSelector) {
+        selector
+            .sender
+            .send(DeviceSelectorEvent::NotAToken(dev.id()))
+            .unwrap()
+    }
+
+    fn remove_device(dev: &Device, selector: &DeviceSelector) {
+        selector
+            .sender
+            .send(DeviceSelectorEvent::DeviceRemoved(dev.id()))
+            .unwrap();
+        assert_eq!(
+            dev.receiver.as_ref().unwrap().recv().unwrap(),
+            DeviceCommand::Removed
+        );
+    }
+
+    fn add_devices<'a, T>(iter: T, selector: &DeviceSelector)
+    where
+        T: Iterator<Item = &'a Device>,
+    {
+        selector
+            .sender
+            .send(DeviceSelectorEvent::DevicesAdded(
+                iter.map(|f| f.id()).collect(),
+            ))
+            .unwrap();
+    }
+
+    #[test]
+    fn test_device_selector_one_token_no_late_adds() {
+        let mut devices = vec![
+            Device::new("device selector 1").unwrap(),
+            Device::new("device selector 2").unwrap(),
+            Device::new("device selector 3").unwrap(),
+            Device::new("device selector 4").unwrap(),
+        ];
+
+        // Make those actual tokens. The rest is interpreted as non-u2f-devices
+        make_device_with_pin(&mut devices[2]);
+
+        let (status_tx, _status_rx) = channel();
+        let selector = DeviceSelector::run(status_tx);
+
+        // Adding all
+        add_devices(devices.iter(), &selector);
+
+        devices.iter().filter(|d| !d.is_u2f()).for_each(|d| {
+            send_no_token(d, &selector);
+        });
+
+        send_i_am_token(&devices[2], &selector);
+
+        assert_eq!(
+            devices[2].receiver.as_ref().unwrap().recv().unwrap(),
+            DeviceCommand::Continue
+        );
+    }
+
+    #[test]
+    fn test_device_selector_all_pins_with_late_add() {
+        let mut devices = vec![
+            Device::new("device selector 1").unwrap(),
+            Device::new("device selector 2").unwrap(),
+            Device::new("device selector 3").unwrap(),
+            Device::new("device selector 4").unwrap(),
+            Device::new("device selector 5").unwrap(),
+            Device::new("device selector 6").unwrap(),
+        ];
+
+        // Make those actual tokens. The rest is interpreted as non-u2f-devices
+        make_device_with_pin(&mut devices[2]);
+        make_device_with_pin(&mut devices[4]);
+        make_device_with_pin(&mut devices[5]);
+
+        let (status_tx, status_rx) = channel();
+        let selector = DeviceSelector::run(status_tx);
+
+        // Adding all, except the last one (we simulate that this one is not yet plugged in)
+        add_devices(devices.iter().take(5), &selector);
+
+        // Interleave tokens and non-tokens
+        send_i_am_token(&devices[2], &selector);
+
+        devices.iter().filter(|d| !d.is_u2f()).for_each(|d| {
+            send_no_token(d, &selector);
+        });
+
+        send_i_am_token(&devices[4], &selector);
+
+        // We added 2 devices that are tokens. They should get the blink-command now
+        assert_eq!(
+            devices[2].receiver.as_ref().unwrap().recv().unwrap(),
+            DeviceCommand::Blink
+        );
+        assert_eq!(
+            devices[4].receiver.as_ref().unwrap().recv().unwrap(),
+            DeviceCommand::Blink
+        );
+        assert!(matches!(
+            status_rx.recv().unwrap(),
+            StatusUpdate::SelectDeviceNotice
+        ));
+
+        // Plug in late device
+        send_i_am_token(&devices[5], &selector);
+        assert_eq!(
+            devices[5].receiver.as_ref().unwrap().recv().unwrap(),
+            DeviceCommand::Blink
+        );
+    }
+
+    #[test]
+    fn test_device_selector_no_pins_late_mixed_adds() {
+        // Multiple tokes, none of them support a PIN, so we should get Continue-commands
+        // for all of them
+        let mut devices = vec![
+            Device::new("device selector 1").unwrap(),
+            Device::new("device selector 2").unwrap(),
+            Device::new("device selector 3").unwrap(),
+            Device::new("device selector 4").unwrap(),
+            Device::new("device selector 5").unwrap(),
+            Device::new("device selector 6").unwrap(),
+            Device::new("device selector 7").unwrap(),
+        ];
+
+        // Make those actual tokens. The rest is interpreted as non-u2f-devices
+        make_device_simple_u2f(&mut devices[2]);
+        make_device_simple_u2f(&mut devices[4]);
+        make_device_simple_u2f(&mut devices[5]);
+
+        let (status_tx, status_rx) = channel();
+        let selector = DeviceSelector::run(status_tx);
+
+        // Adding all, except the last one (we simulate that this one is not yet plugged in)
+        add_devices(devices.iter().take(5), &selector);
+
+        // Interleave tokens and non-tokens
+        send_i_am_token(&devices[2], &selector);
+
+        devices.iter().filter(|d| !d.is_u2f()).for_each(|d| {
+            send_no_token(d, &selector);
+        });
+
+        send_i_am_token(&devices[4], &selector);
+
+        // We added 2 devices that are tokens. They should get the blink-command now
+        assert_eq!(
+            devices[2].receiver.as_ref().unwrap().recv().unwrap(),
+            DeviceCommand::Continue
+        );
+        assert_eq!(
+            devices[4].receiver.as_ref().unwrap().recv().unwrap(),
+            DeviceCommand::Continue
+        );
+        assert!(matches!(
+            status_rx.recv().unwrap(),
+            StatusUpdate::SelectDeviceNotice
+        ));
+
+        // Plug in late device
+        send_i_am_token(&devices[5], &selector);
+        assert_eq!(
+            devices[5].receiver.as_ref().unwrap().recv().unwrap(),
+            DeviceCommand::Continue
+        );
+        // Remove device again
+        remove_device(&devices[5], &selector);
+
+        // Now we add a token that has a PIN, it should not get "Continue" but "Blink"
+        make_device_with_pin(&mut devices[6]);
+        send_i_am_token(&devices[6], &selector);
+        assert_eq!(
+            devices[6].receiver.as_ref().unwrap().recv().unwrap(),
+            DeviceCommand::Blink
+        );
+    }
+
+    #[test]
+    fn test_device_selector_mixed_pins_remove_all() {
+        // Multiple tokes, none of them support a PIN, so we should get Continue-commands
+        // for all of them
+        let mut devices = vec![
+            Device::new("device selector 1").unwrap(),
+            Device::new("device selector 2").unwrap(),
+            Device::new("device selector 3").unwrap(),
+            Device::new("device selector 4").unwrap(),
+            Device::new("device selector 5").unwrap(),
+            Device::new("device selector 6").unwrap(),
+        ];
+
+        // Make those actual tokens. The rest is interpreted as non-u2f-devices
+        make_device_with_pin(&mut devices[2]);
+        make_device_with_pin(&mut devices[4]);
+        make_device_with_pin(&mut devices[5]);
+
+        let (status_tx, status_rx) = channel();
+        let selector = DeviceSelector::run(status_tx);
+
+        // Adding all, except the last one (we simulate that this one is not yet plugged in)
+        add_devices(devices.iter(), &selector);
+
+        devices.iter().for_each(|d| {
+            if d.is_u2f() {
+                send_i_am_token(d, &selector);
+            } else {
+                send_no_token(d, &selector);
+            }
+        });
+
+        for idx in [2, 4, 5] {
+            assert_eq!(
+                devices[idx].receiver.as_ref().unwrap().recv().unwrap(),
+                DeviceCommand::Blink
+            );
+        }
+        assert!(matches!(
+            status_rx.recv().unwrap(),
+            StatusUpdate::SelectDeviceNotice
+        ));
+
+        // Remove all tokens
+        for idx in [2, 4, 5] {
+            remove_device(&devices[idx], &selector);
+        }
+
+        // Adding one again
+        send_i_am_token(&devices[4], &selector);
+
+        // This should now get a "Continue" instead of "Blinking", because it's the only device
+        assert_eq!(
+            devices[4].receiver.as_ref().unwrap().recv().unwrap(),
+            DeviceCommand::Continue
+        );
     }
 }

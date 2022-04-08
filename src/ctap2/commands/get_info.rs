@@ -123,7 +123,7 @@ impl Default for AuthenticatorOptions {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct AuthenticatorInfo {
     pub(crate) versions: Vec<String>,
     pub(crate) extensions: Vec<String>,
@@ -267,8 +267,9 @@ impl<'de> Deserialize<'de> for AuthenticatorInfo {
 pub mod tests {
     use super::*;
     use crate::consts::{Capability, HIDCmd, CID_BROADCAST};
+    use crate::transport::device_selector::Device;
+    use crate::transport::platform::device::IN_HID_RPT_SIZE;
     use crate::transport::{hid::HIDDevice, FidoDevice, Nonce};
-    use crate::u2fprotocol::tests::platform::{TestDevice, IN_HID_RPT_SIZE};
     use crate::u2ftypes::U2FDevice;
     use rand::{thread_rng, RngCore};
     use serde_cbor::de::from_slice;
@@ -317,7 +318,7 @@ pub mod tests {
 
     #[test]
     fn test_get_info_ctap2_only() {
-        let mut device = TestDevice::new();
+        let mut device = Device::new("commands/get_info").unwrap();
         let nonce = [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01];
 
         // channel id

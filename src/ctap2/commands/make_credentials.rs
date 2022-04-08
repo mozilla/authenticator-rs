@@ -416,7 +416,8 @@ pub mod test {
     use crate::ctap2::server::{
         PublicKeyCredentialParameters, RelyingParty, RelyingPartyWrapper, User,
     };
-    use crate::u2fprotocol::tests::platform::TestDevice;
+    use crate::transport::device_selector::Device;
+    use crate::transport::hid::HIDDevice;
     use serde_bytes::ByteBuf;
 
     #[test]
@@ -461,7 +462,7 @@ pub mod test {
             None,
         );
 
-        let mut device = TestDevice::new(); // not really used (all functions ignore it)
+        let mut device = Device::new("commands/make_credentials").unwrap(); // not really used (all functions ignore it)
         let req_serialized = req
             .wire_format(&mut device)
             .expect("Failed to serialize MakeCredentials request");
@@ -607,7 +608,7 @@ pub mod test {
             None,
         );
 
-        let mut device = TestDevice::new(); // not really used (all functions ignore it)
+        let mut device = Device::new("commands/make_credentials").unwrap(); // not really used (all functions ignore it)
         let req_serialized = req
             .apdu_format(&mut device)
             .expect("Failed to serialize MakeCredentials request");

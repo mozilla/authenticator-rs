@@ -26,30 +26,33 @@ pub mod device_selector;
 pub mod errors;
 pub mod hid;
 
-#[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "netbsd"))]
+#[cfg(all(
+    any(target_os = "linux", target_os = "freebsd", target_os = "netbsd"),
+    not(test)
+))]
 pub mod hidproto;
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(test)))]
 #[path = "linux/mod.rs"]
 pub mod platform;
 
-#[cfg(target_os = "freebsd")]
+#[cfg(all(target_os = "freebsd", not(test)))]
 #[path = "freebsd/mod.rs"]
 pub mod platform;
 
-#[cfg(target_os = "netbsd")]
+#[cfg(all(target_os = "netbsd", not(test)))]
 #[path = "netbsd/mod.rs"]
 pub mod platform;
 
-#[cfg(target_os = "openbsd")]
+#[cfg(all(target_os = "openbsd", not(test)))]
 #[path = "openbsd/mod.rs"]
 pub mod platform;
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", not(test)))]
 #[path = "macos/mod.rs"]
 pub mod platform;
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", not(test)))]
 #[path = "windows/mod.rs"]
 pub mod platform;
 
@@ -59,9 +62,14 @@ pub mod platform;
     target_os = "openbsd",
     target_os = "netbsd",
     target_os = "macos",
-    target_os = "windows"
+    target_os = "windows",
+    test
 )))]
 #[path = "stub/mod.rs"]
+pub mod platform;
+
+#[cfg(test)]
+#[path = "mock/mod.rs"]
 pub mod platform;
 
 #[derive(Debug)]

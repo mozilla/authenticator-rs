@@ -58,14 +58,14 @@ impl RequestCtap2 for Selection {
 pub mod tests {
     use super::*;
     use crate::consts::HIDCmd;
-    use crate::transport::FidoDevice;
-    use crate::u2fprotocol::tests::platform::TestDevice;
+    use crate::transport::device_selector::Device;
+    use crate::transport::{hid::HIDDevice, FidoDevice};
     use crate::u2ftypes::U2FDevice;
     use rand::{thread_rng, RngCore};
     use serde_cbor::{de::from_slice, Value};
 
     fn issue_command_and_get_response(cmd: u8, add: &[u8]) -> Result<(), HIDError> {
-        let mut device = TestDevice::new();
+        let mut device = Device::new("commands/selection").unwrap();
         // ctap2 request
         let mut cid = [0u8; 4];
         thread_rng().fill_bytes(&mut cid);

@@ -676,8 +676,9 @@ pub mod test {
     use crate::ctap2::server::{
         PublicKeyCredentialDescriptor, RelyingParty, RelyingPartyWrapper, RpIdHash, Transport, User,
     };
+    use crate::transport::device_selector::Device;
+    use crate::transport::hid::HIDDevice;
     use crate::transport::FidoDevice;
-    use crate::u2fprotocol::tests::platform::TestDevice;
     use crate::u2ftypes::U2FDevice;
     use rand::{thread_rng, RngCore};
 
@@ -714,7 +715,7 @@ pub mod test {
             Default::default(),
             None,
         );
-        let mut device = TestDevice::new();
+        let mut device = Device::new("commands/get_assertion").unwrap();
         let mut cid = [0u8; 4];
         thread_rng().fill_bytes(&mut cid);
         device.set_cid(cid);
@@ -845,7 +846,7 @@ pub mod test {
         assert_eq!(response, expected);
     }
 
-    fn fill_device_ctap1(device: &mut TestDevice, cid: [u8; 4], flags: u8, answer_status: [u8; 2]) {
+    fn fill_device_ctap1(device: &mut Device, cid: [u8; 4], flags: u8, answer_status: [u8; 2]) {
         // ctap2 request
         let mut msg = cid.to_vec();
         msg.extend(&[HIDCmd::Msg.into(), 0x00, 0x8A]); // cmd + bcnt
@@ -916,8 +917,8 @@ pub mod test {
             Default::default(),
             None,
         );
-        let mut device = TestDevice::new(); // not really used (all functions ignore it)
-                                            // channel id
+        let mut device = Device::new("commands/get_assertion").unwrap(); // not really used (all functions ignore it)
+                                                                         // channel id
         let mut cid = [0u8; 4];
         thread_rng().fill_bytes(&mut cid);
 
