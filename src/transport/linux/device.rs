@@ -28,12 +28,6 @@ pub struct Device {
     authenticator_info: Option<AuthenticatorInfo>,
 }
 
-impl Device {
-    pub fn is_u2f(&self) -> bool {
-        hidraw::is_u2f_device(self.fd.as_raw_fd())
-    }
-}
-
 impl Drop for Device {
     fn drop(&mut self) {
         // Close the fd, ignore any errors.
@@ -149,6 +143,10 @@ impl HIDDevice for Device {
 
     fn id(&self) -> Self::Id {
         self.path.clone()
+    }
+
+    fn is_u2f(&self) -> bool {
+        hidraw::is_u2f_device(self.fd.as_raw_fd())
     }
 
     fn get_shared_secret(&self) -> Option<&ECDHSecret> {

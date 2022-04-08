@@ -24,6 +24,8 @@ where
     fn new(parameters: Self::BuildParameters) -> Result<Self, (HIDError, Self::Id)>;
     fn id(&self) -> Self::Id;
     fn initialized(&self) -> bool;
+    // Check if the device is actually a token
+    fn is_u2f(&self) -> bool;
     fn get_authenticator_info(&self) -> Option<&AuthenticatorInfo>;
     fn set_authenticator_info(&mut self, authenticator_info: AuthenticatorInfo);
     fn set_shared_secret(&mut self, secret: ECDHSecret);

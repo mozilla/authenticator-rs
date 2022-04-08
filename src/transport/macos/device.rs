@@ -30,10 +30,6 @@ pub struct Device {
 }
 
 impl Device {
-    pub fn is_u2f(&self) -> bool {
-        true
-    }
-
     unsafe fn get_property_macos(&self, prop_name: &str) -> io::Result<String> {
         let prop_ref = IOHIDDeviceGetProperty(
             self.device_ref,
@@ -194,6 +190,9 @@ impl HIDDevice for Device {
         self.device_ref
     }
 
+    fn is_u2f(&self) -> bool {
+        true
+    }
     fn get_shared_secret(&self) -> Option<&ECDHSecret> {
         self.secret.as_ref()
     }

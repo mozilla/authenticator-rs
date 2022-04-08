@@ -20,15 +20,6 @@ pub struct Device {
     dev_info: Option<U2FDeviceInfo>,
 }
 
-impl Device {
-    pub fn is_u2f(&self) -> bool {
-        match DeviceCapabilities::new(self.file.as_raw_handle()) {
-            Ok(caps) => caps.usage() == FIDO_USAGE_U2FHID && caps.usage_page() == FIDO_USAGE_PAGE,
-            _ => false,
-        }
-    }
-}
-
 impl PartialEq for Device {
     fn eq(&self, other: &Device) -> bool {
         self.path == other.path
@@ -131,6 +122,13 @@ impl HIDDevice for Device {
 
     fn id(&self) -> Self::Id {
         self.path.clone()
+    }
+
+    fn is_u2f(&self) -> bool {
+        match DeviceCapabilities::new(self.file.as_raw_handle()) {
+            Ok(caps) => caps.usage() == FIDO_USAGE_U2FHID && caps.usage_page() == FIDO_USAGE_PAGE,
+            _ => false,
+        }
     }
 
     fn get_shared_secret(&self) -> Option<&ECDHSecret> {
