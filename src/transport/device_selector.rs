@@ -73,13 +73,6 @@ impl DeviceSelector {
                         break; // We are done here. The selected device continues without us.
                     }
                     DeviceSelectorEvent::DevicesAdded(ids) => {
-                        // let callback = new_device_callback.clone();
-                        // let write_only_clone = dev.clone_device_as_write_only().unwrap();
-                        // let device_thread = RunLoop::new(move |alive| {
-                        //     if alive() {
-                        //         callback(dev, alive);
-                        //     }
-                        // });
                         for id in ids {
                             println!("Device added event: {:?}", id);
                             waiting_for_response.insert(id);
@@ -121,11 +114,17 @@ impl DeviceSelector {
                     }
                     DeviceSelectorEvent::ImAToken((dev, tx)) => {
                         let id = dev.id();
+                        let supports_uv = dev.supports_some_user_verification();
                         let _ = waiting_for_response.remove(&id);
                         tokens.insert(dev, tx.clone());
                         if blinking {
+                            let cmd = if supports_uv {
+                                DeviceCommand::Blink
+                            } else {
+                                DeviceCommand::Continue
+                            };
                             // We are already blinking, so this new device should blink too.
-                            if tx.send(DeviceCommand::Blink).is_err() {
+                            if tx.send(cmd).is_err() {
                                 // Device thread died in the meantime (which shouldn't happen)
                                 tokens.retain(|dev, _| dev.id() != id);
                             }
@@ -146,28 +145,22 @@ impl DeviceSelector {
                         Self::cancel_all(tokens, Some(&dev.id()));
                         break; // We are done here
                     } else {
-                        // We blink only, if the token either has a PIN set or some other
-                        // kind of user verification. If so, we can't send the request straight to them
-                        // because that could result in PIN-prompts from multiple devices, so then they
-                        // have to blink first.
-                        // BUT if they are either CTAP1 tokens or CTAP2 without uv, we can send the normal
-                        // request to them, and skip one additional user-interaction (touch).
-                        let needs_to_blink = tokens
-                            .keys()
-                            .filter_map(|d| d.get_authenticator_info())
-                            .any(|i| {
-                                matches!(i.options.user_verification, Some(true))
-                                    || matches!(i.options.client_pin, Some(true))
-                            });
-                        let cmd = if needs_to_blink {
-                            blinking = true;
-                            DeviceCommand::Blink
-                        } else {
-                            DeviceCommand::Continue
-                        };
-                        // A send operation can only fail if the receiving end of a channel is disconnected, implying that the data could never be received.
-                        // We ignore errors here for now, but should probably remove the device in such a case (even though it theoretically can't happen)
-                        tokens.values().for_each(|tx| {
+                        blinking = true;
+
+                        tokens.iter().for_each(|(dev, tx)| {
+                            // We send the add. blink-command only, if the token either has a PIN set or some other
+                            // kind of user verification. If so, we can't send the request straight to them
+                            // because that could result in PIN-prompts from multiple devices, so then they
+                            // have to blink first.
+                            // BUT if they are either CTAP1 tokens or CTAP2 without uv, we can send the normal
+                            // request to them, and skip one additional user-interaction (touch).
+                            let cmd = if dev.supports_some_user_verification() {
+                                DeviceCommand::Blink
+                            } else {
+                                DeviceCommand::Continue
+                            };
+                            // A send operation can only fail if the receiving end of a channel is disconnected, implying that the data could never be received.
+                            // We ignore errors here for now, but should probably remove the device in such a case (even though it theoretically can't happen)
                             let _ = tx.send(cmd);
                         });
                         send_status(&status, crate::StatusUpdate::SelectDeviceNotice);

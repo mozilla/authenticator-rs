@@ -241,4 +241,11 @@ pub trait FidoDevice: HIDDevice {
     fn supports_ctap2(&self) -> bool {
         self.get_device_info().cap_flags.contains(Capability::CBOR)
     }
+
+    fn supports_some_user_verification(&self) -> bool {
+        self.get_authenticator_info().map_or(false, |i| {
+            matches!(i.options.user_verification, Some(true))
+                || matches!(i.options.client_pin, Some(true))
+        })
+    }
 }
