@@ -63,16 +63,20 @@ impl RequestCtap2 for GetInfo {
     }
 }
 
+fn true_val() -> bool {
+    true
+}
+
 #[derive(Debug, Deserialize, Clone, Eq, PartialEq)]
 pub(crate) struct AuthenticatorOptions {
     /// Indicates that the device is attached to the client and therefore can’t
     /// be removed and used on another client.
-    #[serde(rename = "plat")]
+    #[serde(rename = "plat", default)]
     pub(crate) platform_device: bool,
     /// Indicates that the device is capable of storing keys on the device
     /// itself and therefore can satisfy the authenticatorGetAssertion request
     /// with allowList parameter not specified or empty.
-    #[serde(rename = "rk")]
+    #[serde(rename = "rk", default)]
     pub(crate) resident_key: bool,
 
     /// Client PIN:
@@ -87,7 +91,7 @@ pub(crate) struct AuthenticatorOptions {
     pub(crate) client_pin: Option<bool>,
 
     /// Indicates that the device is capable of testing user presence.
-    #[serde(rename = "up")]
+    #[serde(rename = "up", default = "true_val")]
     pub(crate) user_presence: bool,
 
     /// Indicates that the device is capable of verifying the user within
