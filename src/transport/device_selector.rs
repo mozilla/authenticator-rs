@@ -1,6 +1,6 @@
 use crate::send_status;
+use crate::transport::hid::HIDDevice;
 pub use crate::transport::platform::device::Device;
-use crate::transport::{hid::HIDDevice, FidoDevice};
 use runloop::RunLoop;
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
@@ -114,17 +114,11 @@ impl DeviceSelector {
                     }
                     DeviceSelectorEvent::ImAToken((dev, tx)) => {
                         let id = dev.id();
-                        let supports_uv = dev.supports_some_user_verification();
                         let _ = waiting_for_response.remove(&id);
                         tokens.insert(dev, tx.clone());
                         if blinking {
-                            let cmd = if supports_uv {
-                                DeviceCommand::Blink
-                            } else {
-                                DeviceCommand::Continue
-                            };
                             // We are already blinking, so this new device should blink too.
-                            if tx.send(cmd).is_err() {
+                            if tx.send(DeviceCommand::Blink).is_err() {
                                 // Device thread died in the meantime (which shouldn't happen)
                                 tokens.retain(|dev, _| dev.id() != id);
                             }
@@ -147,21 +141,10 @@ impl DeviceSelector {
                     } else {
                         blinking = true;
 
-                        tokens.iter().for_each(|(dev, tx)| {
-                            // We send the add. blink-command only, if the token either has a PIN set or some other
-                            // kind of user verification. If so, we can't send the request straight to them
-                            // because that could result in PIN-prompts from multiple devices, so then they
-                            // have to blink first.
-                            // BUT if they are either CTAP1 tokens or CTAP2 without uv, we can send the normal
-                            // request to them, and skip one additional user-interaction (touch).
-                            let cmd = if dev.supports_some_user_verification() {
-                                DeviceCommand::Blink
-                            } else {
-                                DeviceCommand::Continue
-                            };
+                        tokens.iter().for_each(|(_dev, tx)| {
                             // A send operation can only fail if the receiving end of a channel is disconnected, implying that the data could never be received.
                             // We ignore errors here for now, but should probably remove the device in such a case (even though it theoretically can't happen)
-                            let _ = tx.send(cmd);
+                            let _ = tx.send(DeviceCommand::Blink);
                         });
                         send_status(&status, crate::StatusUpdate::SelectDeviceNotice);
                     }
@@ -340,8 +323,7 @@ pub mod tests {
 
     #[test]
     fn test_device_selector_no_pins_late_mixed_adds() {
-        // Multiple tokes, none of them support a PIN, so we should get Continue-commands
-        // for all of them
+        // Multiple tokes, none of them support a PIN
         let mut devices = vec![
             Device::new("device selector 1").unwrap(),
             Device::new("device selector 2").unwrap(),
@@ -375,11 +357,11 @@ pub mod tests {
         // We added 2 devices that are tokens. They should get the blink-command now
         assert_eq!(
             devices[2].receiver.as_ref().unwrap().recv().unwrap(),
-            DeviceCommand::Continue
+            DeviceCommand::Blink
         );
         assert_eq!(
             devices[4].receiver.as_ref().unwrap().recv().unwrap(),
-            DeviceCommand::Continue
+            DeviceCommand::Blink
         );
         assert!(matches!(
             status_rx.recv().unwrap(),
@@ -390,7 +372,7 @@ pub mod tests {
         send_i_am_token(&devices[5], &selector);
         assert_eq!(
             devices[5].receiver.as_ref().unwrap().recv().unwrap(),
-            DeviceCommand::Continue
+            DeviceCommand::Blink
         );
         // Remove device again
         remove_device(&devices[5], &selector);
