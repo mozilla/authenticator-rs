@@ -458,7 +458,7 @@ impl Pin {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub enum PinError {
     PinRequired,
     PinIsTooShort,
@@ -467,6 +467,7 @@ pub enum PinError {
     InvalidPin(Option<u8>),
     PinAuthBlocked,
     PinBlocked,
+    #[serde(skip)] // TODO: Use 'with' here and just convert to string
     Backend(BackendError),
 }
 

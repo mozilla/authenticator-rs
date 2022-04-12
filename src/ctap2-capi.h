@@ -78,6 +78,11 @@ struct rust_ctap2_sign_result;
 typedef void (*rust_ctap2_register_callback)(uint64_t, rust_ctap2_register_result*);
 typedef void (*rust_ctap2_sign_callback)(uint64_t, rust_ctap2_sign_result*);
 
+// Status updates get send, if a device needs a PIN, if a device needs to be selected, etc.
+struct rust_ctap2_status_update_res;
+// May be called with NULL, in case of an error
+typedef void (*rust_ctap2_status_update_callback)(rust_ctap2_status_update_res*);
+
 rust_ctap_manager* rust_ctap2_mgr_new();
 /* unsafe */ void rust_ctap2_mgr_free(rust_ctap_manager* mgr);
 
@@ -85,7 +90,7 @@ rust_ctap_manager* rust_ctap2_mgr_new();
 /* unsafe */ void rust_ctap2_sign_res_free(rust_ctap2_sign_result* res);
 
 uint64_t rust_ctap2_mgr_register(
-    rust_ctap_manager* mgr, uint64_t timeout, rust_ctap2_register_callback,
+    rust_ctap_manager* mgr, uint64_t timeout, rust_ctap2_register_callback, rust_ctap2_status_update_callback,
     AuthenticatorArgsChallenge challenge,
     const char* relying_party_id, const char *origin_ptr,
     AuthenticatorArgsUser user, AuthenticatorArgsPubCred pub_cred_params,
@@ -94,7 +99,7 @@ uint64_t rust_ctap2_mgr_register(
 );
 
 uint64_t rust_ctap2_mgr_sign(
-    rust_ctap_manager* mgr, uint64_t timeout, rust_ctap2_sign_callback,
+    rust_ctap_manager* mgr, uint64_t timeout, rust_ctap2_sign_callback, rust_ctap2_status_update_callback,
     AuthenticatorArgsChallenge challenge,
     const char* relying_party_id, const char *origin_ptr,
     const rust_ctap2_pub_key_cred_descriptors* allow_list, AuthenticatorArgsOptions options,
@@ -233,7 +238,28 @@ bool rust_ctap2_sign_result_username_copy(
     const char *dst
 );
 
+/// # Safety
+///
+/// This function is used to get the length, prior to calling
+/// rust_ctap2_status_update_copy_json()
+bool rust_ctap2_status_update_len(
+    const rust_ctap2_status_update_res *res,
+    size_t *len
+);
+
+/// # Safety
+///
+/// This method does not ensure anything about dst before copying, so
+/// ensure it is long enough (using rust_ctap2_status_update_len)
+bool rust_ctap2_status_update_copy_json(
+    const rust_ctap2_status_update_res *res,
+    const char *dst
+);
+
+bool rust_ctap2_status_update_send_pin(
+    const rust_ctap2_status_update_res *res,
+    const char *pin
+);
 
 }
-
 #endif  // __CTAP2_CAPI

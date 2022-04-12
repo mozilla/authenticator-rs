@@ -5,8 +5,6 @@
 #[macro_use]
 mod util;
 
-use std::sync::mpsc::Sender;
-
 #[cfg(any(target_os = "linux"))]
 extern crate libudev;
 
@@ -51,6 +49,9 @@ pub mod statecallback;
 mod transport;
 mod virtualdevices;
 
+mod status_update;
+pub use status_update::*;
+
 mod crypto;
 pub use crypto::COSEAlgorithm;
 
@@ -94,22 +95,6 @@ pub enum SignResult {
 }
 
 pub type Result<T> = std::result::Result<T, errors::AuthenticatorError>;
-
-#[derive(Debug)]
-pub enum StatusUpdate {
-    DeviceAvailable { dev_info: u2ftypes::U2FDeviceInfo },
-    DeviceUnavailable { dev_info: u2ftypes::U2FDeviceInfo },
-    Success { dev_info: u2ftypes::U2FDeviceInfo },
-    PinError(PinError, Sender<Pin>),
-    SelectDeviceNotice,
-}
-
-pub(crate) fn send_status(status: &Sender<StatusUpdate>, msg: StatusUpdate) {
-    match status.send(msg) {
-        Ok(_) => {}
-        Err(e) => error!("Couldn't send status: {:?}", e),
-    };
-}
 
 #[cfg(test)]
 #[macro_use]
