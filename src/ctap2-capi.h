@@ -261,5 +261,13 @@ bool rust_ctap2_status_update_send_pin(
     const char *pin
 );
 
+
+/// # Safety
+/// This frees the memory of a status_update_res
+bool rust_ctap2_destroy_status_update_res(
+    rust_ctap2_status_update_res *res
+);
+
+
 }
 #endif  // __CTAP2_CAPI

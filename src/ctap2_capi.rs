@@ -242,7 +242,10 @@ pub unsafe extern "C" fn rust_ctap2_mgr_register(
     let (status_tx, status_rx) = channel::<crate::StatusUpdate>();
     thread::spawn(move || loop {
         match status_rx.recv() {
-            Ok(mut r) => status_callback(&mut r),
+            Ok(r) => {
+                let rb = Box::new(r);
+                status_callback(Box::into_raw(rb));
+            }
             Err(e) => {
                 status_callback(ptr::null_mut());
                 error!("Error when receiving status update: {:?}", e);
@@ -341,7 +344,10 @@ pub unsafe extern "C" fn rust_ctap2_mgr_sign(
     let (status_tx, status_rx) = channel::<crate::StatusUpdate>();
     thread::spawn(move || loop {
         match status_rx.recv() {
-            Ok(mut r) => status_callback(&mut r),
+            Ok(r) => {
+                let rb = Box::new(r);
+                status_callback(Box::into_raw(rb));
+            }
             Err(e) => {
                 status_callback(ptr::null_mut());
                 error!("Error when receiving status update: {:?}", e);
@@ -1003,4 +1009,17 @@ pub unsafe extern "C" fn rust_ctap2_status_update_send_pin(
             false
         }
     }
+}
+
+/// # Safety
+///
+/// This function frees the memory of res!
+#[no_mangle]
+pub unsafe extern "C" fn rust_ctap2_destroy_status_update_res(res: *mut StatusUpdate) -> bool {
+    if res.is_null() {
+        return false;
+    }
+    // Dropping it when we go out of scope
+    let _ = Box::from_raw(res);
+    true
 }

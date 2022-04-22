@@ -235,7 +235,7 @@ pub trait FidoDevice: HIDDevice {
             // Something unexpected happened, so we assume this device is not usable and interpreting
             // this equivalent to being cancelled.
             e => {
-                error!("Device {:?} received unexpected answer, so we assume an error occurred and we are NOT using this device (assuming the request was cancelled): {:?}", &self, e);
+                info!("Device {:?} received unexpected answer, so we assume an error occurred and we are NOT using this device (assuming the request was cancelled): {:?}", &self, e);
                 BlinkResult::Cancelled
             }
         }
