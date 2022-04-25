@@ -97,6 +97,9 @@ fn main() {
             Ok(StatusUpdate::SelectDeviceNotice) => {
                 println!("STATUS: Please select a device by touching one of them.");
             }
+            Ok(StatusUpdate::DeviceSelected(dev_info)) => {
+                println!("STATUS: Continuing with device: {}", dev_info);
+            }
             Ok(StatusUpdate::PinError(error, sender)) => match error {
                 PinError::PinRequired => {
                     let raw_pin = rpassword::prompt_password_stderr("Enter PIN: ")

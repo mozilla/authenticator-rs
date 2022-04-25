@@ -1,6 +1,7 @@
 use crate::send_status;
 use crate::transport::hid::HIDDevice;
 pub use crate::transport::platform::device::Device;
+use crate::u2ftypes::U2FDevice;
 use runloop::RunLoop;
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
@@ -68,8 +69,14 @@ impl DeviceSelector {
                         Self::cancel_all(tokens, None);
                         break;
                     }
-                    DeviceSelectorEvent::SelectedToken(dev) => {
-                        Self::cancel_all(tokens, Some(&dev));
+                    DeviceSelectorEvent::SelectedToken(id) => {
+                        if let Some(dev) = tokens.keys().find(|d| d.id() == id) {
+                            send_status(
+                                &status,
+                                crate::StatusUpdate::DeviceSelected(dev.get_device_info()),
+                            );
+                        }
+                        Self::cancel_all(tokens, Some(&id));
                         break; // We are done here. The selected device continues without us.
                     }
                     DeviceSelectorEvent::DevicesAdded(ids) => {
@@ -90,6 +97,12 @@ impl DeviceSelector {
                             tokens.iter().for_each(|(dev, send)| {
                                 if dev.id() == id {
                                     let _ = send.send(DeviceCommand::Removed);
+                                    send_status(
+                                        &status,
+                                        crate::StatusUpdate::DeviceUnavailable {
+                                            dev_info: dev.get_device_info(),
+                                        },
+                                    );
                                 }
                             });
                             tokens.retain(|dev, _| dev.id() != id);
@@ -113,6 +126,12 @@ impl DeviceSelector {
                         waiting_for_response.remove(&id);
                     }
                     DeviceSelectorEvent::ImAToken((dev, tx)) => {
+                        send_status(
+                            &status,
+                            crate::StatusUpdate::DeviceAvailable {
+                                dev_info: dev.get_device_info(),
+                            },
+                        );
                         let id = dev.id();
                         let _ = waiting_for_response.remove(&id);
                         tokens.insert(dev, tx.clone());
@@ -136,6 +155,10 @@ impl DeviceSelector {
                             // Tokens is empty, so we just start over again
                             continue;
                         }
+                        send_status(
+                            &status,
+                            crate::StatusUpdate::DeviceSelected(dev.get_device_info()),
+                        );
                         Self::cancel_all(tokens, Some(&dev.id()));
                         break; // We are done here
                     } else {
@@ -175,18 +198,41 @@ impl DeviceSelector {
 
 #[cfg(test)]
 pub mod tests {
+    use super::*;
     use crate::{
+        consts::Capability,
         ctap2::commands::get_info::{AuthenticatorInfo, AuthenticatorOptions},
+        u2ftypes::U2FDeviceInfo,
         StatusUpdate,
     };
+    use std::sync::mpsc::Receiver;
 
-    use super::*;
+    enum ExpectedUpdate {
+        DeviceAvailable,
+        DeviceUnavailable,
+        SelectDeviceNotice,
+        DeviceSelected,
+    }
+
+    fn gen_info(id: String) -> U2FDeviceInfo {
+        U2FDeviceInfo {
+            vendor_name: String::from("ExampleVendor").into_bytes(),
+            device_name: id.into_bytes(),
+            version_interface: 1,
+            version_major: 3,
+            version_minor: 2,
+            version_build: 1,
+            cap_flags: Capability::WINK | Capability::CBOR | Capability::NMSG,
+        }
+    }
 
     fn make_device_simple_u2f(dev: &mut Device) {
+        dev.set_device_info(gen_info(dev.id()));
         dev.create_channel();
     }
 
     fn make_device_with_pin(dev: &mut Device) {
+        dev.set_device_info(gen_info(dev.id()));
         dev.create_channel();
         let info = AuthenticatorInfo {
             options: AuthenticatorOptions {
@@ -226,6 +272,22 @@ pub mod tests {
         );
     }
 
+    fn recv_status(dev: &Device, status_rx: &Receiver<StatusUpdate>, expected: ExpectedUpdate) {
+        let res = status_rx.recv().unwrap();
+        // Marking it with _, as cargo warns about "unused exp", as it doesn't view the assert below as a usage
+        let _exp = match expected {
+            ExpectedUpdate::DeviceAvailable => StatusUpdate::DeviceUnavailable {
+                dev_info: gen_info(dev.id()),
+            },
+            ExpectedUpdate::DeviceUnavailable => StatusUpdate::DeviceUnavailable {
+                dev_info: gen_info(dev.id()),
+            },
+            ExpectedUpdate::DeviceSelected => StatusUpdate::DeviceSelected(gen_info(dev.id())),
+            ExpectedUpdate::SelectDeviceNotice => StatusUpdate::SelectDeviceNotice,
+        };
+        assert!(matches!(res, _exp));
+    }
+
     fn add_devices<'a, T>(iter: T, selector: &DeviceSelector)
     where
         T: Iterator<Item = &'a Device>,
@@ -249,23 +311,23 @@ pub mod tests {
 
         // Make those actual tokens. The rest is interpreted as non-u2f-devices
         make_device_with_pin(&mut devices[2]);
-
-        let (status_tx, _status_rx) = channel();
+        let (status_tx, status_rx) = channel();
         let selector = DeviceSelector::run(status_tx);
 
         // Adding all
         add_devices(devices.iter(), &selector);
-
         devices.iter().filter(|d| !d.is_u2f()).for_each(|d| {
             send_no_token(d, &selector);
         });
 
         send_i_am_token(&devices[2], &selector);
 
+        recv_status(&devices[2], &status_rx, ExpectedUpdate::DeviceAvailable);
         assert_eq!(
             devices[2].receiver.as_ref().unwrap().recv().unwrap(),
             DeviceCommand::Continue
         );
+        recv_status(&devices[2], &status_rx, ExpectedUpdate::DeviceSelected);
     }
 
     #[test]
@@ -292,12 +354,14 @@ pub mod tests {
 
         // Interleave tokens and non-tokens
         send_i_am_token(&devices[2], &selector);
+        recv_status(&devices[2], &status_rx, ExpectedUpdate::DeviceAvailable);
 
         devices.iter().filter(|d| !d.is_u2f()).for_each(|d| {
             send_no_token(d, &selector);
         });
 
         send_i_am_token(&devices[4], &selector);
+        recv_status(&devices[4], &status_rx, ExpectedUpdate::DeviceAvailable);
 
         // We added 2 devices that are tokens. They should get the blink-command now
         assert_eq!(
@@ -308,13 +372,11 @@ pub mod tests {
             devices[4].receiver.as_ref().unwrap().recv().unwrap(),
             DeviceCommand::Blink
         );
-        assert!(matches!(
-            status_rx.recv().unwrap(),
-            StatusUpdate::SelectDeviceNotice
-        ));
+        recv_status(&devices[2], &status_rx, ExpectedUpdate::SelectDeviceNotice);
 
         // Plug in late device
         send_i_am_token(&devices[5], &selector);
+        recv_status(&devices[5], &status_rx, ExpectedUpdate::DeviceAvailable);
         assert_eq!(
             devices[5].receiver.as_ref().unwrap().recv().unwrap(),
             DeviceCommand::Blink
@@ -347,12 +409,14 @@ pub mod tests {
 
         // Interleave tokens and non-tokens
         send_i_am_token(&devices[2], &selector);
+        recv_status(&devices[2], &status_rx, ExpectedUpdate::DeviceAvailable);
 
         devices.iter().filter(|d| !d.is_u2f()).for_each(|d| {
             send_no_token(d, &selector);
         });
 
         send_i_am_token(&devices[4], &selector);
+        recv_status(&devices[4], &status_rx, ExpectedUpdate::DeviceAvailable);
 
         // We added 2 devices that are tokens. They should get the blink-command now
         assert_eq!(
@@ -363,23 +427,23 @@ pub mod tests {
             devices[4].receiver.as_ref().unwrap().recv().unwrap(),
             DeviceCommand::Blink
         );
-        assert!(matches!(
-            status_rx.recv().unwrap(),
-            StatusUpdate::SelectDeviceNotice
-        ));
+        recv_status(&devices[2], &status_rx, ExpectedUpdate::SelectDeviceNotice);
 
         // Plug in late device
         send_i_am_token(&devices[5], &selector);
+        recv_status(&devices[5], &status_rx, ExpectedUpdate::DeviceAvailable);
         assert_eq!(
             devices[5].receiver.as_ref().unwrap().recv().unwrap(),
             DeviceCommand::Blink
         );
         // Remove device again
         remove_device(&devices[5], &selector);
+        recv_status(&devices[5], &status_rx, ExpectedUpdate::DeviceUnavailable);
 
         // Now we add a token that has a PIN, it should not get "Continue" but "Blink"
         make_device_with_pin(&mut devices[6]);
         send_i_am_token(&devices[6], &selector);
+        recv_status(&devices[6], &status_rx, ExpectedUpdate::DeviceAvailable);
         assert_eq!(
             devices[6].receiver.as_ref().unwrap().recv().unwrap(),
             DeviceCommand::Blink
@@ -419,28 +483,29 @@ pub mod tests {
         });
 
         for idx in [2, 4, 5] {
+            recv_status(&devices[idx], &status_rx, ExpectedUpdate::DeviceAvailable);
             assert_eq!(
                 devices[idx].receiver.as_ref().unwrap().recv().unwrap(),
                 DeviceCommand::Blink
             );
         }
-        assert!(matches!(
-            status_rx.recv().unwrap(),
-            StatusUpdate::SelectDeviceNotice
-        ));
+        recv_status(&devices[2], &status_rx, ExpectedUpdate::SelectDeviceNotice);
 
         // Remove all tokens
         for idx in [2, 4, 5] {
             remove_device(&devices[idx], &selector);
+            recv_status(&devices[idx], &status_rx, ExpectedUpdate::DeviceUnavailable);
         }
 
         // Adding one again
         send_i_am_token(&devices[4], &selector);
+        recv_status(&devices[4], &status_rx, ExpectedUpdate::DeviceAvailable);
 
         // This should now get a "Continue" instead of "Blinking", because it's the only device
         assert_eq!(
             devices[4].receiver.as_ref().unwrap().recv().unwrap(),
             DeviceCommand::Continue
         );
+        recv_status(&devices[4], &status_rx, ExpectedUpdate::DeviceSelected);
     }
 }

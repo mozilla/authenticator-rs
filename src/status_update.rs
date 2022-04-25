@@ -4,11 +4,20 @@ use std::sync::mpsc::Sender;
 
 #[derive(Debug)]
 pub enum StatusUpdate {
+    /// Device found
     DeviceAvailable { dev_info: u2ftypes::U2FDeviceInfo },
+    /// Device got removed
     DeviceUnavailable { dev_info: u2ftypes::U2FDeviceInfo },
+    /// We successfully finished the register or sign request
     Success { dev_info: u2ftypes::U2FDeviceInfo },
+    /// Sent if a PIN is needed (or was wrong), or some other kind of PIN-related
+    /// error occurred. The Sender is for sending back a PIN (if needed).
     PinError(PinError, Sender<Pin>),
+    /// Sent, if multiple devices are found and the user has to select one
     SelectDeviceNotice,
+    /// Sent, once a device was selected (either automatically or by user-interaction)
+    /// and the register or signing process continues with this device
+    DeviceSelected(u2ftypes::U2FDeviceInfo),
 }
 
 impl Serialize for StatusUpdate {
@@ -27,6 +36,9 @@ impl Serialize for StatusUpdate {
             StatusUpdate::Success { dev_info } => map.serialize_field("Success", &dev_info)?,
             StatusUpdate::PinError(e, _) => map.serialize_field("PinError", &e)?,
             StatusUpdate::SelectDeviceNotice => map.serialize_field("SelectDeviceNotice", &())?,
+            StatusUpdate::DeviceSelected(dev_info) => {
+                map.serialize_field("DeviceSelected", &dev_info)?
+            }
         }
         map.end()
     }

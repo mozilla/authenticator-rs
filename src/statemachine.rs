@@ -302,7 +302,6 @@ impl StateMachineCtap2 {
     fn init_and_select(
         info: DeviceBuildParameters,
         selector: &Sender<DeviceSelectorEvent>,
-        status: &Sender<StatusUpdate>,
     ) -> Option<Device> {
         // Create a new device.
         let mut dev = match Device::new(info) {
@@ -338,12 +337,6 @@ impl StateMachineCtap2 {
             .send(DeviceSelectorEvent::ImAToken((write_only_clone, tx)))
             .ok()?;
 
-        send_status(
-            status,
-            crate::StatusUpdate::DeviceAvailable {
-                dev_info: dev.get_device_info(),
-            },
-        );
         // Blocking recv. DeviceSelector will tell us what to do
         loop {
             match rx.recv() {
@@ -439,7 +432,7 @@ impl StateMachineCtap2 {
             cbc.clone(),
             status,
             move |info, selector, status, _alive| {
-                let mut dev = match Self::init_and_select(info, &selector, &status) {
+                let mut dev = match Self::init_and_select(info, &selector) {
                     None => {
                         return;
                     }
@@ -527,12 +520,6 @@ impl StateMachineCtap2 {
                         callback.call(Err(AuthenticatorError::HIDError(e)));
                     }
                 }
-                send_status(
-                    &status,
-                    crate::StatusUpdate::DeviceUnavailable {
-                        dev_info: dev.get_device_info(),
-                    },
-                );
             },
         );
 
@@ -555,7 +542,7 @@ impl StateMachineCtap2 {
             callback.clone(),
             status,
             move |info, selector, status, _alive| {
-                let mut dev = match Self::init_and_select(info, &selector, &status) {
+                let mut dev = match Self::init_and_select(info, &selector) {
                     None => {
                         return;
                     }
