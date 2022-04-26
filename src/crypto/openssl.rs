@@ -17,7 +17,7 @@ use openssl::x509::X509;
 use serde_bytes::ByteBuf;
 
 /// Errors that can be returned from COSE functions.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum BackendError {
     OpenSSL(ErrorStack),
     UnsupportedCurve(ECDSACurve),

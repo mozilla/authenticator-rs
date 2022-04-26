@@ -458,7 +458,7 @@ impl Pin {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub enum PinError {
     PinRequired,
     PinIsTooShort,

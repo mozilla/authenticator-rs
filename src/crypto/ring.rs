@@ -31,7 +31,7 @@ authenticate(key, message) → signature
 
 pub type Result<T> = std::result::Result<T, BackendError>;
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum BackendError {
     AgreementError,
     UnspecifiedRingError,

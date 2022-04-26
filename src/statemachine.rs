@@ -382,19 +382,20 @@ impl StateMachineCtap2 {
                     break;
                 }
                 Err(AuthenticatorError::PinError(e)) => {
-                    info!("PIN Error detected. Sending it back and waiting for a reply");
+                    info!("PIN Error that requires user interaction detected. Sending it back and waiting for a reply");
                     let (tx, rx) = channel();
-                    send_status(status, crate::StatusUpdate::PinError(e, tx));
+                    send_status(status, crate::StatusUpdate::PinError(e.clone(), tx));
                     match rx.recv() {
                         Ok(pin) => {
                             cmd.set_pin(Some(pin));
                             continue;
                         }
-                        Err(e) => {
-                            error!("Error when determining pinAuth: {:?}", e);
-                            callback.call(Err(AuthenticatorError::InternalError(String::from(
-                                "Pin callback returned error",
-                            ))));
+                        Err(_) => {
+                            // recv() can only fail, if the other side is dropping the Sender. We are using this as a trick
+                            // to let the callback decide if this PinError is recoverable (e.g. with User input) or not (e.g.
+                            // locked token). If it is deemed unrecoverable, we error out the 'normal' way with the same error.
+                            error!("Callback dropped the channel, so we forward the error to the results-callback: {:?}", e);
+                            callback.call(Err(AuthenticatorError::PinError(e)));
                             return Err(());
                         }
                     }
