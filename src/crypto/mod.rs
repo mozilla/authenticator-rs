@@ -21,6 +21,9 @@ cfg_if::cfg_if! {
     } else if #[cfg(feature = "crypto_openssl")] {
         #[path = "openssl.rs"]
         pub mod imp;
+    } else if #[cfg(feature = "crypto_dummy")] {
+        #[path = "dummy.rs"]
+        pub mod imp;
     } else {
         #[path = "nss.rs"]
         pub mod imp;
@@ -686,7 +689,7 @@ impl fmt::Debug for ECDHSecret {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "crypto_dummy")))]
 mod test {
     use super::{
         decrypt, encrypt, imp::parse_key, imp::test_encapsulate, serialize_key, COSEAlgorithm,
