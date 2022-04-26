@@ -9,11 +9,11 @@ use crate::statecallback::StateCallback;
 use crate::transport::device_selector::{
     DeviceBuildParameters, DeviceSelector, DeviceSelectorEvent,
 };
-use crate::transport::platform::iokit::{CFRunLoopEntryObserver, IOHIDDeviceRef, SendableRunLoop};
+use crate::transport::platform::iokit::{CFRunLoopEntryObserver, SendableRunLoop};
 use crate::transport::platform::monitor::Monitor;
 use core_foundation::runloop::*;
 use std::os::raw::c_void;
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{channel, Sender};
 use std::thread;
 
 // A transaction will run the given closure in a new thread, thereby using a
@@ -35,7 +35,7 @@ impl Transaction {
     ) -> crate::Result<Self>
     where
         F: Fn(
-                (IOHIDDeviceRef, Receiver<Vec<u8>>,
+                DeviceBuildParameters,
                 Sender<DeviceSelectorEvent>,
                 Sender<crate::StatusUpdate>,
                 &dyn Fn() -> bool,

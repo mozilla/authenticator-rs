@@ -6,7 +6,7 @@ use crate::transport::device_selector::DeviceSelectorEvent;
 use crate::transport::platform::winapi::DeviceInfoSet;
 use runloop::RunLoop;
 use std::collections::{HashMap, HashSet};
-use std::io;
+use std::error::Error;
 use std::iter::FromIterator;
 use std::sync::{mpsc::Sender, Arc};
 use std::thread;
@@ -55,12 +55,12 @@ where
                 self.remove_device(path);
             }
 
-            let paths: Vec<_> = devices.difference(&stored).collect();
+            let paths: Vec<_> = devices.difference(&stored).cloned().collect();
             self.selector_sender
                 .send(DeviceSelectorEvent::DevicesAdded(paths.clone()))?;
             // Add devices that were plugged in.
             for path in paths {
-                self.add_device(path);
+                self.add_device(&path);
             }
 
             // Remember the new set.

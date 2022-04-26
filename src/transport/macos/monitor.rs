@@ -5,6 +5,7 @@
 extern crate libc;
 extern crate log;
 
+use crate::transport::device_selector::DeviceSelectorEvent;
 use crate::transport::platform::iokit::*;
 use crate::util::io_err;
 use core_foundation::base::*;
@@ -23,7 +24,7 @@ struct DeviceData {
 pub struct Monitor<F>
 where
     F: Fn(
-            (IOHIDDeviceRef, Receiver<Vec<u8>>,
+            (IOHIDDeviceRef, Receiver<Vec<u8>>),
             Sender<DeviceSelectorEvent>,
             Sender<crate::StatusUpdate>,
             &dyn Fn() -> bool,
@@ -43,7 +44,7 @@ where
 impl<F> Monitor<F>
 where
     F: Fn(
-            (IOHIDDeviceRef, Receiver<Vec<u8>>,
+            (IOHIDDeviceRef, Receiver<Vec<u8>>),
             Sender<DeviceSelectorEvent>,
             Sender<crate::StatusUpdate>,
             &dyn Fn() -> bool,
@@ -162,9 +163,11 @@ where
         device_ref: IOHIDDeviceRef,
     ) {
         let this = unsafe { &mut *(context as *mut Self) };
-        let _ = self
+        let _ = this
             .selector_sender
             .send(DeviceSelectorEvent::DevicesAdded(vec![device_ref]));
+        let selector_sender = this.selector_sender.clone();
+        let status_sender = this.status_sender.clone();
         let (tx, rx) = channel();
         let f = &this.new_device_cb;
 
@@ -194,7 +197,14 @@ where
 
 impl<F> Drop for Monitor<F>
 where
-    F: Fn((IOHIDDeviceRef, Receiver<Vec<u8>>), &dyn Fn() -> bool) + Sync,
+    F: Fn(
+            (IOHIDDeviceRef, Receiver<Vec<u8>>),
+            Sender<DeviceSelectorEvent>,
+            Sender<crate::StatusUpdate>,
+            &dyn Fn() -> bool,
+        ) + Send
+        + Sync
+        + 'static,
 {
     fn drop(&mut self) {
         unsafe { CFRelease(self.manager as *mut c_void) };

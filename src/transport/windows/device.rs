@@ -8,8 +8,8 @@ use crate::transport::hid::HIDDevice;
 use crate::transport::{AuthenticatorInfo, ECDHSecret, FidoDevice, HIDError};
 use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
 use std::fs::{File, OpenOptions};
-use std::io;
-use std::io::{Read, Write};
+use std::hash::{Hash, Hasher};
+use std::io::{self, Read, Write};
 use std::os::windows::io::AsRawHandle;
 
 #[derive(Debug)]
@@ -18,6 +18,8 @@ pub struct Device {
     file: File,
     cid: [u8; 4],
     dev_info: Option<U2FDeviceInfo>,
+    secret: Option<ECDHSecret>,
+    authenticator_info: Option<AuthenticatorInfo>,
 }
 
 impl PartialEq for Device {
@@ -98,7 +100,7 @@ impl HIDDevice for Device {
             .read(true)
             .write(true)
             .open(&path)
-            .map_err(|e| (HIDError::IO(Some(path.clone()), e)), path.clone())?;
+            .map_err(|e| (HIDError::IO(Some(path.clone().into()), e), path.clone()))?;
         let res = Self {
             path,
             file,
@@ -150,14 +152,14 @@ impl HIDDevice for Device {
     /// This is used for cancellation of blocking read()-requests.
     /// With this, we can clone the Device, pass it to another thread and call "cancel()" on that.
     fn clone_device_as_write_only(&self) -> Result<Self, HIDError> {
-        let fd = OpenOptions::new()
+        let file = OpenOptions::new()
             .write(true)
             .open(&self.path)
-            .map_err(|e| (HIDError::IO(Some(self.path.clone()), e)))?;
+            .map_err(|e| (HIDError::IO(Some(self.path.clone().into()), e)))?;
 
         Ok(Self {
             path: self.path.clone(),
-            fd,
+            file,
             cid: self.cid,
             dev_info: self.dev_info.clone(),
             secret: self.secret.clone(),

@@ -13,6 +13,7 @@ use core_foundation::base::*;
 use core_foundation::string::*;
 use std::convert::TryInto;
 use std::fmt;
+use std::hash::{Hash, Hasher};
 use std::io;
 use std::io::{Read, Write};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
@@ -83,7 +84,7 @@ impl Hash for Device {
 
 impl Read for Device {
     fn read(&mut self, mut bytes: &mut [u8]) -> io::Result<usize> {
-        if let Some(rx) = self.report_rx {
+        if let Some(rx) = &self.report_rx {
             let timeout = Duration::from_secs(READ_TIMEOUT);
             let data = match rx.recv_timeout(timeout) {
                 Ok(v) => v,
@@ -96,7 +97,7 @@ impl Read for Device {
             };
             bytes.write(&data)
         } else {
-            Err(io::ErrorKind::Unsupported)
+            Err(io::Error::from(io::ErrorKind::Unsupported))
         }
     }
 }
@@ -175,7 +176,7 @@ impl HIDDevice for Device {
         Ok(Self {
             device_ref,
             cid: CID_BROADCAST,
-            report_rx,
+            report_rx: Some(report_rx),
             dev_info: None,
             secret: None,
             authenticator_info: None,
