@@ -11,12 +11,13 @@ use rc_crypto::agreement::{
 use rc_crypto::digest::digest;
 use rc_crypto::hmac::{sign, SigningKey};
 use rc_crypto::pbkdf2::HashAlgorithm;
+use serde::Serialize;
 use serde_bytes::ByteBuf;
 use std::convert::TryFrom;
 use std::os::raw::{c_uchar, c_uint};
 
 /// Errors that can be returned from COSE functions.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub enum BackendError {
     // rc_crypto-Error is not clone-able, so we convert it to a String
     // NSSError(rc_crypto::Error),

@@ -9,8 +9,8 @@ use ring::digest;
 use ring::hmac;
 use ring::rand::SystemRandom;
 use ring::signature::KeyPair;
+use serde::Serialize;
 use serde_bytes::ByteBuf;
-
 /*
 initialize()
 
@@ -31,7 +31,7 @@ authenticate(key, message) → signature
 
 pub type Result<T> = std::result::Result<T, BackendError>;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub enum BackendError {
     AgreementError,
     UnspecifiedRingError,

@@ -1,11 +1,12 @@
 use super::{ByteBuf, COSEKey, ECDHSecret, ECDSACurve};
+use serde::Serialize;
 /*
 This is a dummy implementation for CI, to avoid having to install NSS or openSSL in the CI-pipeline
 */
 
 pub type Result<T> = std::result::Result<T, BackendError>;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub enum BackendError {}
 
 pub(crate) fn serialize_key(_curve: ECDSACurve, key: &[u8]) -> Result<(ByteBuf, ByteBuf)> {

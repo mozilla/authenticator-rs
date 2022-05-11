@@ -14,11 +14,20 @@ use openssl::pkey::{PKey, Private};
 use openssl::sign::{Signer, Verifier};
 use openssl::symm::{Cipher, Crypter, Mode};
 use openssl::x509::X509;
+use serde::{Serialize, Serializer};
 use serde_bytes::ByteBuf;
 
+fn openssl_string<S>(_: &ErrorStack, s: S) -> std::result::Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    s.serialize_str("OpenSSLError")
+}
+
 /// Errors that can be returned from COSE functions.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub enum BackendError {
+    #[serde(serialize_with = "openssl_string")]
     OpenSSL(ErrorStack),
     UnsupportedCurve(ECDSACurve),
     UnsupportedKeyType,
