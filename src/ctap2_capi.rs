@@ -925,53 +925,46 @@ pub unsafe extern "C" fn rust_ctap2_sign_result_username_copy(
 
 /// # Safety
 ///
-/// This function is used to get how long the JSON-representation of a status update is.
+/// `len` is the length of the buffer `dst`. If the result is bigger
+/// the function will return false and set `len` to how large the
+/// buffer should be. In case of an unrecoverable error, `len` will
+/// be set to -1. In case of success, it will be set to the actual
+/// used length.
+/// Note: If input `len` is 0, then `dst` is allowed to be nullptr
 #[no_mangle]
-pub unsafe extern "C" fn rust_ctap2_status_update_len(
+pub unsafe extern "C" fn rust_ctap2_status_update_copy_json(
     res: *const StatusUpdate,
+    dst: *mut c_char,
     len: *mut size_t,
 ) -> bool {
     if res.is_null() || len.is_null() {
         return false;
     }
-
-    match serde_json::to_string(&*res) {
-        Ok(s) => {
-            *len = s.len();
-            true
-        }
-        Err(e) => {
-            error!("Failed to parse {:?} into json: {:?}", &*res, e);
-            false
-        }
-    }
-}
-
-/// # Safety
-///
-/// This method does not ensure anything about dst before copying, so
-/// ensure it is long enough (using rust_ctap2_status_update_len)
-#[no_mangle]
-pub unsafe extern "C" fn rust_ctap2_status_update_copy_json(
-    res: *const StatusUpdate,
-    dst: *mut c_char,
-) -> bool {
-    if res.is_null() || dst.is_null() {
+    // Only error out if dst is null AND some length is set
+    if *len > 0 && dst.is_null() {
         return false;
     }
 
     match serde_json::to_string(&*res) {
         Ok(s) => {
             if let Ok(cs) = CString::new(s) {
+                let required_len = cs.as_bytes().len();
+                if *len < required_len {
+                    *len = required_len;
+                    return false;
+                }
+                *len = required_len;
                 ptr::copy_nonoverlapping(cs.as_ptr(), dst, cs.as_bytes().len());
                 true
             } else {
                 error!("Failed to convert String to CString");
+                *len = 0;
                 false
             }
         }
         Err(e) => {
             error!("Failed to parse {:?} into json: {:?}", &*res, e);
+            *len = 0;
             false
         }
     }

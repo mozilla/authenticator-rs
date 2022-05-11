@@ -240,27 +240,22 @@ bool rust_ctap2_sign_result_username_copy(
 
 /// # Safety
 ///
-/// This function is used to get the length, prior to calling
-/// rust_ctap2_status_update_copy_json()
-bool rust_ctap2_status_update_len(
-    const rust_ctap2_status_update_res *res,
-    size_t *len
-);
-
-/// # Safety
-///
-/// This method does not ensure anything about dst before copying, so
-/// ensure it is long enough (using rust_ctap2_status_update_len)
+/// `len` is the length of the buffer `dst`. If the result is bigger
+/// the function will return false and set `len` to how large the
+/// buffer should be. In case of an unrecoverable error, `len` will
+/// be set to 0. In case of success, it will be set to the actual
+/// used length.
+/// Note: If input `len` is 0, then `dst` is allowed to be nullptr
 bool rust_ctap2_status_update_copy_json(
     const rust_ctap2_status_update_res *res,
-    const char *dst
+    const char *dst,
+    size_t *len
 );
 
 bool rust_ctap2_status_update_send_pin(
     const rust_ctap2_status_update_res *res,
     const char *pin
 );
-
 
 /// # Safety
 /// This frees the memory of a status_update_res
