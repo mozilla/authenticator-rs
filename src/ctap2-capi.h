@@ -78,7 +78,7 @@ struct rust_ctap2_sign_result;
 typedef void (*rust_ctap2_register_callback)(uint64_t, rust_ctap2_register_result*);
 typedef void (*rust_ctap2_sign_callback)(uint64_t, rust_ctap2_sign_result*);
 
-// Status updates get send, if a device needs a PIN, if a device needs to be selected, etc.
+// Status updates get sent, if a device needs a PIN, if a device needs to be selected, etc.
 struct rust_ctap2_status_update_res;
 // May be called with NULL, in case of an error
 typedef void (*rust_ctap2_status_update_callback)(rust_ctap2_status_update_res*);
