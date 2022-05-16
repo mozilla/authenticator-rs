@@ -51,6 +51,11 @@ enum QueueAction {
         callback: StateCallback<crate::Result<crate::SignResult>>,
     },
     Cancel,
+    Reset {
+        timeout: u64,
+        status: Sender<crate::StatusUpdate>,
+        callback: StateCallback<crate::Result<crate::ResetResult>>,
+    },
 }
 
 pub struct U2FManager {
@@ -116,6 +121,9 @@ impl U2FManager {
                     }
                     Ok(QueueAction::SignCtap2 { .. }) => {
                         // TODO(MS): What to do here? Error out? Silently ignore?
+                        unimplemented!();
+                    }
+                    Ok(QueueAction::Reset { .. }) => {
                         unimplemented!();
                     }
                     Err(RecvTimeoutError::Disconnected) => {
@@ -215,6 +223,19 @@ impl AuthenticatorTransport for U2FManager {
     fn cancel(&mut self) -> crate::Result<()> {
         Ok(self.tx.send(QueueAction::Cancel)?)
     }
+
+    fn reset(
+        &mut self,
+        timeout: u64,
+        status: Sender<crate::StatusUpdate>,
+        callback: StateCallback<crate::Result<crate::ResetResult>>,
+    ) -> crate::Result<()> {
+        Ok(self.tx.send(QueueAction::Reset {
+            timeout,
+            status,
+            callback,
+        })?)
+    }
 }
 
 impl Drop for U2FManager {
@@ -262,6 +283,15 @@ impl Manager {
                         // Cancelling must block so that we don't start a new
                         // polling thread before the old one has shut down.
                         sm.cancel();
+                    }
+
+                    Ok(QueueAction::Reset {
+                        timeout,
+                        status,
+                        callback,
+                    }) => {
+                        // Reset the token: Delete all keypairs, reset PIN
+                        sm.reset(timeout, status, callback);
                     }
 
                     Ok(QueueAction::RegisterCtap1 {
@@ -480,5 +510,18 @@ impl AuthenticatorTransport for Manager {
 
     fn cancel(&mut self) -> Result<(), AuthenticatorError> {
         Ok(self.tx.send(QueueAction::Cancel)?)
+    }
+
+    fn reset(
+        &mut self,
+        timeout: u64,
+        status: Sender<crate::StatusUpdate>,
+        callback: StateCallback<crate::Result<crate::ResetResult>>,
+    ) -> Result<(), AuthenticatorError> {
+        Ok(self.tx.send(QueueAction::Reset {
+            timeout,
+            status,
+            callback,
+        })?)
     }
 }

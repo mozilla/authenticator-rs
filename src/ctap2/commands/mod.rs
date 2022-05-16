@@ -19,6 +19,7 @@ pub(crate) mod get_info;
 pub(crate) mod get_next_assertion;
 pub(crate) mod get_version;
 pub(crate) mod make_credentials;
+pub(crate) mod reset;
 pub(crate) mod selection;
 
 pub trait Request<T>

@@ -5,6 +5,7 @@
 use crate::consts::PARAMETER_SIZE;
 use crate::ctap2::commands::get_assertion::{GetAssertion, GetAssertionResult};
 use crate::ctap2::commands::make_credentials::{MakeCredentials, MakeCredentialsResult};
+use crate::ctap2::commands::reset::Reset;
 use crate::ctap2::commands::{CommandError, PinAuthCommand, Request, StatusCode};
 use crate::errors::{self, AuthenticatorError, UnsupportedOption};
 use crate::statecallback::StateCallback;
@@ -302,6 +303,7 @@ impl StateMachineCtap2 {
     fn init_and_select(
         info: DeviceBuildParameters,
         selector: &Sender<DeviceSelectorEvent>,
+        ctap2_only: bool,
     ) -> Option<Device> {
         // Create a new device.
         let mut dev = match Device::new(info) {
@@ -316,6 +318,12 @@ impl StateMachineCtap2 {
         // Try initializing it.
         if let Err(e) = dev.init(Nonce::CreateRandom) {
             warn!("error while initializing device: {}", e);
+            selector.send(DeviceSelectorEvent::NotAToken(dev.id())).ok();
+            return None;
+        }
+
+        if ctap2_only && dev.get_authenticator_info().is_none() {
+            info!("Device does not support CTAP2");
             selector.send(DeviceSelectorEvent::NotAToken(dev.id())).ok();
             return None;
         }
@@ -433,7 +441,7 @@ impl StateMachineCtap2 {
             cbc.clone(),
             status,
             move |info, selector, status, _alive| {
-                let mut dev = match Self::init_and_select(info, &selector) {
+                let mut dev = match Self::init_and_select(info, &selector, false) {
                     None => {
                         return;
                     }
@@ -543,7 +551,7 @@ impl StateMachineCtap2 {
             callback.clone(),
             status,
             move |info, selector, status, _alive| {
-                let mut dev = match Self::init_and_select(info, &selector) {
+                let mut dev = match Self::init_and_select(info, &selector, false) {
                     None => {
                         return;
                     }
@@ -647,5 +655,66 @@ impl StateMachineCtap2 {
             info!("Statemachine was cancelled. Cancelling transaction now.");
             transaction.cancel();
         }
+    }
+
+    pub fn reset(
+        &mut self,
+        timeout: u64,
+        status: Sender<crate::StatusUpdate>,
+        callback: StateCallback<crate::Result<crate::ResetResult>>,
+    ) {
+        // Abort any prior register/sign calls.
+        self.cancel();
+        let cbc = callback.clone();
+
+        let transaction = Transaction::new(
+            timeout,
+            callback.clone(),
+            status,
+            move |info, selector, status, _alive| {
+                let reset = Reset {};
+                let mut dev = match Self::init_and_select(info, &selector, true) {
+                    None => {
+                        return;
+                    }
+                    Some(dev) => dev,
+                };
+
+                info!("Device {:?} continues with the reset process", dev.id());
+                debug!("------------------------------------------------------------------");
+                debug!("{:?}", reset);
+                debug!("------------------------------------------------------------------");
+
+                let resp = dev.send_cbor(&reset);
+                if resp.is_ok() {
+                    send_status(
+                        &status,
+                        crate::StatusUpdate::Success {
+                            dev_info: dev.get_device_info(),
+                        },
+                    );
+                    // The DeviceSelector could already be dead, but it might also wait
+                    // for us to respond, in order to cancel all other tokens in case
+                    // we skipped the "blinking"-action and went straight for the actual
+                    // request.
+                    let _ = selector.send(DeviceSelectorEvent::SelectedToken(dev.id()));
+                }
+
+                match resp {
+                    Ok(()) => callback.call(Ok(())),
+                    Err(HIDError::DeviceNotSupported) | Err(HIDError::UnsupportedCommand) => {}
+                    Err(HIDError::Command(CommandError::StatusCode(
+                        StatusCode::ChannelBusy,
+                        _,
+                    ))) => {}
+                    Err(e) => {
+                        warn!("error happened: {}", e);
+                        callback.call(Err(AuthenticatorError::HIDError(e)));
+                    }
+                }
+            },
+        );
+
+        self.transaction = Some(try_or!(transaction, move |e| cbc.call(Err(e))));
     }
 }
