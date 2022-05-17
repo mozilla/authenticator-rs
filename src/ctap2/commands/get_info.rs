@@ -63,16 +63,20 @@ impl RequestCtap2 for GetInfo {
     }
 }
 
+fn true_val() -> bool {
+    true
+}
+
 #[derive(Debug, Deserialize, Clone, Eq, PartialEq)]
 pub(crate) struct AuthenticatorOptions {
     /// Indicates that the device is attached to the client and therefore can’t
     /// be removed and used on another client.
-    #[serde(rename = "plat")]
+    #[serde(rename = "plat", default)]
     pub(crate) platform_device: bool,
     /// Indicates that the device is capable of storing keys on the device
     /// itself and therefore can satisfy the authenticatorGetAssertion request
     /// with allowList parameter not specified or empty.
-    #[serde(rename = "rk")]
+    #[serde(rename = "rk", default)]
     pub(crate) resident_key: bool,
 
     /// Client PIN:
@@ -87,7 +91,7 @@ pub(crate) struct AuthenticatorOptions {
     pub(crate) client_pin: Option<bool>,
 
     /// Indicates that the device is capable of testing user presence.
-    #[serde(rename = "up")]
+    #[serde(rename = "up", default = "true_val")]
     pub(crate) user_presence: bool,
 
     /// Indicates that the device is capable of verifying the user within
@@ -123,7 +127,7 @@ impl Default for AuthenticatorOptions {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct AuthenticatorInfo {
     pub(crate) versions: Vec<String>,
     pub(crate) extensions: Vec<String>,
@@ -270,8 +274,9 @@ impl<'de> Deserialize<'de> for AuthenticatorInfo {
 pub mod tests {
     use super::*;
     use crate::consts::{Capability, HIDCmd, CID_BROADCAST};
-    use crate::transport::{FidoDevice, Nonce};
-    use crate::u2fprotocol::tests::platform::{TestDevice, IN_HID_RPT_SIZE};
+    use crate::transport::device_selector::Device;
+    use crate::transport::platform::device::IN_HID_RPT_SIZE;
+    use crate::transport::{hid::HIDDevice, FidoDevice, Nonce};
     use crate::u2ftypes::U2FDevice;
     use rand::{thread_rng, RngCore};
     use serde_cbor::de::from_slice;
@@ -320,7 +325,7 @@ pub mod tests {
 
     #[test]
     fn test_get_info_ctap2_only() {
-        let mut device = TestDevice::new();
+        let mut device = Device::new("commands/get_info").unwrap();
         let nonce = [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01];
 
         // channel id
@@ -375,8 +380,9 @@ pub mod tests {
             Capability::WINK | Capability::CBOR | Capability::NMSG
         );
 
-        let result =
-            FidoDevice::get_authenticator_info(&device).expect("Didn't get any authenticator_info");
+        let result = device
+            .get_authenticator_info()
+            .expect("Didn't get any authenticator_info");
         let expected = AuthenticatorInfo {
             versions: vec!["U2F_V2".to_string(), "FIDO_2_0".to_string()],
             extensions: vec!["uvm".to_string(), "hmac-secret".to_string()],

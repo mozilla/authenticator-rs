@@ -5,6 +5,7 @@
 extern crate libc;
 extern crate log;
 
+use crate::transport::device_selector::DeviceSelectorEvent;
 use crate::transport::platform::iokit::*;
 use crate::util::io_err;
 use core_foundation::base::*;
@@ -22,20 +23,40 @@ struct DeviceData {
 
 pub struct Monitor<F>
 where
-    F: Fn((IOHIDDeviceRef, Receiver<Vec<u8>>), &dyn Fn() -> bool) + Sync,
+    F: Fn(
+            (IOHIDDeviceRef, Receiver<Vec<u8>>),
+            Sender<DeviceSelectorEvent>,
+            Sender<crate::StatusUpdate>,
+            &dyn Fn() -> bool,
+        ) + Send
+        + Sync
+        + 'static,
 {
     manager: IOHIDManagerRef,
     // Keep alive until the monitor goes away.
     _matcher: IOHIDDeviceMatcher,
     map: HashMap<IOHIDDeviceRef, DeviceData>,
     new_device_cb: F,
+    selector_sender: Sender<DeviceSelectorEvent>,
+    status_sender: Sender<crate::StatusUpdate>,
 }
 
 impl<F> Monitor<F>
 where
-    F: Fn((IOHIDDeviceRef, Receiver<Vec<u8>>), &dyn Fn() -> bool) + Sync + 'static,
+    F: Fn(
+            (IOHIDDeviceRef, Receiver<Vec<u8>>),
+            Sender<DeviceSelectorEvent>,
+            Sender<crate::StatusUpdate>,
+            &dyn Fn() -> bool,
+        ) + Send
+        + Sync
+        + 'static,
 {
-    pub fn new(new_device_cb: F) -> Self {
+    pub fn new(
+        new_device_cb: F,
+        selector_sender: Sender<DeviceSelectorEvent>,
+        status_sender: Sender<crate::StatusUpdate>,
+    ) -> Self {
         let manager = unsafe { IOHIDManagerCreate(kCFAllocatorDefault, kIOHIDManagerOptionNone) };
 
         // Match FIDO devices only.
@@ -47,6 +68,8 @@ where
             _matcher,
             new_device_cb,
             map: HashMap::new(),
+            selector_sender,
+            status_sender,
         }
     }
 
@@ -98,6 +121,9 @@ where
 
     fn remove_device(&mut self, device_ref: IOHIDDeviceRef) {
         if let Some(DeviceData { tx, runloop }) = self.map.remove(&device_ref) {
+            let _ = self
+                .selector_sender
+                .send(DeviceSelectorEvent::DeviceRemoved(device_ref));
             // Dropping `tx` will make Device::read() fail eventually.
             drop(tx);
 
@@ -137,7 +163,11 @@ where
         device_ref: IOHIDDeviceRef,
     ) {
         let this = unsafe { &mut *(context as *mut Self) };
-
+        let _ = this
+            .selector_sender
+            .send(DeviceSelectorEvent::DevicesAdded(vec![device_ref]));
+        let selector_sender = this.selector_sender.clone();
+        let status_sender = this.status_sender.clone();
         let (tx, rx) = channel();
         let f = &this.new_device_cb;
 
@@ -145,7 +175,7 @@ where
         let runloop = RunLoop::new(move |alive| {
             // Ensure that the runloop is still alive.
             if alive() {
-                f((device_ref, rx), alive);
+                f((device_ref, rx), selector_sender, status_sender, alive);
             }
         });
 
@@ -167,7 +197,14 @@ where
 
 impl<F> Drop for Monitor<F>
 where
-    F: Fn((IOHIDDeviceRef, Receiver<Vec<u8>>), &dyn Fn() -> bool) + Sync,
+    F: Fn(
+            (IOHIDDeviceRef, Receiver<Vec<u8>>),
+            Sender<DeviceSelectorEvent>,
+            Sender<crate::StatusUpdate>,
+            &dyn Fn() -> bool,
+        ) + Send
+        + Sync
+        + 'static,
 {
     fn drop(&mut self) {
         unsafe { CFRelease(self.manager as *mut c_void) };

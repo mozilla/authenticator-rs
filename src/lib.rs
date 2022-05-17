@@ -38,7 +38,7 @@ pub use crate::capi::*;
 pub mod ctap2;
 pub use ctap2::attestation::AttestationObject;
 pub use ctap2::client_data::CollectedClientData;
-pub use ctap2::commands::client_pin::Pin;
+pub use ctap2::commands::client_pin::{Pin, PinError};
 pub use ctap2::AssertionObject;
 
 mod ctap2_capi;
@@ -48,6 +48,9 @@ pub mod errors;
 pub mod statecallback;
 mod transport;
 mod virtualdevices;
+
+mod status_update;
+pub use status_update::*;
 
 mod crypto;
 pub use crypto::COSEAlgorithm;
@@ -92,13 +95,6 @@ pub enum SignResult {
 }
 
 pub type Result<T> = std::result::Result<T, errors::AuthenticatorError>;
-
-#[derive(Debug, Clone)]
-pub enum StatusUpdate {
-    DeviceAvailable { dev_info: u2ftypes::U2FDeviceInfo },
-    DeviceUnavailable { dev_info: u2ftypes::U2FDeviceInfo },
-    Success { dev_info: u2ftypes::U2FDeviceInfo },
-}
 
 #[cfg(test)]
 #[macro_use]

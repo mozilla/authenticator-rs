@@ -15,9 +15,9 @@ use crate::util::io_err;
 extern crate libc;
 extern crate winapi;
 
-use crate::transport::platformwinapi::winapi::shared::{guiddef, minwindef, ntdef, windef};
-use crate::transport::platformwinapi::winapi::shared::{hidclass, hidpi, hidusage};
-use crate::transport::platformwinapi::winapi::um::{handleapi, setupapi};
+use winapi::shared::{guiddef, minwindef, ntdef, windef};
+use winapi::shared::{hidclass, hidpi, hidusage};
+use winapi::um::{handleapi, setupapi};
 
 #[link(name = "setupapi")]
 extern "system" {

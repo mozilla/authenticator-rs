@@ -21,6 +21,7 @@ webdriver = ["bytes", "warp", "tokio"]
 # NOTE: These are mutually exclusive, but cargo does not support that.
 #       Selecting more than one will result in a compilation error!
 # Default: NSS
+crypto_dummy = []
 crypto_ring = ["ring"]
 crypto_openssl = ["openssl", "openssl-sys"]
 crypto_nss = ["nss", "nss_sys", "rc_crypto"]

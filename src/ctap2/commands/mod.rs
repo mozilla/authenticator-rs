@@ -19,6 +19,7 @@ pub(crate) mod get_info;
 pub(crate) mod get_next_assertion;
 pub(crate) mod get_version;
 pub(crate) mod make_credentials;
+pub(crate) mod selection;
 
 pub trait Request<T>
 where
@@ -88,9 +89,11 @@ pub trait RequestCtap2: fmt::Debug {
 
 pub(crate) trait PinAuthCommand {
     fn pin(&self) -> &Option<Pin>;
+    fn set_pin(&mut self, pin: Option<Pin>);
     fn pin_auth(&self) -> &Option<PinAuth>;
     fn set_pin_auth(&mut self, pin_auth: Option<PinAuth>);
     fn client_data(&self) -> &CollectedClientData;
+    fn unset_uv_option(&mut self);
     fn determine_pin_auth<D: FidoDevice>(&mut self, dev: &mut D) -> Result<(), AuthenticatorError> {
         if !dev.supports_ctap2() {
             self.set_pin_auth(None);
@@ -142,6 +145,7 @@ pub(crate) trait PinAuthCommand {
 }
 
 // Spec: https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html#authenticator-api
+// and: https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-20210615.html#authenticator-api
 #[repr(u8)]
 #[derive(Debug)]
 pub enum Command {
@@ -151,6 +155,7 @@ pub enum Command {
     ClientPin = 0x06,
     Reset = 0x07,
     GetNextAssertion = 0x08,
+    Selection = 0x0B,
 }
 
 impl Command {
@@ -437,15 +442,12 @@ where
                 None,
             )))?;
 
-        let shared_secret = if let Some(shared_secret) = dev.get_shared_secret().cloned() {
-            shared_secret
-        } else {
-            let pin_command = GetKeyAgreement::new(&info)?;
-            let device_key_agreement = dev.send_cbor(&pin_command)?;
-            let shared_secret = device_key_agreement.shared_secret()?;
-            dev.set_shared_secret(shared_secret.clone());
-            shared_secret
-        };
+        // Not reusing the shared secret here, if it exists, since we might start again
+        // with a different PIN (e.g. if the last one was wrong)
+        let pin_command = GetKeyAgreement::new(&info)?;
+        let device_key_agreement = dev.send_cbor(&pin_command)?;
+        let shared_secret = device_key_agreement.shared_secret()?;
+        dev.set_shared_secret(shared_secret.clone());
 
         let pin_command = GetPinToken::new(&info, &shared_secret, &pin)?;
         let pin_token = dev.send_cbor(&pin_command)?;
@@ -460,57 +462,4 @@ where
     };
 
     Ok(pin_auth)
-}
-
-#[cfg(test)]
-pub mod tests {
-    use super::*;
-    use crate::consts::CID_BROADCAST;
-    use crate::crypto::ECDHSecret;
-    use crate::ctap2::commands::get_info::AuthenticatorInfo;
-    use crate::transport::hid::HIDDevice;
-    use crate::u2fprotocol::tests::platform::TestDevice;
-    use crate::u2ftypes::U2FDevice;
-
-    impl HIDDevice for TestDevice {
-        type Id = String;
-        type BuildParameters = (); // None used
-
-        fn get_authenticator_info(&self) -> Option<&AuthenticatorInfo> {
-            self.authenticator_info.as_ref()
-        }
-
-        fn set_authenticator_info(&mut self, authenticator_info: AuthenticatorInfo) {
-            self.authenticator_info = Some(authenticator_info);
-        }
-
-        fn set_shared_secret(&mut self, _: ECDHSecret) {
-            // Nothing
-        }
-        fn get_shared_secret(&self) -> std::option::Option<&ECDHSecret> {
-            None
-        }
-
-        fn new(_: Self::BuildParameters) -> Result<Self, HIDError>
-        where
-            Self::BuildParameters: Sized,
-            Self: Sized,
-        {
-            Ok(TestDevice {
-                cid: CID_BROADCAST,
-                reads: vec![],
-                writes: vec![],
-                dev_info: None,
-                authenticator_info: None,
-            })
-        }
-
-        fn initialized(&self) -> bool {
-            self.get_cid() != &CID_BROADCAST
-        }
-
-        fn id(&self) -> Self::Id {
-            "TestDevice".to_string()
-        }
-    }
 }

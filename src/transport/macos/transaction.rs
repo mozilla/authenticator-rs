@@ -6,11 +6,14 @@ extern crate libc;
 
 use crate::errors;
 use crate::statecallback::StateCallback;
-use crate::transport::platform::iokit::{CFRunLoopEntryObserver, IOHIDDeviceRef, SendableRunLoop};
+use crate::transport::device_selector::{
+    DeviceBuildParameters, DeviceSelector, DeviceSelectorEvent,
+};
+use crate::transport::platform::iokit::{CFRunLoopEntryObserver, SendableRunLoop};
 use crate::transport::platform::monitor::Monitor;
 use core_foundation::runloop::*;
 use std::os::raw::c_void;
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{channel, Sender};
 use std::thread;
 
 // A transaction will run the given closure in a new thread, thereby using a
@@ -20,21 +23,32 @@ use std::thread;
 pub struct Transaction {
     runloop: Option<SendableRunLoop>,
     thread: Option<thread::JoinHandle<()>>,
+    device_selector: DeviceSelector,
 }
 
 impl Transaction {
     pub fn new<F, T>(
         timeout: u64,
         callback: StateCallback<crate::Result<T>>,
+        status: Sender<crate::StatusUpdate>,
         new_device_cb: F,
     ) -> crate::Result<Self>
     where
-        F: Fn((IOHIDDeviceRef, Receiver<Vec<u8>>), &dyn Fn() -> bool) + Sync + Send + 'static,
+        F: Fn(
+                DeviceBuildParameters,
+                Sender<DeviceSelectorEvent>,
+                Sender<crate::StatusUpdate>,
+                &dyn Fn() -> bool,
+            ) + Sync
+            + Send
+            + 'static,
         T: 'static,
     {
         let (tx, rx) = channel();
         let timeout = (timeout as f64) / 1000.0;
-
+        let status_sender = status.clone();
+        let device_selector = DeviceSelector::run(status);
+        let selector_sender = device_selector.clone_sender();
         let builder = thread::Builder::new();
         let thread = builder
             .spawn(move || {
@@ -47,7 +61,7 @@ impl Transaction {
                 obs.add_to_current_runloop();
 
                 // Create a new HID device monitor and start polling.
-                let mut monitor = Monitor::new(new_device_cb);
+                let mut monitor = Monitor::new(new_device_cb, selector_sender, status_sender);
                 try_or!(monitor.start(), |_| callback
                     .call(Err(errors::AuthenticatorError::Platform)));
 
@@ -72,6 +86,7 @@ impl Transaction {
         Ok(Self {
             runloop: Some(runloop),
             thread: Some(thread),
+            device_selector,
         })
     }
 
@@ -88,5 +103,6 @@ impl Transaction {
 
         // This must never be None. Ignore return value.
         let _ = self.thread.take().unwrap().join();
+        self.device_selector.stop();
     }
 }

@@ -11,7 +11,7 @@ use authenticator::{
     ctap2::server::{
         PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, Transport, User,
     },
-    errors::{AuthenticatorError, PinError},
+    errors::PinError,
     statecallback::StateCallback,
     COSEAlgorithm, Pin, RegisterResult, SignResult, StatusUpdate,
 };
@@ -57,7 +57,7 @@ fn main() {
         manager.add_u2f_usb_hid_platform_transports();
     }
 
-    let timeout_ms = match matches.opt_get_default::<u64>("timeout", 15) {
+    let timeout_ms = match matches.opt_get_default::<u64>("timeout", 25) {
         Ok(timeout_s) => {
             println!("Using {}s as the timeout", &timeout_s);
             timeout_s * 1_000
@@ -94,6 +94,42 @@ fn main() {
             Ok(StatusUpdate::Success { dev_info }) => {
                 println!("STATUS: success using device: {}", dev_info);
             }
+            Ok(StatusUpdate::SelectDeviceNotice) => {
+                println!("STATUS: Please select a device by touching one of them.");
+            }
+            Ok(StatusUpdate::DeviceSelected(dev_info)) => {
+                println!("STATUS: Continuing with device: {}", dev_info);
+            }
+            Ok(StatusUpdate::PinError(error, sender)) => match error {
+                PinError::PinRequired => {
+                    let raw_pin = rpassword::prompt_password_stderr("Enter PIN: ")
+                        .expect("Failed to read PIN");
+                    sender.send(Pin::new(&raw_pin)).expect("Failed to send PIN");
+                    continue;
+                }
+                PinError::InvalidPin(attempts) => {
+                    println!(
+                        "Wrong PIN! {}",
+                        attempts.map_or(format!("Try again."), |a| format!(
+                            "You have {} attempts left.",
+                            a
+                        ))
+                    );
+                    let raw_pin = rpassword::prompt_password_stderr("Enter PIN: ")
+                        .expect("Failed to read PIN");
+                    sender.send(Pin::new(&raw_pin)).expect("Failed to send PIN");
+                    continue;
+                }
+                PinError::PinAuthBlocked => {
+                    panic!("Too many failed attempts in one row. Your device has been temporarily blocked. Please unplug it and plug in again.")
+                }
+                PinError::PinBlocked => {
+                    panic!("Too many failed attempts. Your device has been blocked. Reset it.")
+                }
+                e => {
+                    panic!("Unexpected error: {:?}", e)
+                }
+            },
             Err(RecvError) => {
                 println!("STATUS: end");
                 return;
@@ -108,7 +144,7 @@ fn main() {
         display_name: None,
     };
     let origin = "https://example.com".to_string();
-    let mut ctap_args = RegisterArgsCtap2 {
+    let ctap_args = RegisterArgsCtap2 {
         challenge: chall_bytes.clone(),
         relying_party: RelyingParty {
             id: "example.com".to_string(),
@@ -135,7 +171,7 @@ fn main() {
         }],
         options: MakeCredentialsOptions {
             resident_key: None,
-            user_verification: Some(true),
+            user_verification: None,
         },
         extensions: MakeCredentialsExtensions {
             hmac_secret: if matches.opt_present("hmac_secret") {
@@ -176,31 +212,6 @@ fn main() {
                 client_data = c;
                 break;
             }
-            Err(AuthenticatorError::PinError(PinError::PinRequired)) => {
-                let raw_pin =
-                    rpassword::prompt_password_stderr("Enter PIN: ").expect("Failed to read PIN");
-                ctap_args.pin = Some(Pin::new(&raw_pin));
-                continue;
-            }
-            Err(AuthenticatorError::PinError(PinError::InvalidPin(attempts))) => {
-                println!(
-                    "Wrong PIN! {}",
-                    attempts.map_or(format!("Try again."), |a| format!(
-                        "You have {} attempts left.",
-                        a
-                    ))
-                );
-                let raw_pin =
-                    rpassword::prompt_password_stderr("Enter PIN: ").expect("Failed to read PIN");
-                ctap_args.pin = Some(Pin::new(&raw_pin));
-                continue;
-            }
-            Err(AuthenticatorError::PinError(PinError::PinAuthBlocked)) => {
-                panic!("Too many failed attempts in one row. Your device has been temporarily blocked. Please unplug it and plug in again.")
-            }
-            Err(AuthenticatorError::PinError(PinError::PinBlocked)) => {
-                panic!("Too many failed attempts. Your device has been blocked. Reset it.")
-            }
             Err(e) => panic!("Registration failed: {:?}", e),
         };
     }
@@ -223,7 +234,7 @@ fn main() {
         allow_list = Vec::new();
     }
 
-    let mut ctap_args = SignArgsCtap2 {
+    let ctap_args = SignArgsCtap2 {
         challenge: chall_bytes,
         origin,
         relying_party_id: "example.com".to_string(),
@@ -273,36 +284,6 @@ fn main() {
                 println!("Done.");
                 break;
             }
-
-            Err(AuthenticatorError::PinError(PinError::PinRequired)) => {
-                let raw_pin =
-                    rpassword::prompt_password_stderr("Enter PIN: ").expect("Failed to read PIN");
-                ctap_args.pin = Some(Pin::new(&raw_pin));
-                continue;
-            }
-
-            Err(AuthenticatorError::PinError(PinError::InvalidPin(attempts))) => {
-                println!(
-                    "Wrong PIN! {}",
-                    attempts.map_or(format!("Try again."), |a| format!(
-                        "You have {} attempts left.",
-                        a
-                    ))
-                );
-                let raw_pin =
-                    rpassword::prompt_password_stderr("Enter PIN: ").expect("Failed to read PIN");
-                ctap_args.pin = Some(Pin::new(&raw_pin));
-                continue;
-            }
-
-            Err(AuthenticatorError::PinError(PinError::PinAuthBlocked)) => {
-                panic!("Too many failed attempts in one row. Your device has been temporarily blocked. Please unplug it and plug in again.")
-            }
-
-            Err(AuthenticatorError::PinError(PinError::PinBlocked)) => {
-                panic!("Too many failed attempts. Your device has been blocked. Reset it.")
-            }
-
             Err(e) => panic!("Signing failed: {:?}", e),
         }
     }

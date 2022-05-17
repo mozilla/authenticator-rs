@@ -14,7 +14,7 @@ use crate::ctap2::server::{
 };
 use crate::errors::{AuthenticatorError, U2FTokenError};
 use crate::statecallback::StateCallback;
-use crate::{AttestationObject, CollectedClientData, Pin};
+use crate::{AttestationObject, CollectedClientData, Pin, StatusUpdate};
 use crate::{RegisterResult, SignResult};
 use libc::size_t;
 use rand::{thread_rng, Rng};
@@ -31,6 +31,7 @@ type Ctap2PubKeyCredDescriptors = Vec<PublicKeyCredentialDescriptor>;
 type Ctap2RegisterCallback = extern "C" fn(u64, *mut Ctap2RegisterResult);
 type Ctap2SignResult = Result<(AssertionObject, CString), AuthenticatorError>;
 type Ctap2SignCallback = extern "C" fn(u64, *mut Ctap2SignResult);
+type Ctap2StatusUpdateCallback = extern "C" fn(*mut StatusUpdate);
 
 const SIGN_RESULT_PUBKEY_CRED_ID: u8 = 1;
 const SIGN_RESULT_AUTH_DATA: u8 = 2;
@@ -181,6 +182,7 @@ pub unsafe extern "C" fn rust_ctap2_mgr_register(
     mgr: *mut AuthenticatorService,
     timeout: u64,
     callback: Ctap2RegisterCallback,
+    status_callback: Ctap2StatusUpdateCallback,
     challenge: AuthenticatorArgsChallenge,
     relying_party_id: *const c_char,
     origin_ptr: *const c_char,
@@ -239,11 +241,16 @@ pub unsafe extern "C" fn rust_ctap2_mgr_register(
 
     let (status_tx, status_rx) = channel::<crate::StatusUpdate>();
     thread::spawn(move || loop {
-        // Issue https://github.com/mozilla/authenticator-rs/issues/132 will
-        // plumb the status channel through to the actual C API signatures
         match status_rx.recv() {
-            Ok(_) => {}
-            Err(_recv_error) => return,
+            Ok(r) => {
+                let rb = Box::new(r);
+                status_callback(Box::into_raw(rb));
+            }
+            Err(e) => {
+                status_callback(ptr::null_mut());
+                error!("Error when receiving status update: {:?}", e);
+                return;
+            }
         }
     });
 
@@ -301,6 +308,7 @@ pub unsafe extern "C" fn rust_ctap2_mgr_sign(
     mgr: *mut AuthenticatorService,
     timeout: u64,
     callback: Ctap2SignCallback,
+    status_callback: Ctap2StatusUpdateCallback,
     challenge: AuthenticatorArgsChallenge,
     relying_party_id: *const c_char,
     origin_ptr: *const c_char,
@@ -335,11 +343,16 @@ pub unsafe extern "C" fn rust_ctap2_mgr_sign(
 
     let (status_tx, status_rx) = channel::<crate::StatusUpdate>();
     thread::spawn(move || loop {
-        // Issue https://github.com/mozilla/authenticator-rs/issues/132 will
-        // plumb the status channel through to the actual C API signatures
         match status_rx.recv() {
-            Ok(_) => {}
-            Err(_recv_error) => return,
+            Ok(r) => {
+                let rb = Box::new(r);
+                status_callback(Box::into_raw(rb));
+            }
+            Err(e) => {
+                status_callback(ptr::null_mut());
+                error!("Error when receiving status update: {:?}", e);
+                return;
+            }
         }
     });
 
@@ -908,4 +921,105 @@ pub unsafe extern "C" fn rust_ctap2_sign_result_username_copy(
 
         Err(_) => false,
     }
+}
+
+/// # Safety
+///
+/// This function is used to get how long the JSON-representation of a status update is.
+#[no_mangle]
+pub unsafe extern "C" fn rust_ctap2_status_update_len(
+    res: *const StatusUpdate,
+    len: *mut size_t,
+) -> bool {
+    if res.is_null() || len.is_null() {
+        return false;
+    }
+
+    match serde_json::to_string(&*res) {
+        Ok(s) => {
+            *len = s.len();
+            true
+        }
+        Err(e) => {
+            error!("Failed to parse {:?} into json: {:?}", &*res, e);
+            false
+        }
+    }
+}
+
+/// # Safety
+///
+/// This method does not ensure anything about dst before copying, so
+/// ensure it is long enough (using rust_ctap2_status_update_len)
+#[no_mangle]
+pub unsafe extern "C" fn rust_ctap2_status_update_copy_json(
+    res: *const StatusUpdate,
+    dst: *mut c_char,
+) -> bool {
+    if res.is_null() || dst.is_null() {
+        return false;
+    }
+
+    match serde_json::to_string(&*res) {
+        Ok(s) => {
+            if let Ok(cs) = CString::new(s) {
+                ptr::copy_nonoverlapping(cs.as_ptr(), dst, cs.as_bytes().len());
+                true
+            } else {
+                error!("Failed to convert String to CString");
+                false
+            }
+        }
+        Err(e) => {
+            error!("Failed to parse {:?} into json: {:?}", &*res, e);
+            false
+        }
+    }
+}
+
+/// # Safety
+///
+/// We copy the pin, so it is the callers responsibility to free the argument
+#[no_mangle]
+pub unsafe extern "C" fn rust_ctap2_status_update_send_pin(
+    res: *const StatusUpdate,
+    c_pin: *mut c_char,
+) -> bool {
+    if res.is_null() || c_pin.is_null() {
+        return false;
+    }
+
+    match &*res {
+        StatusUpdate::PinError(_, sender) => {
+            if let Ok(pin) = CStr::from_ptr(c_pin).to_str() {
+                sender
+                    .send(Pin::new(pin))
+                    .map_err(|e| {
+                        error!("Failed to send PIN to device-thread");
+                        e
+                    })
+                    .is_ok()
+            } else {
+                error!("Failed to convert PIN from c_char to String");
+                false
+            }
+        }
+        _ => {
+            error!("Wrong state!");
+            false
+        }
+    }
+}
+
+/// # Safety
+///
+/// This function frees the memory of res!
+#[no_mangle]
+pub unsafe extern "C" fn rust_ctap2_destroy_status_update_res(res: *mut StatusUpdate) -> bool {
+    if res.is_null() {
+        return false;
+    }
+    // Dropping it when we go out of scope
+    let _ = Box::from_raw(res);
+    true
 }
