@@ -2,10 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use std::{cmp, fmt, io, str};
-
 use crate::consts::*;
 use crate::util::io_err;
+use serde::Serialize;
+use std::{cmp, fmt, io, str};
 
 pub fn to_hex(data: &[u8], joiner: &str) -> String {
     let parts: Vec<String> = data.iter().map(|byte| format!("{:02x}", byte)).collect();
@@ -230,7 +230,7 @@ impl U2FAPDUHeader {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct U2FDeviceInfo {
     pub vendor_name: Vec<u8>,
     pub device_name: Vec<u8>,

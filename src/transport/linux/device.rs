@@ -3,16 +3,14 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 extern crate libc;
-
 use crate::consts::CID_BROADCAST;
 use crate::transport::hid::HIDDevice;
 use crate::transport::platform::{hidraw, monitor};
-use crate::transport::AuthenticatorInfo;
-use crate::transport::ECDHSecret;
-use crate::transport::HIDError;
+use crate::transport::{AuthenticatorInfo, ECDHSecret, FidoDevice, HIDError};
 use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
 use crate::util::from_unix_result;
 use std::fs::OpenOptions;
+use std::hash::{Hash, Hasher};
 use std::io;
 use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;
@@ -30,31 +28,6 @@ pub struct Device {
     authenticator_info: Option<AuthenticatorInfo>,
 }
 
-impl Device {
-    pub fn new(path: PathBuf) -> io::Result<Self> {
-        let fd = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(path.clone())?;
-
-        let (in_rpt_size, out_rpt_size) = hidraw::read_hid_rpt_sizes_or_defaults(fd.as_raw_fd());
-        Ok(Self {
-            path,
-            fd,
-            in_rpt_size,
-            out_rpt_size,
-            cid: CID_BROADCAST,
-            dev_info: None,
-            secret: None,
-            authenticator_info: None,
-        })
-    }
-
-    pub fn is_u2f(&self) -> bool {
-        hidraw::is_u2f_device(self.fd.as_raw_fd())
-    }
-}
-
 impl Drop for Device {
     fn drop(&mut self) {
         // Close the fd, ignore any errors.
@@ -64,7 +37,19 @@ impl Drop for Device {
 
 impl PartialEq for Device {
     fn eq(&self, other: &Device) -> bool {
+        // The path should be the only identifying member for a device
+        // If the path is the same, its the same device
         self.path == other.path
+    }
+}
+
+impl Eq for Device {}
+
+impl Hash for Device {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // The path should be the only identifying member for a device
+        // If the path is the same, its the same device
+        self.path.hash(state);
     }
 }
 
@@ -125,28 +110,29 @@ impl HIDDevice for Device {
     type BuildParameters = PathBuf;
     type Id = PathBuf;
 
-    fn new(path: PathBuf) -> Result<Self, HIDError> {
+    fn new(path: PathBuf) -> Result<Self, (HIDError, Self::Id)> {
         debug!("Opening device {:?}", path);
         let fd = OpenOptions::new()
             .read(true)
             .write(true)
-            .open(path.clone())
-            .map_err(|e| HIDError::IO(Some(path.clone()), e))?;
+            .open(&path)
+            .map_err(|e| (HIDError::IO(Some(path.clone()), e), path.clone()))?;
         let (in_rpt_size, out_rpt_size) = hidraw::read_hid_rpt_sizes_or_defaults(fd.as_raw_fd());
-        if hidraw::is_u2f_device(fd.as_raw_fd()) {
-            info!("new device {:?}", path);
-            Ok(Self {
-                path,
-                fd,
-                in_rpt_size,
-                out_rpt_size,
-                cid: CID_BROADCAST,
-                dev_info: None,
-                secret: None,
-                authenticator_info: None,
-            })
+        let res = Self {
+            path,
+            fd,
+            in_rpt_size,
+            out_rpt_size,
+            cid: CID_BROADCAST,
+            dev_info: None,
+            secret: None,
+            authenticator_info: None,
+        };
+        if res.is_u2f() {
+            info!("new device {:?}", res.path);
+            Ok(res)
         } else {
-            Err(HIDError::DeviceNotSupported)
+            Err((HIDError::DeviceNotSupported, res.path.clone()))
         }
     }
 
@@ -157,6 +143,10 @@ impl HIDDevice for Device {
 
     fn id(&self) -> Self::Id {
         self.path.clone()
+    }
+
+    fn is_u2f(&self) -> bool {
+        hidraw::is_u2f_device(self.fd.as_raw_fd())
     }
 
     fn get_shared_secret(&self) -> Option<&ECDHSecret> {
@@ -174,4 +164,26 @@ impl HIDDevice for Device {
     fn set_authenticator_info(&mut self, authenticator_info: AuthenticatorInfo) {
         self.authenticator_info = Some(authenticator_info);
     }
+
+    /// This is used for cancellation of blocking read()-requests.
+    /// With this, we can clone the Device, pass it to another thread and call "cancel()" on that.
+    fn clone_device_as_write_only(&self) -> Result<Self, HIDError> {
+        let fd = OpenOptions::new()
+            .write(true)
+            .open(&self.path)
+            .map_err(|e| (HIDError::IO(Some(self.path.clone()), e)))?;
+
+        Ok(Self {
+            path: self.path.clone(),
+            fd,
+            in_rpt_size: self.in_rpt_size,
+            out_rpt_size: self.out_rpt_size,
+            cid: self.cid,
+            dev_info: self.dev_info.clone(),
+            secret: self.secret.clone(),
+            authenticator_info: self.authenticator_info.clone(),
+        })
+    }
 }
+
+impl FidoDevice for Device {}

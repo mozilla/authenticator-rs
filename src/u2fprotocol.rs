@@ -236,130 +236,14 @@ where
 pub(crate) mod tests {
     use super::{init_device, is_v2_device, send_apdu, sendrecv, U2FDevice};
     use crate::consts::{Capability, HIDCmd, CID_BROADCAST, SW_NO_ERROR};
+    use crate::transport::device_selector::Device;
+    use crate::transport::hid::HIDDevice;
     use crate::u2ftypes::U2FDeviceInfo;
     use rand::{thread_rng, RngCore};
 
-    pub(crate) mod platform {
-        use std::io;
-        use std::io::{Read, Write};
-
-        use crate::consts::CID_BROADCAST;
-        use crate::ctap2::commands::get_info::AuthenticatorInfo;
-        use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
-
-        pub(crate) const IN_HID_RPT_SIZE: usize = 64;
-        const OUT_HID_RPT_SIZE: usize = 64;
-
-        #[derive(Debug)]
-        pub struct TestDevice {
-            pub cid: [u8; 4],
-            pub reads: Vec<[u8; IN_HID_RPT_SIZE]>,
-            pub writes: Vec<[u8; OUT_HID_RPT_SIZE + 1]>,
-            pub dev_info: Option<U2FDeviceInfo>,
-            pub authenticator_info: Option<AuthenticatorInfo>,
-        }
-
-        impl TestDevice {
-            pub fn new() -> TestDevice {
-                TestDevice {
-                    cid: CID_BROADCAST,
-                    reads: vec![],
-                    writes: vec![],
-                    dev_info: None,
-                    authenticator_info: None,
-                }
-            }
-
-            pub fn add_write(&mut self, packet: &[u8], fill_value: u8) {
-                // Add one to deal with record index check
-                let mut write = [fill_value; OUT_HID_RPT_SIZE + 1];
-                // Make sure we start with a 0, for HID record index
-                write[0] = 0;
-                // Clone packet data in at 1, since front is padded with HID record index
-                write[1..=packet.len()].clone_from_slice(packet);
-                self.writes.push(write);
-            }
-
-            pub fn add_read(&mut self, packet: &[u8], fill_value: u8) {
-                let mut read = [fill_value; IN_HID_RPT_SIZE];
-                read[..packet.len()].clone_from_slice(packet);
-                self.reads.push(read);
-            }
-        }
-
-        impl Write for TestDevice {
-            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-                // Pop a vector from the expected writes, check for quality
-                // against bytes array.
-                assert!(
-                    !self.writes.is_empty(),
-                    "Ran out of expected write values! Wanted to write {:?}",
-                    bytes
-                );
-                let check = self.writes.remove(0);
-                assert_eq!(check.len(), bytes.len());
-                assert_eq!(&check, bytes);
-                Ok(bytes.len())
-            }
-
-            // nop
-            fn flush(&mut self) -> io::Result<()> {
-                Ok(())
-            }
-        }
-
-        impl Read for TestDevice {
-            fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
-                assert!(!self.reads.is_empty(), "Ran out of read values!");
-                let check = self.reads.remove(0);
-                assert_eq!(check.len(), bytes.len());
-                bytes.clone_from_slice(&check);
-                Ok(check.len())
-            }
-        }
-
-        impl Drop for TestDevice {
-            fn drop(&mut self) {
-                if !std::thread::panicking() {
-                    assert!(self.reads.is_empty());
-                    assert!(self.writes.is_empty());
-                }
-            }
-        }
-
-        impl U2FDevice for TestDevice {
-            fn get_cid<'a>(&'a self) -> &'a [u8; 4] {
-                &self.cid
-            }
-
-            fn set_cid(&mut self, cid: [u8; 4]) {
-                self.cid = cid;
-            }
-
-            fn in_rpt_size(&self) -> usize {
-                IN_HID_RPT_SIZE
-            }
-
-            fn out_rpt_size(&self) -> usize {
-                OUT_HID_RPT_SIZE
-            }
-
-            fn get_property(&self, prop_name: &str) -> io::Result<String> {
-                Ok(format!("{} not implemented", prop_name))
-            }
-            fn get_device_info(&self) -> U2FDeviceInfo {
-                self.dev_info.clone().unwrap()
-            }
-
-            fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {
-                self.dev_info = Some(dev_info);
-            }
-        }
-    }
-
     #[test]
     fn test_init_device() {
-        let mut device = platform::TestDevice::new();
+        let mut device = Device::new("u2fprotocol").unwrap();
         let nonce = vec![0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01];
 
         // channel id
@@ -393,7 +277,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_get_version() {
-        let mut device = platform::TestDevice::new();
+        let mut device = Device::new("u2fprotocol").unwrap();
         // channel id
         let mut cid = [0u8; 4];
         thread_rng().fill_bytes(&mut cid);
@@ -430,7 +314,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_sendrecv_multiple() {
-        let mut device = platform::TestDevice::new();
+        let mut device = Device::new("u2fprotocol").unwrap();
         let cid = [0x01, 0x02, 0x03, 0x04];
         device.set_cid(cid);
 
@@ -473,7 +357,7 @@ pub(crate) mod tests {
     fn test_sendapdu() {
         let cid = [0x01, 0x02, 0x03, 0x04];
         let data = [0x01, 0x02, 0x03, 0x04, 0x05];
-        let mut device = platform::TestDevice::new();
+        let mut device = Device::new("u2fprotocol").unwrap();
         device.set_cid(cid);
 
         let mut msg = cid.to_vec();
@@ -507,7 +391,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_get_property() {
-        let device = platform::TestDevice::new();
+        let device = Device::new("u2fprotocol").unwrap();
 
         assert_eq!(device.get_property("a").unwrap(), "a not implemented");
     }

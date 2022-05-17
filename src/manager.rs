@@ -320,7 +320,7 @@ impl AuthenticatorTransport for Manager {
         callback: StateCallback<crate::Result<crate::RegisterResult>>,
     ) -> Result<(), AuthenticatorError> {
         let make_credentials = match ctap_args {
-            RegisterArgs::CTAP2(mut args) => {
+            RegisterArgs::CTAP2(args) => {
                 let client_data = CollectedClientData {
                     webauthn_type: WebauthnType::Create,
                     challenge: args.challenge.into(),
@@ -328,11 +328,6 @@ impl AuthenticatorTransport for Manager {
                     cross_origin: false,
                     token_binding: None,
                 };
-
-                // Do not set user_verification, if pin is provided
-                if args.pin.is_some() {
-                    args.options.user_verification = None;
-                }
 
                 MakeCredentials::new(
                     client_data,
@@ -449,7 +444,7 @@ impl AuthenticatorTransport for Manager {
                 }
             }
 
-            SignArgs::CTAP2(mut args) => {
+            SignArgs::CTAP2(args) => {
                 let client_data = CollectedClientData {
                     webauthn_type: WebauthnType::Get,
                     challenge: args.challenge.into(),
@@ -457,11 +452,6 @@ impl AuthenticatorTransport for Manager {
                     cross_origin: false,
                     token_binding: None,
                 };
-
-                // Do not set user_verification, if pin is provided
-                if args.pin.is_some() {
-                    args.options.user_verification = None;
-                }
 
                 let get_assertion = GetAssertion::new(
                     client_data.clone(),

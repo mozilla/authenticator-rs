@@ -57,14 +57,14 @@ impl RequestCtap1 for GetVersion {
 #[cfg(test)]
 pub mod tests {
     use crate::consts::{Capability, HIDCmd, CID_BROADCAST, SW_NO_ERROR};
-    use crate::transport::{FidoDevice, Nonce};
-    use crate::u2fprotocol::tests::platform::TestDevice;
+    use crate::transport::device_selector::Device;
+    use crate::transport::{hid::HIDDevice, FidoDevice, Nonce};
     use crate::u2ftypes::U2FDevice;
     use rand::{thread_rng, RngCore};
 
     #[test]
     fn test_get_version_ctap1_only() {
-        let mut device = TestDevice::new();
+        let mut device = Device::new("commands/get_version").unwrap();
         let nonce = [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01];
 
         // channel id
@@ -112,7 +112,7 @@ pub mod tests {
         let dev_info = device.get_device_info();
         assert_eq!(dev_info.cap_flags, Capability::WINK);
 
-        let result = FidoDevice::get_authenticator_info(&device);
+        let result = device.get_authenticator_info();
         assert!(result.is_none());
     }
 }

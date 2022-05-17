@@ -97,6 +97,16 @@ impl PartialEq for Device {
     }
 }
 
+impl Eq for Device {}
+
+impl Hash for Device {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // The path should be the only identifying member for a device
+        // If the path is the same, its the same device
+        self.fd.hash(state);
+    }
+}
+
 impl Read for Device {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let bufp = buf.as_mut_ptr() as *mut libc::c_void;

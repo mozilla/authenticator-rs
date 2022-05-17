@@ -45,3 +45,17 @@ impl PartialEq for Fd {
         (st.st_dev == sto.st_dev) & (st.st_ino == sto.st_ino)
     }
 }
+
+
+impl Eq for Device {}
+
+impl Hash for Device {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        let mut st: libc::stat = unsafe { mem::zeroed() };
+        if unsafe { libc::fstat(self.fileno, &mut st) } == -1 {
+            return;
+        }
+        st.st_dev.hash(state);
+        st.st_ino.hash(state);
+    }
+}

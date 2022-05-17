@@ -5,6 +5,8 @@
 // Allow dead code in this module, since it's all packet consts anyways.
 #![allow(dead_code)]
 
+use serde::Serialize;
+
 pub const MAX_HID_RPT_SIZE: usize = 64;
 pub const U2FAPDUHEADER_SIZE: usize = 7;
 pub const CID_BROADCAST: [u8; 4] = [0xff, 0xff, 0xff, 0xff];
@@ -111,6 +113,7 @@ pub const U2F_CHECK_IS_REGISTERED: u8 = 0x07; // Check if the key handle is regi
 pub const INIT_NONCE_SIZE: usize = 8; // Size of channel initialization challenge
 
 bitflags! {
+    #[derive(Serialize)]
     pub struct Capability: u8 {
         const WINK = 0x01;
         const LOCK = 0x02;
