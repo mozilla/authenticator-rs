@@ -250,18 +250,18 @@ impl DeviceCapabilities {
         }
 
         let mut caps = mem::MaybeUninit::<hidpi::HIDP_CAPS>::uninit();
-        unsafe {
-            let rv = HidP_GetCaps(preparsed_data, caps.as_mut_ptr());
-            HidD_FreePreparsedData(preparsed_data);
+        
+            let rv = unsafe { HidP_GetCaps(preparsed_data, caps.as_mut_ptr()) };
+            unsafe { HidD_FreePreparsedData(preparsed_data) };
 
             if rv != hidpi::HIDP_STATUS_SUCCESS {
                 return Err(io_err("HidP_GetCaps failed!"));
             }
 
             Ok(Self {
-                caps: caps.assume_init(),
+                caps: unsafe { caps.assume_init() },
             })
-        }
+        
     }
 
     pub fn usage(&self) -> hidusage::USAGE {
