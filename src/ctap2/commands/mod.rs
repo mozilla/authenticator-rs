@@ -1,9 +1,6 @@
 use crate::crypto;
 use crate::ctap2::client_data::{ClientDataHash, CollectedClientData};
-use crate::ctap2::commands::client_pin::{
-    GetKeyAgreement, GetPinToken, GetRetries, Pin, PinAuth, PinError,
-};
-use crate::ctap2::commands::get_info::GetInfo;
+use crate::ctap2::commands::client_pin::{GetPinToken, GetRetries, Pin, PinAuth, PinError};
 use crate::errors::AuthenticatorError;
 use crate::transport::errors::{ApduErrorStatus, HIDError};
 use crate::transport::FidoDevice;
@@ -107,41 +104,52 @@ pub(crate) trait PinAuthCommand {
             .map_err(|e| AuthenticatorError::HIDError(HIDError::Command(CommandError::Json(e))))?;
         let pin_auth = match calculate_pin_auth(dev, &client_data_hash, &self.pin()) {
             Ok(pin_auth) => pin_auth,
-            Err(AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
-                StatusCode::PinInvalid,
-                _,
-            )))) => {
-                // If the given PIN was wrong, determine no. of left retries
-                let cmd = GetRetries::new();
-                let retries = dev.send_cbor(&cmd).ok(); // If we got retries, wrap it in Some, otherwise ignore err
-                return Err(AuthenticatorError::PinError(PinError::InvalidPin(retries)));
-            }
-            Err(AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
-                StatusCode::PinAuthBlocked,
-                _,
-            )))) => {
-                return Err(AuthenticatorError::PinError(PinError::PinAuthBlocked));
-            }
-            Err(AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
-                StatusCode::PinBlocked,
-                _,
-            )))) => {
-                return Err(AuthenticatorError::PinError(PinError::PinBlocked));
-            }
-            Err(AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
-                StatusCode::PinRequired,
-                _,
-            )))) => {
-                return Err(AuthenticatorError::PinError(PinError::PinRequired));
-            }
-            // TODO(MS): Add "PinNotSet"
-            // TODO(MS): Add "PinPolicyViolated"
-            Err(err) => {
-                return Err(err);
+            Err(e) => {
+                return Err(repackage_pin_errors(dev, e));
             }
         };
         self.set_pin_auth(pin_auth);
         Ok(())
+    }
+}
+
+pub(crate) fn repackage_pin_errors<D: FidoDevice>(
+    dev: &mut D,
+    error: AuthenticatorError,
+) -> AuthenticatorError {
+    match error {
+        AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
+            StatusCode::PinInvalid,
+            _,
+        ))) => {
+            // If the given PIN was wrong, determine no. of left retries
+            let cmd = GetRetries::new();
+            let retries = dev.send_cbor(&cmd).ok(); // If we got retries, wrap it in Some, otherwise ignore err
+            return AuthenticatorError::PinError(PinError::InvalidPin(retries));
+        }
+        AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
+            StatusCode::PinAuthBlocked,
+            _,
+        ))) => {
+            return AuthenticatorError::PinError(PinError::PinAuthBlocked);
+        }
+        AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
+            StatusCode::PinBlocked,
+            _,
+        ))) => {
+            return AuthenticatorError::PinError(PinError::PinBlocked);
+        }
+        AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
+            StatusCode::PinRequired,
+            _,
+        ))) => {
+            return AuthenticatorError::PinError(PinError::PinRequired);
+        }
+        // TODO(MS): Add "PinNotSet"
+        // TODO(MS): Add "PinPolicyViolated"
+        err => {
+            return err;
+        }
     }
 }
 
@@ -422,16 +430,9 @@ pub(crate) fn calculate_pin_auth<Dev>(
 where
     Dev: FidoDevice,
 {
-    let info = if let Some(authenticator_info) = dev.get_authenticator_info().cloned() {
-        authenticator_info
-    } else {
-        let info_command = GetInfo::default();
-        let info = dev.send_cbor(&info_command)?;
-        debug!("infos: {:?}", info);
-
-        dev.set_authenticator_info(info.clone());
-        info
-    };
+    // Not reusing the shared secret here, if it exists, since we might start again
+    // with a different PIN (e.g. if the last one was wrong)
+    let (shared_secret, info) = dev.establish_shared_secret()?;
 
     // TODO(MS): What to do if token supports client_pin, but none has been set: Some(false)
     //           AND a Pin is not None?
@@ -443,20 +444,13 @@ where
                 None,
             )))?;
 
-        // Not reusing the shared secret here, if it exists, since we might start again
-        // with a different PIN (e.g. if the last one was wrong)
-        let pin_command = GetKeyAgreement::new(&info)?;
-        let device_key_agreement = dev.send_cbor(&pin_command)?;
-        let shared_secret = device_key_agreement.shared_secret()?;
-        dev.set_shared_secret(shared_secret.clone());
-
         let pin_command = GetPinToken::new(&info, &shared_secret, &pin)?;
         let pin_token = dev.send_cbor(&pin_command)?;
 
         Some(
             pin_token
-                .auth(&client_data_hash)
-                .map_err(AuthenticatorError::PinError)?,
+                .auth(client_data_hash.as_ref())
+                .map_err(CommandError::Crypto)?,
         )
     } else {
         None
