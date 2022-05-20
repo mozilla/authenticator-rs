@@ -64,7 +64,7 @@ impl Transaction {
 
     pub fn cancel(&mut self) {
         info!("Transaction was cancelled.");
-        self.thread.cancel();
         self.device_selector.stop();
+        self.thread.cancel();
     }
 }

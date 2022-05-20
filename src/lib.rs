@@ -94,6 +94,8 @@ pub enum SignResult {
     CTAP2(AssertionObject, CollectedClientData),
 }
 
+pub type ResetResult = ();
+
 pub type Result<T> = std::result::Result<T, errors::AuthenticatorError>;
 
 #[cfg(test)]

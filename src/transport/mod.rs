@@ -1,7 +1,7 @@
 use crate::consts::{Capability, HIDCmd};
 use crate::crypto::ECDHSecret;
 use crate::ctap2::client_data::{Challenge, WebauthnType};
-use crate::ctap2::commands::client_pin::PinAuth;
+use crate::ctap2::commands::client_pin::{GetKeyAgreement, PinAuth};
 use crate::ctap2::commands::get_info::{AuthenticatorInfo, GetInfo};
 use crate::ctap2::commands::get_version::GetVersion;
 use crate::ctap2::commands::make_credentials::{
@@ -108,7 +108,12 @@ pub trait FidoDevice: HIDDevice {
         let buf = buf;
 
         let (cmd, resp) = self.sendrecv(HIDCmd::Cbor, &buf)?;
-        debug!("got from {:?} status={:?}: {:?}", self, cmd, resp);
+        debug!(
+            "got from Device {:?} status={:?}: {:?}",
+            self.id(),
+            cmd,
+            resp
+        );
         if cmd == HIDCmd::Cbor {
             Ok(msg.handle_response_ctap2(self, &resp)?)
         } else {
@@ -125,7 +130,12 @@ pub trait FidoDevice: HIDDevice {
 
         loop {
             let (cmd, mut data) = self.sendrecv(HIDCmd::Msg, &data)?;
-            debug!("got from {:?} status={:?}: {:?}", self, cmd, data);
+            debug!(
+                "got from Device {:?} status={:?}: {:?}",
+                self.id(),
+                cmd,
+                data
+            );
             if cmd == HIDCmd::Msg {
                 if data.len() < 2 {
                     return Err(io_err("Unexpected Response: shorter than expected").into());
@@ -248,5 +258,31 @@ pub trait FidoDevice: HIDDevice {
 
     fn supports_ctap2(&self) -> bool {
         self.get_device_info().cap_flags.contains(Capability::CBOR)
+    }
+
+    fn establish_shared_secret(&mut self) -> Result<(ECDHSecret, AuthenticatorInfo), HIDError> {
+        if !self.supports_ctap2() {
+            return Err(HIDError::UnsupportedCommand);
+        }
+
+        let info = if let Some(authenticator_info) = self.get_authenticator_info().cloned() {
+            authenticator_info
+        } else {
+            // We should already have it, since it is queried upon `init()`, but just to be safe
+            let info_command = GetInfo::default();
+            let info = self.send_cbor(&info_command)?;
+            debug!("infos: {:?}", info);
+
+            self.set_authenticator_info(info.clone());
+            info
+        };
+
+        // Not reusing the shared secret here, if it exists, since we might start again
+        // with a different PIN (e.g. if the last one was wrong)
+        let pin_command = GetKeyAgreement::new(&info)?;
+        let device_key_agreement = self.send_cbor(&pin_command)?;
+        let shared_secret = device_key_agreement.shared_secret()?;
+        self.set_shared_secret(shared_secret.clone());
+        Ok((shared_secret, info))
     }
 }
