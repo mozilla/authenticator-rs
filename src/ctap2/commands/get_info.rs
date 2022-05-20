@@ -234,7 +234,10 @@ impl<'de> Deserialize<'de> for AuthenticatorInfo {
                             }
                             algorithms = Some(map.next_value()?);
                         }
-                        k => return Err(M::Error::custom(format!("unexpected key: {:?}", k))),
+                        k => {
+                            warn!("GetInfo: unexpected key: {:?}", k);
+                            continue;
+                        }
                     }
                 }
 
