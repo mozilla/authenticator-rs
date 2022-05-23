@@ -75,9 +75,9 @@ fn main() {
         r#"{"challenge": "1vQ9mxionq0ngCnjD-wTsv1zUSrGRtFqG2xP09SbZ70","#,
         r#" "version": "U2F_V2", "appId": "http://example.com"}"#
     );
-    let mut challenge = Sha256::default();
-    challenge.input(challenge_str.as_bytes());
-    let chall_bytes = challenge.result().to_vec();
+    let mut challenge = Sha256::new();
+    challenge.update(challenge_str.as_bytes());
+    let chall_bytes = challenge.finalize().to_vec();
 
     // TODO(MS): Needs to be added to RegisterArgsCtap2
     // let flags = RegisterFlags::empty();

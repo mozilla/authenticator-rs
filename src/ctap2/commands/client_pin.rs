@@ -448,11 +448,11 @@ impl Pin {
 
     pub fn for_pin_token(&self) -> PinAuth {
         let mut hasher = Sha256::new();
-        hasher.input(&self.0.as_bytes());
+        hasher.update(&self.0.as_bytes());
 
         let mut output = [0u8; 16];
         let len = output.len();
-        output.copy_from_slice(&hasher.result().as_slice()[..len]);
+        output.copy_from_slice(&hasher.finalize().as_slice()[..len]);
 
         PinAuth(output.to_vec())
     }
