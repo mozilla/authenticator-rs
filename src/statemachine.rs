@@ -3,9 +3,13 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use crate::consts::PARAMETER_SIZE;
+use crate::ctap2::commands::client_pin::{ChangeExistingPin, Pin, PinError, SetNewPin};
 use crate::ctap2::commands::get_assertion::{GetAssertion, GetAssertionResult};
 use crate::ctap2::commands::make_credentials::{MakeCredentials, MakeCredentialsResult};
-use crate::ctap2::commands::{CommandError, PinAuthCommand, Request, StatusCode};
+use crate::ctap2::commands::reset::Reset;
+use crate::ctap2::commands::{
+    repackage_pin_errors, CommandError, PinAuthCommand, Request, StatusCode,
+};
 use crate::errors::{self, AuthenticatorError, UnsupportedOption};
 use crate::statecallback::StateCallback;
 use crate::transport::device_selector::{
@@ -302,6 +306,7 @@ impl StateMachineCtap2 {
     fn init_and_select(
         info: DeviceBuildParameters,
         selector: &Sender<DeviceSelectorEvent>,
+        ctap2_only: bool,
     ) -> Option<Device> {
         // Create a new device.
         let mut dev = match Device::new(info) {
@@ -316,6 +321,12 @@ impl StateMachineCtap2 {
         // Try initializing it.
         if let Err(e) = dev.init(Nonce::CreateRandom) {
             warn!("error while initializing device: {}", e);
+            selector.send(DeviceSelectorEvent::NotAToken(dev.id())).ok();
+            return None;
+        }
+
+        if ctap2_only && dev.get_authenticator_info().is_none() {
+            info!("Device does not support CTAP2");
             selector.send(DeviceSelectorEvent::NotAToken(dev.id())).ok();
             return None;
         }
@@ -370,6 +381,27 @@ impl StateMachineCtap2 {
         Some(dev)
     }
 
+    fn ask_user_for_pin<U>(
+        error: PinError,
+        status: &Sender<StatusUpdate>,
+        callback: &StateCallback<crate::Result<U>>,
+    ) -> Result<Pin, ()> {
+        info!("PIN Error that requires user interaction detected. Sending it back and waiting for a reply");
+        let (tx, rx) = channel();
+        send_status(status, crate::StatusUpdate::PinError(error.clone(), tx));
+        match rx.recv() {
+            Ok(pin) => Ok(pin),
+            Err(_) => {
+                // recv() can only fail, if the other side is dropping the Sender. We are using this as a trick
+                // to let the callback decide if this PinError is recoverable (e.g. with User input) or not (e.g.
+                // locked token). If it is deemed unrecoverable, we error out the 'normal' way with the same error.
+                error!("Callback dropped the channel, so we forward the error to the results-callback: {:?}", error);
+                callback.call(Err(AuthenticatorError::PinError(error)));
+                return Err(());
+            }
+        }
+    }
+
     fn determine_pin_auth<T: PinAuthCommand, U>(
         cmd: &mut T,
         dev: &mut Device,
@@ -382,23 +414,9 @@ impl StateMachineCtap2 {
                     break;
                 }
                 Err(AuthenticatorError::PinError(e)) => {
-                    info!("PIN Error that requires user interaction detected. Sending it back and waiting for a reply");
-                    let (tx, rx) = channel();
-                    send_status(status, crate::StatusUpdate::PinError(e.clone(), tx));
-                    match rx.recv() {
-                        Ok(pin) => {
-                            cmd.set_pin(Some(pin));
-                            continue;
-                        }
-                        Err(_) => {
-                            // recv() can only fail, if the other side is dropping the Sender. We are using this as a trick
-                            // to let the callback decide if this PinError is recoverable (e.g. with User input) or not (e.g.
-                            // locked token). If it is deemed unrecoverable, we error out the 'normal' way with the same error.
-                            error!("Callback dropped the channel, so we forward the error to the results-callback: {:?}", e);
-                            callback.call(Err(AuthenticatorError::PinError(e)));
-                            return Err(());
-                        }
-                    }
+                    let pin = Self::ask_user_for_pin(e, status, callback)?;
+                    cmd.set_pin(Some(pin));
+                    continue;
                 }
                 Err(e) => {
                     error!("Error when determining pinAuth: {:?}", e);
@@ -433,7 +451,7 @@ impl StateMachineCtap2 {
             cbc.clone(),
             status,
             move |info, selector, status, _alive| {
-                let mut dev = match Self::init_and_select(info, &selector) {
+                let mut dev = match Self::init_and_select(info, &selector, false) {
                     None => {
                         return;
                     }
@@ -543,7 +561,7 @@ impl StateMachineCtap2 {
             callback.clone(),
             status,
             move |info, selector, status, _alive| {
-                let mut dev = match Self::init_and_select(info, &selector) {
+                let mut dev = match Self::init_and_select(info, &selector, false) {
                     None => {
                         return;
                     }
@@ -647,5 +665,165 @@ impl StateMachineCtap2 {
             info!("Statemachine was cancelled. Cancelling transaction now.");
             transaction.cancel();
         }
+    }
+
+    pub fn reset(
+        &mut self,
+        timeout: u64,
+        status: Sender<crate::StatusUpdate>,
+        callback: StateCallback<crate::Result<crate::ResetResult>>,
+    ) {
+        // Abort any prior register/sign calls.
+        self.cancel();
+        let cbc = callback.clone();
+
+        let transaction = Transaction::new(
+            timeout,
+            callback.clone(),
+            status,
+            move |info, selector, status, _alive| {
+                let reset = Reset {};
+                let mut dev = match Self::init_and_select(info, &selector, true) {
+                    None => {
+                        return;
+                    }
+                    Some(dev) => dev,
+                };
+
+                info!("Device {:?} continues with the reset process", dev.id());
+                debug!("------------------------------------------------------------------");
+                debug!("{:?}", reset);
+                debug!("------------------------------------------------------------------");
+
+                let resp = dev.send_cbor(&reset);
+                if resp.is_ok() {
+                    send_status(
+                        &status,
+                        crate::StatusUpdate::Success {
+                            dev_info: dev.get_device_info(),
+                        },
+                    );
+                    // The DeviceSelector could already be dead, but it might also wait
+                    // for us to respond, in order to cancel all other tokens in case
+                    // we skipped the "blinking"-action and went straight for the actual
+                    // request.
+                    let _ = selector.send(DeviceSelectorEvent::SelectedToken(dev.id()));
+                }
+
+                match resp {
+                    Ok(()) => callback.call(Ok(())),
+                    Err(HIDError::DeviceNotSupported) | Err(HIDError::UnsupportedCommand) => {}
+                    Err(HIDError::Command(CommandError::StatusCode(
+                        StatusCode::ChannelBusy,
+                        _,
+                    ))) => {}
+                    Err(e) => {
+                        warn!("error happened: {}", e);
+                        callback.call(Err(AuthenticatorError::HIDError(e)));
+                    }
+                }
+            },
+        );
+
+        self.transaction = Some(try_or!(transaction, move |e| cbc.call(Err(e))));
+    }
+
+    pub fn set_pin(
+        &mut self,
+        timeout: u64,
+        new_pin: Pin,
+        status: Sender<crate::StatusUpdate>,
+        callback: StateCallback<crate::Result<crate::ResetResult>>,
+    ) {
+        // Abort any prior register/sign calls.
+        self.cancel();
+
+        let cbc = callback.clone();
+
+        let transaction = Transaction::new(
+            timeout,
+            callback.clone(),
+            status,
+            move |info, selector, status, _alive| {
+                let mut dev = match Self::init_and_select(info, &selector, true) {
+                    None => {
+                        return;
+                    }
+                    Some(dev) => dev,
+                };
+
+                let (mut shared_secret, authinfo) = match dev.establish_shared_secret() {
+                    Ok(s) => s,
+                    Err(e) => {
+                        callback.call(Err(AuthenticatorError::HIDError(e)));
+                        return;
+                    }
+                };
+
+                // With CTAP2.1 we will have an adjustable required length for PINs
+                if new_pin.as_bytes().len() < 4 {
+                    callback.call(Err(AuthenticatorError::PinError(PinError::PinIsTooShort)));
+                    return;
+                }
+
+                if new_pin.as_bytes().len() > 64 {
+                    callback.call(Err(AuthenticatorError::PinError(PinError::PinIsTooLong(
+                        new_pin.as_bytes().len(),
+                    ))));
+                    return;
+                }
+
+                // Check if a client-pin is already set, or if a new one should be created
+                let res = if authinfo.options.client_pin.unwrap_or_default() {
+                    let mut res;
+                    let mut error = PinError::PinRequired;
+                    loop {
+                        let current_pin = match Self::ask_user_for_pin(error, &status, &callback) {
+                            Ok(pin) => pin,
+                            _ => {
+                                return;
+                            }
+                        };
+
+                        res = ChangeExistingPin::new(
+                            &authinfo,
+                            &shared_secret,
+                            &current_pin,
+                            &new_pin,
+                        )
+                        .map_err(HIDError::Command)
+                        .and_then(|msg| dev.send_cbor(&msg))
+                        .map_err(AuthenticatorError::HIDError)
+                        .map_err(|e| repackage_pin_errors(&mut dev, e));
+
+                        if let Err(AuthenticatorError::PinError(e)) = res {
+                            error = e;
+                            // We need to re-establish the shared secret for the next round.
+                            match dev.establish_shared_secret() {
+                                Ok((s, _)) => {
+                                    shared_secret = s;
+                                }
+                                Err(e) => {
+                                    callback.call(Err(AuthenticatorError::HIDError(e)));
+                                    return;
+                                }
+                            };
+
+                            continue;
+                        } else {
+                            break;
+                        }
+                    }
+                    res
+                } else {
+                    SetNewPin::new(&authinfo, &shared_secret, &new_pin)
+                        .map_err(HIDError::Command)
+                        .and_then(|msg| dev.send_cbor(&msg))
+                        .map_err(AuthenticatorError::HIDError)
+                };
+                callback.call(res);
+            },
+        );
+        self.transaction = Some(try_or!(transaction, move |e| cbc.call(Err(e))));
     }
 }

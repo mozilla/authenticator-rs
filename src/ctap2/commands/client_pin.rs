@@ -2,7 +2,6 @@ use super::{get_info::AuthenticatorInfo, Command, CommandError, RequestCtap2, St
 use crate::crypto::{
     authenticate, decrypt, encapsulate, encrypt, BackendError, COSEKey, CryptoError, ECDHSecret,
 };
-use crate::ctap2::client_data::ClientDataHash;
 use crate::transport::errors::HIDError;
 use crate::u2ftypes::U2FDevice;
 use serde::{
@@ -35,7 +34,7 @@ pub struct ClientPIN {
     pin_protocol: Option<u8>,
     subcommand: PINSubcommand,
     key_agreement: Option<COSEKey>,
-    pin_auth: Option<[u8; 16]>,
+    pin_auth: Option<PinAuth>,
     new_pin_enc: Option<ByteBuf>,
     pin_hash_enc: Option<ByteBuf>,
 }
@@ -87,7 +86,7 @@ impl Serialize for ClientPIN {
             map.serialize_entry(&3, key_agreement)?;
         }
         if let Some(ref pin_auth) = self.pin_auth {
-            map.serialize_entry(&4, pin_auth)?;
+            map.serialize_entry(&4, &ByteBuf::from(pin_auth.as_ref()))?;
         }
         if let Some(ref new_pin_enc) = self.new_pin_enc {
             map.serialize_entry(&5, new_pin_enc)?;
@@ -134,7 +133,6 @@ impl<'de> Deserialize<'de> for ClientPinResponse {
                 let mut key_agreement = None;
                 let mut pin_token = None;
                 let mut retries = None;
-
                 while let Some(key) = map.next_key()? {
                     match key {
                         1 => {
@@ -165,7 +163,6 @@ impl<'de> Deserialize<'de> for ClientPinResponse {
                 })
             }
         }
-
         deserializer.deserialize_bytes(ClientPinResponseVisitor)
     }
 }
@@ -307,6 +304,166 @@ impl ClientPINSubCommand for GetRetries {
     }
 }
 
+#[derive(Debug)]
+pub struct SetNewPin<'sc, 'pin> {
+    pin_protocol: u8,
+    shared_secret: &'sc ECDHSecret,
+    new_pin: &'pin Pin,
+}
+
+impl<'sc, 'pin> SetNewPin<'sc, 'pin> {
+    pub fn new(
+        info: &AuthenticatorInfo,
+        shared_secret: &'sc ECDHSecret,
+        new_pin: &'pin Pin,
+    ) -> Result<Self, CommandError> {
+        if info.pin_protocols.contains(&1) {
+            Ok(SetNewPin {
+                pin_protocol: 1,
+                shared_secret,
+                new_pin,
+            })
+        } else {
+            Err(CommandError::UnsupportedPinProtocol)
+        }
+    }
+}
+
+impl<'sc, 'pin> ClientPINSubCommand for SetNewPin<'sc, 'pin> {
+    type Output = ();
+
+    fn as_client_pin(&self) -> Result<ClientPIN, CommandError> {
+        if self.new_pin.as_bytes().len() > 63 {
+            return Err(CommandError::StatusCode(
+                StatusCode::PinPolicyViolation,
+                None,
+            ));
+        }
+        // Padding the PIN with trailing zeros, according to spec
+        let input: Vec<u8> = self
+            .new_pin
+            .as_bytes()
+            .iter()
+            .chain(std::iter::repeat(&0x00))
+            .take(64)
+            .cloned()
+            .collect();
+
+        let shared_secret = self.shared_secret.shared_secret();
+        // AES256-CBC(sharedSecret, IV=0, newPin)
+        let new_pin_enc =
+            encrypt(shared_secret, input.as_ref()).map_err(|e| CryptoError::Backend(e))?;
+
+        // LEFT(HMAC-SHA-265(sharedSecret, newPinEnc), 16)
+        let pin_auth = PinToken(shared_secret.to_vec())
+            .auth(&new_pin_enc)
+            .map_err(CommandError::Crypto)?;
+
+        Ok(ClientPIN {
+            pin_protocol: Some(self.pin_protocol),
+            subcommand: PINSubcommand::SetPIN,
+            key_agreement: Some(self.shared_secret.my_public_key().clone()),
+            new_pin_enc: Some(ByteBuf::from(new_pin_enc)),
+            pin_auth: Some(pin_auth),
+            ..ClientPIN::default()
+        })
+    }
+
+    fn parse_response_payload(&self, input: &[u8]) -> Result<Self::Output, CommandError> {
+        // Should be an empty response or a valid cbor-value (which we ignore)
+        if input.is_empty() {
+            Ok(())
+        } else {
+            let _: Value = from_slice(input).map_err(CommandError::Deserializing)?;
+            Ok(())
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ChangeExistingPin<'sc, 'pin> {
+    pin_protocol: u8,
+    shared_secret: &'sc ECDHSecret,
+    current_pin: &'pin Pin,
+    new_pin: &'pin Pin,
+}
+
+impl<'sc, 'pin> ChangeExistingPin<'sc, 'pin> {
+    pub fn new(
+        info: &AuthenticatorInfo,
+        shared_secret: &'sc ECDHSecret,
+        current_pin: &'pin Pin,
+        new_pin: &'pin Pin,
+    ) -> Result<Self, CommandError> {
+        if info.pin_protocols.contains(&1) {
+            Ok(ChangeExistingPin {
+                pin_protocol: 1,
+                shared_secret,
+                current_pin,
+                new_pin,
+            })
+        } else {
+            Err(CommandError::UnsupportedPinProtocol)
+        }
+    }
+}
+
+impl<'sc, 'pin> ClientPINSubCommand for ChangeExistingPin<'sc, 'pin> {
+    type Output = ();
+
+    fn as_client_pin(&self) -> Result<ClientPIN, CommandError> {
+        if self.new_pin.as_bytes().len() > 63 {
+            return Err(CommandError::StatusCode(
+                StatusCode::PinPolicyViolation,
+                None,
+            ));
+        }
+        // Padding the PIN with trailing zeros, according to spec
+        let input: Vec<u8> = self
+            .new_pin
+            .as_bytes()
+            .iter()
+            .chain(std::iter::repeat(&0x00))
+            .take(64)
+            .cloned()
+            .collect();
+
+        let shared_secret = self.shared_secret.shared_secret();
+        // AES256-CBC(sharedSecret, IV=0, newPin)
+        let new_pin_enc =
+            encrypt(shared_secret, input.as_ref()).map_err(|e| CryptoError::Backend(e))?;
+
+        // AES256-CBC(sharedSecret, IV=0, LEFT(SHA-256(oldPin), 16))
+        let input = self.current_pin.for_pin_token();
+        let pin_hash_enc = encrypt(self.shared_secret.shared_secret(), input.as_ref())
+            .map_err(|e| CryptoError::Backend(e))?;
+
+        // LEFT(HMAC-SHA-265(sharedSecret, newPinEnc), 16)
+        let pin_auth = PinToken(shared_secret.to_vec())
+            .auth(&[new_pin_enc.as_slice(), pin_hash_enc.as_slice()].concat())
+            .map_err(CommandError::Crypto)?;
+
+        Ok(ClientPIN {
+            pin_protocol: Some(self.pin_protocol),
+            subcommand: PINSubcommand::ChangePIN,
+            key_agreement: Some(self.shared_secret.my_public_key().clone()),
+            new_pin_enc: Some(ByteBuf::from(new_pin_enc)),
+            pin_hash_enc: Some(ByteBuf::from(pin_hash_enc)),
+            pin_auth: Some(pin_auth),
+        })
+    }
+
+    fn parse_response_payload(&self, input: &[u8]) -> Result<Self::Output, CommandError> {
+        // Should be an empty response or a valid cbor-value (which we ignore)
+        if input.is_empty() {
+            Ok(())
+        } else {
+            let _: Value = from_slice(input).map_err(CommandError::Deserializing)?;
+            Ok(())
+        }
+    }
+}
+
 impl<T> RequestCtap2 for T
 where
     T: ClientPINSubCommand,
@@ -324,7 +481,7 @@ where
     {
         let client_pin = self.as_client_pin()?;
         let output = to_vec(&client_pin).map_err(CommandError::Serializing)?;
-        trace!("client subcommmand: {:#04X?}", &output);
+        trace!("client subcommmand: {:04X?}", &output);
 
         Ok(output)
     }
@@ -337,25 +494,25 @@ where
     where
         Dev: U2FDevice,
     {
-        trace!("Client pin subcomand response:{:#04X?}", &input);
-
+        trace!("Client pin subcomand response:{:04X?}", &input);
         if input.is_empty() {
             return Err(CommandError::InputTooSmall.into());
         }
+
         let status: StatusCode = input[0].into();
         debug!("response status code: {:?}", status);
-        if input.len() > 1 {
-            if status.is_ok() {
-                <T as ClientPINSubCommand>::parse_response_payload(self, &input[1..])
-                    .map_err(HIDError::Command)
-            } else {
-                let data: Value = from_slice(&input[1..]).map_err(CommandError::Deserializing)?;
-                Err(CommandError::StatusCode(status, Some(data)).into())
-            }
-        } else if status.is_ok() {
-            Err(CommandError::InputTooSmall.into())
+        if status.is_ok() {
+            let res = <T as ClientPINSubCommand>::parse_response_payload(self, &input[1..])
+                .map_err(HIDError::Command);
+            res
         } else {
-            Err(CommandError::StatusCode(status, None).into())
+            let add_data = if input.len() > 1 {
+                let data: Value = from_slice(&input[1..]).map_err(CommandError::Deserializing)?;
+                Some(data)
+            } else {
+                None
+            };
+            Err(CommandError::StatusCode(status, add_data).into())
         }
     }
 }
@@ -382,17 +539,8 @@ impl AsRef<[u8]> for EncryptedPinToken {
 pub struct PinToken(Vec<u8>);
 
 impl PinToken {
-    pub fn auth(&self, client_hash_data: &ClientDataHash) -> Result<PinAuth, PinError> {
-        if self.0.len() < 4 {
-            return Err(PinError::PinIsTooShort);
-        }
-
-        let bytes = self.0.as_slice();
-        if bytes.len() > 64 {
-            return Err(PinError::PinIsTooLong(bytes.len()));
-        }
-
-        let hmac = authenticate(self.as_ref(), client_hash_data.as_ref())?;
+    pub fn auth(&self, payload: &[u8]) -> Result<PinAuth, CryptoError> {
+        let hmac = authenticate(self.as_ref(), payload)?;
 
         let mut out = [0u8; 16];
         out.copy_from_slice(&hmac[0..16]);
@@ -455,6 +603,10 @@ impl Pin {
         output.copy_from_slice(&hasher.result().as_slice()[..len]);
 
         PinAuth(output.to_vec())
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        self.0.as_bytes()
     }
 }
 

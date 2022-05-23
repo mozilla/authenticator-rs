@@ -101,8 +101,8 @@ impl Transaction {
         // This must never be None. This won't block.
         unsafe { CFRunLoopStop(*self.runloop.take().unwrap()) };
 
+        self.device_selector.stop();
         // This must never be None. Ignore return value.
         let _ = self.thread.take().unwrap().join();
-        self.device_selector.stop();
     }
 }

@@ -27,6 +27,7 @@ pub enum DeviceCommand {
 
 #[derive(Debug)]
 pub enum DeviceSelectorEvent {
+    Cancel,
     Timeout,
     DevicesAdded(Vec<DeviceID>),
     DeviceRemoved(DeviceID),
@@ -64,7 +65,7 @@ impl DeviceSelector {
                 };
 
                 match res {
-                    DeviceSelectorEvent::Timeout => {
+                    DeviceSelectorEvent::Timeout | DeviceSelectorEvent::Cancel => {
                         /* TODO */
                         Self::cancel_all(tokens, None);
                         break;
@@ -81,13 +82,13 @@ impl DeviceSelector {
                     }
                     DeviceSelectorEvent::DevicesAdded(ids) => {
                         for id in ids {
-                            println!("Device added event: {:?}", id);
+                            debug!("Device added event: {:?}", id);
                             waiting_for_response.insert(id);
                         }
                         continue;
                     }
                     DeviceSelectorEvent::DeviceRemoved(id) => {
-                        println!("Device removed event: {:?}", id);
+                        debug!("Device removed event: {:?}", id);
                         if !waiting_for_response.remove(&id) {
                             // Note: We _could_ check here if we had multiple tokens and are already blinking
                             //       and the removal of this one leads to only one token left. So we could in theory
@@ -122,7 +123,7 @@ impl DeviceSelector {
                         }
                     }
                     DeviceSelectorEvent::NotAToken(id) => {
-                        println!("Device not a token event: {:?}", id);
+                        debug!("Device not a token event: {:?}", id);
                         waiting_for_response.remove(&id);
                     }
                     DeviceSelectorEvent::ImAToken((dev, tx)) => {
@@ -192,6 +193,8 @@ impl DeviceSelector {
     }
 
     pub fn stop(&mut self) {
+        // We ignore a possible error here, since we don't really care
+        let _ = self.sender.send(DeviceSelectorEvent::Cancel);
         self.runloop.cancel();
     }
 }

@@ -115,7 +115,7 @@ where
         let (cmd, data) = {
             let (cmd, mut data) = U2FHIDInit::read(self)?;
 
-            trace!("init frame data read: {:#04X?}", &data);
+            trace!("init frame data read: {:04X?}", &data);
             let mut sequence = 0u8;
             while data.len() < data.capacity() {
                 let max = data.capacity() - data.len();
@@ -124,7 +124,7 @@ where
             }
             (cmd, data)
         };
-        trace!("u2f_read({:?}) cmd={:?}: {:#04X?}", self.id(), cmd, &data);
+        trace!("u2f_read({:?}) cmd={:?}: {:04X?}", self.id(), cmd, &data);
         Ok((cmd, data))
     }
 

@@ -692,8 +692,8 @@ impl fmt::Debug for ECDHSecret {
 #[cfg(all(test, not(feature = "crypto_dummy")))]
 mod test {
     use super::{
-        decrypt, encrypt, imp::parse_key, imp::test_encapsulate, serialize_key, COSEAlgorithm,
-        COSEKey, ECDSACurve,
+        authenticate, decrypt, encrypt, imp::parse_key, imp::test_encapsulate, serialize_key,
+        COSEAlgorithm, COSEKey, ECDSACurve,
     };
     use crate::crypto::{COSEEC2Key, COSEKeyType};
     use crate::ctap2::commands::client_pin::Pin;
@@ -806,5 +806,63 @@ mod test {
         let pin_hash_enc =
             encrypt(&shared_secret.shared_secret(), pin.for_pin_token().as_ref()).unwrap();
         assert_eq!(pin_hash_enc, PIN_HASH_ENC);
+    }
+
+    #[test]
+    fn test_authenticate() {
+        let key = "key";
+        let message = "The quick brown fox jumps over the lazy dog";
+        let expected =
+            decode_hex("f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8");
+
+        let result =
+            authenticate(key.as_bytes(), message.as_bytes()).expect("Failed to authenticate");
+        assert_eq!(result, expected);
+
+        let key = "The quick brown fox jumps over the lazy dogThe quick brown fox jumps over the lazy dog";
+        let message = "message";
+        let expected =
+            decode_hex("5597b93a2843078cbb0c920ae41dfe20f1685e10c67e423c11ab91adfc319d12");
+
+        let result =
+            authenticate(key.as_bytes(), message.as_bytes()).expect("Failed to authenticate");
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_pin_encryption_and_hashing() {
+        let pin = "1234";
+
+        let shared_secret = vec![
+            0x82, 0xE3, 0xD8, 0x41, 0xE2, 0x5C, 0x5C, 0x13, 0x46, 0x2C, 0x12, 0x3C, 0xC3, 0xD3,
+            0x98, 0x78, 0x65, 0xBA, 0x3D, 0x20, 0x46, 0x74, 0xFB, 0xED, 0xD4, 0x7E, 0xF5, 0xAB,
+            0xAB, 0x8D, 0x13, 0x72,
+        ];
+        let expected_new_pin_enc = vec![
+            0x70, 0x66, 0x4B, 0xB5, 0x81, 0xE2, 0x57, 0x45, 0x1A, 0x3A, 0xB9, 0x1B, 0xF1, 0xAA,
+            0xD8, 0xE4, 0x5F, 0x6C, 0xE9, 0xB5, 0xC3, 0xB0, 0xF3, 0x2B, 0x5E, 0xCD, 0x62, 0xD0,
+            0xBA, 0x3B, 0x60, 0x5F, 0xD9, 0x18, 0x31, 0x66, 0xF6, 0xC5, 0xFA, 0xF3, 0xE4, 0xDA,
+            0x24, 0x81, 0x50, 0x2C, 0xD0, 0xCE, 0xE0, 0x15, 0x8B, 0x35, 0x1F, 0xC3, 0x92, 0x08,
+            0xA7, 0x7C, 0xB2, 0x74, 0x4B, 0xD4, 0x3C, 0xF9,
+        ];
+        let expected_pin_auth = vec![
+            0x8E, 0x7F, 0x01, 0x69, 0x97, 0xF3, 0xB0, 0xA2, 0x7B, 0xA4, 0x34, 0x7A, 0x0E, 0x49,
+            0xFD, 0xF5,
+        ];
+
+        // Padding to 64 bytes
+        let input: Vec<u8> = pin
+            .as_bytes()
+            .iter()
+            .chain(std::iter::repeat(&0x00))
+            .take(64)
+            .cloned()
+            .collect();
+
+        let new_pin_enc = encrypt(&shared_secret, &input).expect("Failed to encrypt pin");
+        assert_eq!(new_pin_enc, expected_new_pin_enc);
+
+        let pin_auth = authenticate(&shared_secret, &new_pin_enc).expect("Failed to authenticate");
+        assert_eq!(pin_auth[0..16], expected_pin_auth);
     }
 }
