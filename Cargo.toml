@@ -63,7 +63,7 @@ serde_json = "1.0"
 bytes = { version = "0.5", optional = true, features = ["serde"] }
 base64 = "^0.10"
 nom = "^5.1"
-sha2 = "^0.8.0"
+sha2 = "^0.10.0"
 cfg-if = "1.0"
 # Crypto backends
 ring = { version = "0.16", optional = true }

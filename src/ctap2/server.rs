@@ -67,10 +67,10 @@ impl RelyingPartyWrapper {
         match *self {
             RelyingPartyWrapper::Data(ref d) => {
                 let mut hasher = Sha256::new();
-                hasher.input(&d.id);
+                hasher.update(&d.id);
 
                 let mut output = [0u8; 32];
-                output.copy_from_slice(&hasher.result().as_slice());
+                output.copy_from_slice(&hasher.finalize().as_slice());
 
                 RpIdHash(output)
             }

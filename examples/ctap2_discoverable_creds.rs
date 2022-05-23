@@ -46,9 +46,9 @@ fn register_user(manager: &mut AuthenticatorService, username: &str, timeout_ms:
         username,
         r#""}"#
     );
-    let mut challenge = Sha256::default();
-    challenge.input(challenge_str.as_bytes());
-    let chall_bytes = challenge.result().to_vec();
+    let mut challenge = Sha256::new();
+    challenge.update(challenge_str.as_bytes());
+    let chall_bytes = challenge.finalize().to_vec();
 
     // TODO(MS): Needs to be added to RegisterArgsCtap2
     // let flags = RegisterFlags::empty();
@@ -297,9 +297,9 @@ fn main() {
         }
     });
 
-    let mut challenge = Sha256::default();
-    challenge.input(challenge_str.as_bytes());
-    let chall_bytes = challenge.result().to_vec();
+    let mut challenge = Sha256::new();
+    challenge.update(challenge_str.as_bytes());
+    let chall_bytes = challenge.finalize().to_vec();
     let ctap_args = SignArgsCtap2 {
         challenge: chall_bytes,
         origin,
