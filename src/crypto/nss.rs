@@ -193,18 +193,11 @@ fn crypt_helper(key: &[u8], input: &[u8], operation: Operation) -> Result<Vec<u8
         data: iv.as_ptr() as *mut c_uchar,
         len: c_uint::try_from(iv.len()).map_err(|_| BackendError::TryFromError)?,
     };
-    let ckm_aes_cbc: u64 = 0x00001082; // copied from nss/lib/util/pkcs11t.h
+    let ckm_aes_cbc = 0x00001082; // copied from nss/lib/util/pkcs11t.h
 
     let add_len = input.len() % (nss_sys::AES_BLOCK_SIZE as usize);
-    let output = common_crypt(
-        ckm_aes_cbc.into(),
-        key,
-        input,
-        add_len,
-        &mut params,
-        operation,
-    )
-    .map_err(|e| rc_crypto::Error::from(e))?;
+    let output = common_crypt(ckm_aes_cbc, key, input, add_len, &mut params, operation)
+        .map_err(|e| rc_crypto::Error::from(e))?;
     Ok(output)
 }
 
