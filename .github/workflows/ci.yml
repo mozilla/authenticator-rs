@@ -3,144 +3,65 @@ name: Build and test
 on: [push, pull_request]
 
 jobs:
-  # These could be done with an OS-matrix, but I hope to one day activate a real crypto-backend
-  # and then there need to be different installation paths for each OS
-  build-linux:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v2
+  build:
+    strategy:
+      matrix:
+        include:
+          # Linux dummy crypto
+          - OS: ubuntu-latest
+            TARGET: x86_64-unknown-linux-gnu
+            ADD_INSTALL: |
+                sudo apt-get update
+                sudo apt-get install -y libudev-dev
+            BUILD_OPTIONS: --features crypto_dummy --no-default-features
 
-      - name: Install latest rust toolchain
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-            source $HOME/.cargo/env
+          # Linux NSS crypto
+          - OS: ubuntu-latest
+            TARGET: x86_64-unknown-linux-gnu
+            ADD_INSTALL: |
+                sudo apt-get update
+                sudo apt-get install -y libudev-dev libnss3
+                # This last part is a really ugly hack, but I fail to find another way,
+                # since rc_crypto is expecting a dir with ./lib/ and ./include/ in it,
+                # with all NSS-libs located in ./libs/ (we can ignore ./include/ luckily).
+                sudo ln -s /usr/lib/x86_64-linux-gnu/nss/ /usr/lib/x86_64-linux-gnu/lib
+            BUILD_OPTIONS: 
 
-      - name: Install Packages
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libudev-dev
+          # Linux openSSL crypto
+          - OS: ubuntu-latest
+            TARGET: x86_64-unknown-linux-gnu
+            ADD_INSTALL: |
+                sudo apt-get update
+                sudo apt-get install -y libudev-dev openssl
+            BUILD_OPTIONS: --features crypto_openssl --no-default-features
 
-      - name: Build
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          cargo build --all --release --features crypto_dummy --no-default-features
+          # Mac dummy crypto
+          - OS: macos-latest
+            TARGET: x86_64-apple-darwin
+            BUILD_OPTIONS: --features crypto_dummy --no-default-features --target=x86_64-apple-darwin
 
-      - name: Test
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          cargo test --features crypto_dummy --no-default-features -- nocapture
+          # Windows dummy crypto
+          - OS: windows-latest
+            TARGET: x86_64-pc-windows-gnu
+            BUILD_OPTIONS: --features crypto_dummy --no-default-features --target=x86_64-pc-windows-gnu
 
-  build-linux-nss:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.OS }}
     env:
+        # Setting this for all, as it's the easiest right now
         NSS_DIR: /usr/lib/x86_64-linux-gnu/
     steps:
       - name: Checkout
         uses: actions/checkout@v2
 
       - name: Install latest rust toolchain
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-            source $HOME/.cargo/env
+        run: rustup target add ${{ matrix.TARGET }}
 
       - name: Install Packages
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libudev-dev libnss3
-          # This is a really ugly hack, but I fail to find another way
-          sudo ln -s /usr/lib/x86_64-linux-gnu/nss/ /usr/lib/x86_64-linux-gnu/lib
+        if: ${{ matrix.ADD_INSTALL }}
+        run: ${{ matrix.ADD_INSTALL }}
 
       - name: Build
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          cargo build --all --release
+        run: cargo build --all --release ${{ matrix.BUILD_OPTIONS }}
 
       - name: Test
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          cargo test -- nocapture
-
-  build-linux-openssl:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-
-      - name: Install latest rust toolchain
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-            source $HOME/.cargo/env
-
-      - name: Install Packages
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libudev-dev openssl
-
-      - name: Build
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          cargo build --all --release --features crypto_openssl --no-default-features
-
-      - name: Test
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          cargo test --features crypto_openssl --no-default-features -- nocapture
-
-  build-win:
-    runs-on: windows-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-
-      - name: Install latest rust toolchain
-        run: |
-           rustup target add x86_64-pc-windows-gnu
-      - name: Build for Win
-        run: |
-          cargo build --all --release --features crypto_dummy --no-default-features --target=x86_64-pc-windows-gnu
-
-      - name: Test on Win
-        run: |
-          cargo test --features crypto_dummy --no-default-features --target=x86_64-pc-windows-gnu -- nocapture
-
-  build-mac:
-    runs-on: macos-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-
-      - name: Install latest rust toolchain
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y -t x86_64-apple-darwin
-            source $HOME/.cargo/env
-
-      - name: Build for Mac
-        run: |
-          cargo build --all --release --features crypto_dummy --no-default-features --target=x86_64-apple-darwin
-
-      - name: Test on Mac
-        run: |
-          cargo test --features crypto_dummy --no-default-features --target=x86_64-apple-darwin -- nocapture
+        run: cargo test ${{ matrix.BUILD_OPTIONS }} -- nocapture
