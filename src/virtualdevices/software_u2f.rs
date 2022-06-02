@@ -34,7 +34,12 @@ impl SoftwareU2FToken {
         _app_ids: Vec<crate::AppId>,
         _key_handles: Vec<crate::KeyHandle>,
     ) -> crate::Result<crate::SignResult> {
-        Ok((vec![0u8; 0], vec![0u8; 0], vec![0u8; 0], self.dev_info()))
+        Ok((
+            vec![0u8; 0].into(),
+            vec![0u8; 0],
+            vec![0u8; 0],
+            self.dev_info(),
+        ))
     }
 
     pub fn dev_info(&self) -> crate::u2ftypes::U2FDeviceInfo {

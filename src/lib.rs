@@ -104,7 +104,8 @@ pub struct KeyHandle {
     pub transports: AuthenticatorTransports,
 }
 
-pub type AppId = Vec<u8>;
+#[derive(Clone, Debug)]
+pub struct AppId(Vec<u8>);
 pub type RegisterResult = (Vec<u8>, u2ftypes::U2FDeviceInfo);
 pub type SignResult = (AppId, Vec<u8>, Vec<u8>, u2ftypes::U2FDeviceInfo);
 

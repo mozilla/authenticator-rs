@@ -71,6 +71,8 @@ impl AuthenticatorService {
     /// Add any detected platform transports
     pub fn add_detected_transports(&mut self) {
         self.add_u2f_usb_hid_platform_transports();
+        #[cfg(feature = "dbus")]
+        self.add_dbus();
     }
 
     fn add_transport(&mut self, boxed_token: Box<dyn AuthenticatorTransport + Send>) {
@@ -95,6 +97,14 @@ impl AuthenticatorService {
         }
     }
 
+    #[cfg(feature = "dbus")]
+    pub fn add_dbus(&mut self) {
+        match crate::virtualdevices::dbus::VirtualManager::new() {
+            Ok(token) => self.add_transport(Box::new(token)),
+            Err(e) => error!("Could not add D-Bus transport: {}", e),
+        }
+    }
+
     pub fn register(
         &mut self,
         flags: crate::RegisterFlags,
@@ -105,7 +115,7 @@ impl AuthenticatorService {
         status: Sender<crate::StatusUpdate>,
         callback: StateCallback<crate::Result<crate::RegisterResult>>,
     ) -> crate::Result<()> {
-        if challenge.len() != PARAMETER_SIZE || application.len() != PARAMETER_SIZE {
+        if challenge.len() != PARAMETER_SIZE {
             return Err(AuthenticatorError::InvalidRelyingPartyInput);
         }
 
@@ -165,12 +175,6 @@ impl AuthenticatorService {
 
         if app_ids.is_empty() {
             return Err(AuthenticatorError::InvalidRelyingPartyInput);
-        }
-
-        for app_id in &app_ids {
-            if app_id.len() != PARAMETER_SIZE {
-                return Err(AuthenticatorError::InvalidRelyingPartyInput);
-            }
         }
 
         for key_handle in &key_handles {

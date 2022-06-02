@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use authenticator::{
-    authenticatorservice::AuthenticatorService, statecallback::StateCallback,
+    authenticatorservice::AuthenticatorService, statecallback::StateCallback, AppId,
     AuthenticatorTransports, KeyHandle, RegisterFlags, SignFlags, StatusUpdate,
 };
 use getopts::Options;
@@ -42,6 +42,8 @@ fn main() {
     opts.optflag("x", "no-u2f-usb-hid", "do not enable u2f-usb-hid platforms");
     #[cfg(feature = "webdriver")]
     opts.optflag("w", "webdriver", "enable WebDriver virtual bus");
+    #[cfg(feature = "dbus")]
+    opts.optflag("d", "dbus", "enable access to remote token through D-Bus");
 
     opts.optflag("h", "help", "print this help menu").optopt(
         "t",
@@ -74,6 +76,13 @@ fn main() {
         }
     }
 
+    #[cfg(feature = "dbus")]
+    {
+        if matches.opt_present("dbus") {
+            manager.add_dbus();
+        }
+    }
+
     let timeout_ms = match matches.opt_get_default::<u64>("timeout", 15) {
         Ok(timeout_s) => {
             println!("Using {}s as the timeout", &timeout_s);
@@ -96,9 +105,8 @@ fn main() {
     challenge.input(challenge_str.as_bytes());
     let chall_bytes = challenge.result().to_vec();
 
-    let mut application = Sha256::default();
-    application.input(b"http://demo.yubico.com");
-    let app_bytes = application.result().to_vec();
+    let app_bytes = b"http://demo.yubico.com".to_vec();
+    let app_id: AppId = app_bytes.into();
 
     let flags = RegisterFlags::empty();
 
@@ -131,7 +139,7 @@ fn main() {
             flags,
             timeout_ms,
             chall_bytes.clone(),
-            app_bytes.clone(),
+            app_id.clone(),
             vec![],
             status_tx.clone(),
             callback,
@@ -163,7 +171,7 @@ fn main() {
         flags,
         timeout_ms,
         chall_bytes,
-        vec![app_bytes],
+        vec![app_id.clone()],
         vec![key_handle],
         status_tx,
         callback,

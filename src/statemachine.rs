@@ -112,12 +112,14 @@ impl StateMachine {
                 },
             );
 
+            let app_id_hash = application.to_u2f();
+
             // Iterate the exclude list and see if there are any matches.
             // If so, we'll keep polling the device anyway to test for user
             // consent, to be consistent with CTAP2 device behavior.
             let excluded = key_handles.iter().any(|key_handle| {
                 is_valid_transport(key_handle.transports)
-                    && u2f_is_keyhandle_valid(dev, &challenge, &application, &key_handle.credential)
+                    && u2f_is_keyhandle_valid(dev, &challenge, &app_id_hash, &key_handle.credential)
                         .unwrap_or(false) /* no match on failure */
             });
 
@@ -130,7 +132,7 @@ impl StateMachine {
                         )));
                         break;
                     }
-                } else if let Ok(bytes) = u2f_register(dev, &challenge, &application) {
+                } else if let Ok(bytes) = u2f_register(dev, &challenge, &app_id_hash) {
                     let dev_info = dev.get_device_info();
                     send_status(
                         &status_mutex,
@@ -201,7 +203,9 @@ impl StateMachine {
             // valid key handle for an appId, we'll use that appId below.
             let (app_id, valid_handles) =
                 find_valid_key_handles(&app_ids, &key_handles, |app_id, key_handle| {
-                    u2f_is_keyhandle_valid(dev, &challenge, app_id, &key_handle.credential)
+                    let app_id: crate::AppId = app_id.clone().into();
+                    let app_id_hash = app_id.to_u2f();
+                    u2f_is_keyhandle_valid(dev, &challenge, &app_id_hash, &key_handle.credential)
                         .unwrap_or(false) /* no match on failure */
                 });
 
@@ -225,6 +229,8 @@ impl StateMachine {
                 },
             );
 
+            let app_id_hash = app_id.to_u2f();
+
             'outer: while alive() {
                 // If the device matches none of the given key handles
                 // then just make it blink with bogus data.
@@ -239,7 +245,8 @@ impl StateMachine {
                 } else {
                     // Otherwise, try to sign.
                     for key_handle in &valid_handles {
-                        if let Ok(bytes) = u2f_sign(dev, &challenge, app_id, &key_handle.credential)
+                        if let Ok(bytes) =
+                            u2f_sign(dev, &challenge, &app_id_hash, &key_handle.credential)
                         {
                             let dev_info = dev.get_device_info();
                             send_status(

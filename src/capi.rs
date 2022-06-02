@@ -82,7 +82,7 @@ pub unsafe extern "C" fn rust_u2f_app_ids_add(
     id_ptr: *const u8,
     id_len: usize,
 ) {
-    (*ids).push(from_raw(id_ptr, id_len));
+    (*ids).push(from_raw(id_ptr, id_len).into());
 }
 
 /// # Safety
@@ -232,7 +232,7 @@ pub unsafe extern "C" fn rust_u2f_mgr_register(
 
     let flags = crate::RegisterFlags::from_bits_truncate(flags);
     let challenge = from_raw(challenge_ptr, challenge_len);
-    let application = from_raw(application_ptr, application_len);
+    let application = from_raw(application_ptr, application_len).into();
     let key_handles = (*khs).clone();
 
     let (status_tx, status_rx) = channel::<crate::StatusUpdate>();
@@ -333,7 +333,7 @@ pub unsafe extern "C" fn rust_u2f_mgr_sign(
                 let mut bufs = HashMap::new();
                 bufs.insert(RESBUF_ID_KEYHANDLE, key_handle);
                 bufs.insert(RESBUF_ID_SIGNATURE, signature);
-                bufs.insert(RESBUF_ID_APPID, app_id);
+                bufs.insert(RESBUF_ID_APPID, app_id.to_u2f());
                 bufs.insert(RESBUF_ID_VENDOR_NAME, dev_info.vendor_name);
                 bufs.insert(RESBUF_ID_DEVICE_NAME, dev_info.device_name);
                 bufs.insert(RESBUF_ID_FIRMWARE_MAJOR, vec![dev_info.version_major]);
