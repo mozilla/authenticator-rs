@@ -63,12 +63,6 @@ extern "system" {
     ) -> ntdef::NTSTATUS;
 }
 
-macro_rules! offset_of {
-    ($ty:ty, $field:ident) => {
-        unsafe { &(*(0 as *const $ty)).$field as *const _ as usize }
-    };
-}
-
 fn from_wide_ptr(ptr: *const u16, len: usize) -> String {
     assert!(!ptr.is_null() && len % 2 == 0);
     let slice = unsafe { slice::from_raw_parts(ptr, len / 2) };
@@ -214,7 +208,7 @@ impl DeviceInterfaceDetailData {
         unsafe { (*data).cbSize = cb_size as minwindef::UINT };
 
         // Compute offset of `SP_DEVICE_INTERFACE_DETAIL_DATA_W.DevicePath`.
-        let offset = offset_of!(setupapi::SP_DEVICE_INTERFACE_DETAIL_DATA_W, DevicePath);
+        let offset = memoffset::offset_of!(setupapi::SP_DEVICE_INTERFACE_DETAIL_DATA_W, DevicePath);
 
         Some(Self {
             data,
