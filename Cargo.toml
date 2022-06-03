@@ -77,7 +77,6 @@ nss = { git = "https://github.com/mozilla/application-services", rev="c51b63595a
 nss_sys = { git = "https://github.com/mozilla/application-services", rev="c51b63595a27a6ef45161012323e0261475c10c9", optional = true, feature="gecko"}
 
 [dev-dependencies]
-base64 = "^0.10"
 env_logger = "^0.6"
 getopts = "^0.2"
 assert_matches = "1.2"
