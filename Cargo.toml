@@ -72,9 +72,9 @@ cfg-if = "1.0"
 ring = { version = "0.16", optional = true }
 openssl-sys = { version = "0.9", optional = true}
 openssl = { version = "0.10", optional = true}
-rc_crypto = { git = "https://github.com/mozilla/application-services", rev="c51b63595a27a6ef45161012323e0261475c10c9", optional = true, feature="gecko"}
-nss = { git = "https://github.com/mozilla/application-services", rev="c51b63595a27a6ef45161012323e0261475c10c9", optional = true, feature="gecko"}
-nss_sys = { git = "https://github.com/mozilla/application-services", rev="c51b63595a27a6ef45161012323e0261475c10c9", optional = true, feature="gecko"}
+rc_crypto = { git = "https://github.com/mozilla/application-services", rev="2689788cecf24c385e6b7440e3aa1a89c511f14a", optional = true, feature="gecko"}
+nss = { git = "https://github.com/mozilla/application-services", rev="2689788cecf24c385e6b7440e3aa1a89c511f14a", optional = true, feature="gecko"}
+nss_sys = { git = "https://github.com/mozilla/application-services", rev="2689788cecf24c385e6b7440e3aa1a89c511f14a", optional = true, feature="gecko"}
 
 [dev-dependencies]
 env_logger = "^0.6"
