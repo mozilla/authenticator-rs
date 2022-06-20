@@ -1,6 +1,6 @@
 [package]
 name = "authenticator"
-version = "0.3.1"
+version = "0.3.2"
 authors = ["J.C. Jones <jc@mozilla.com>", "Tim Taubert <ttaubert@mozilla.com>", "Kyle Machulis <kyle@nonpolynomial.com>"]
 keywords = ["ctap2", "u2f", "fido", "webauthn"]
 categories = ["cryptography", "hardware-support", "os"]
@@ -35,6 +35,9 @@ devd-rs = "0.3"
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.9"
 
+[target.'cfg(target_os = "windows")'.dependencies]
+memoffset = "0.6"
+
 [target.'cfg(target_os = "windows")'.dependencies.winapi]
 version = "^0.3"
 features = [
@@ -46,10 +49,10 @@ features = [
 ]
 
 [build-dependencies]
-bindgen = { version = "^0.51", optional = true }
+bindgen = { version = "^0.58.1", optional = true }
 
 [dependencies]
-rand = "0.7"
+rand = "0.8"
 log = "0.4"
 libc = "0.2"
 runloop = "0.1.0"
@@ -69,12 +72,11 @@ cfg-if = "1.0"
 ring = { version = "0.16", optional = true }
 openssl-sys = { version = "0.9", optional = true}
 openssl = { version = "0.10", optional = true}
-rc_crypto = { git = "https://github.com/mozilla/application-services", rev="c51b63595a27a6ef45161012323e0261475c10c9", optional = true, feature="gecko"}
-nss = { git = "https://github.com/mozilla/application-services", rev="c51b63595a27a6ef45161012323e0261475c10c9", optional = true, feature="gecko"}
-nss_sys = { git = "https://github.com/mozilla/application-services", rev="c51b63595a27a6ef45161012323e0261475c10c9", optional = true, feature="gecko"}
+rc_crypto = { git = "https://github.com/mozilla/application-services", rev="2689788cecf24c385e6b7440e3aa1a89c511f14a", optional = true, feature="gecko"}
+nss = { git = "https://github.com/mozilla/application-services", rev="2689788cecf24c385e6b7440e3aa1a89c511f14a", optional = true, feature="gecko"}
+nss_sys = { git = "https://github.com/mozilla/application-services", rev="2689788cecf24c385e6b7440e3aa1a89c511f14a", optional = true, feature="gecko"}
 
 [dev-dependencies]
-base64 = "^0.10"
 env_logger = "^0.6"
 getopts = "^0.2"
 assert_matches = "1.2"
