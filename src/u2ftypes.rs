@@ -5,18 +5,7 @@
 use std::{cmp, fmt, io, str};
 
 use crate::consts::*;
-use crate::util::io_err;
-
-pub fn to_hex(data: &[u8], joiner: &str) -> String {
-    let parts: Vec<String> = data.iter().map(|byte| format!("{:02x}", byte)).collect();
-    parts.join(joiner)
-}
-
-pub fn trace_hex(data: &[u8]) {
-    if log_enabled!(log::Level::Trace) {
-        trace!("USB send: {}", to_hex(data, ""));
-    }
-}
+use crate::util::{io_err, to_hex, trace_hex};
 
 // Trait for representing U2F HID Devices. Requires getters/setters for the
 // channel ID, created during device initialization.
@@ -41,8 +30,11 @@ pub trait U2FDevice {
     }
 
     fn get_property(&self, prop_name: &str) -> io::Result<String>;
-    fn get_device_info(&self) -> U2FDeviceInfo;
     fn set_device_info(&mut self, dev_info: U2FDeviceInfo);
+}
+
+pub trait U2FInfoQueryable {
+    fn get_device_info(&self) -> U2FDeviceInfo;
 }
 
 // Init structure for U2F Communications. Tells the receiver what channel
@@ -94,7 +86,7 @@ impl U2FHIDInit {
 
         let count = cmp::min(data.len(), dev.out_init_data_size());
         frame[8..8 + count].copy_from_slice(&data[..count]);
-        trace_hex(&frame);
+        trace_hex("USB send", &frame);
 
         if dev.write(&frame)? != frame.len() {
             return Err(io_err("device write failed"));
@@ -147,7 +139,7 @@ impl U2FHIDCont {
 
         let count = cmp::min(data.len(), dev.out_cont_data_size());
         frame[6..6 + count].copy_from_slice(&data[..count]);
-        trace_hex(&frame);
+        trace_hex("USB send", &frame);
 
         if dev.write(&frame)? != frame.len() {
             return Err(io_err("device write failed"));
@@ -199,32 +191,6 @@ impl U2FHIDInitResp {
         };
 
         Ok(rsp)
-    }
-}
-
-// https://en.wikipedia.org/wiki/Smart_card_application_protocol_data_unit
-// https://fidoalliance.org/specs/fido-u2f-v1.
-// 0-nfc-bt-amendment-20150514/fido-u2f-raw-message-formats.html#u2f-message-framing
-pub struct U2FAPDUHeader {}
-
-impl U2FAPDUHeader {
-    pub fn serialize(ins: u8, p1: u8, data: &[u8]) -> io::Result<Vec<u8>> {
-        if data.len() > 0xffff {
-            return Err(io_err("payload length > 2^16"));
-        }
-
-        // Size of header + data + 2 zero bytes for maximum return size.
-        let mut bytes = vec![0u8; U2FAPDUHEADER_SIZE + data.len() + 2];
-        // cla is always 0 for our requirements
-        bytes[1] = ins;
-        bytes[2] = p1;
-        // p2 is always 0, at least, for our requirements.
-        // lc[0] should always be 0.
-        bytes[5] = (data.len() >> 8) as u8;
-        bytes[6] = data.len() as u8;
-        bytes[7..7 + data.len()].copy_from_slice(data);
-
-        Ok(bytes)
     }
 }
 

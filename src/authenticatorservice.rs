@@ -71,6 +71,9 @@ impl AuthenticatorService {
     /// Add any detected platform transports
     pub fn add_detected_transports(&mut self) {
         self.add_u2f_usb_hid_platform_transports();
+
+        #[cfg(feature = "nfc")]
+        self.add_u2f_nfc_transports();
     }
 
     fn add_transport(&mut self, boxed_token: Box<dyn AuthenticatorTransport + Send>) {
@@ -93,6 +96,11 @@ impl AuthenticatorService {
             }
             Err(e) => error!("Could not add WebDriver virtual bus: {}", e),
         }
+    }
+
+    #[cfg(feature = "nfc")]
+    pub fn add_u2f_nfc_transports(&mut self) {
+        self.add_transport(Box::new(crate::NFCManager::new()));
     }
 
     pub fn register(

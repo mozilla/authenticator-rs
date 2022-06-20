@@ -17,6 +17,7 @@ addons:
     packages:
       - build-essential
       - libudev-dev
+      - libpcsclite-dev
 
 install:
   - rustup component add rustfmt

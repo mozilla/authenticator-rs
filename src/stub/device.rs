@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
+use crate::u2ftypes::{U2FDevice, U2FDeviceInfo, U2FInfoQueryable};
 use std::io;
 use std::io::{Read, Write};
 
@@ -55,11 +55,13 @@ impl U2FDevice for Device {
         panic!("not implemented")
     }
 
-    fn get_device_info(&self) -> U2FDeviceInfo {
+    fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {
         panic!("not implemented")
     }
+}
 
-    fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {
+impl U2FInfoQueryable for Device {
+    fn get_device_info(&self) -> U2FDeviceInfo {
         panic!("not implemented")
     }
 }

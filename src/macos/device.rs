@@ -6,7 +6,7 @@ extern crate log;
 
 use crate::consts::{CID_BROADCAST, MAX_HID_RPT_SIZE};
 use crate::platform::iokit::*;
-use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
+use crate::u2ftypes::{U2FDevice, U2FDeviceInfo, U2FInfoQueryable};
 use core_foundation::base::*;
 use core_foundation::string::*;
 use std::convert::TryInto;
@@ -144,13 +144,15 @@ impl U2FDevice for Device {
         unsafe { self.get_property_macos(prop_name) }
     }
 
+    fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {
+        self.dev_info = Some(dev_info);
+    }
+}
+
+impl U2FInfoQueryable for Device {
     fn get_device_info(&self) -> U2FDeviceInfo {
         // unwrap is okay, as dev_info must have already been set, else
         // a programmer error
         self.dev_info.clone().unwrap()
-    }
-
-    fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {
-        self.dev_info = Some(dev_info);
     }
 }

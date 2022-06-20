@@ -7,115 +7,33 @@
 extern crate std;
 
 use rand::{thread_rng, RngCore};
-use std::ffi::CString;
 use std::io;
 use std::io::{Read, Write};
 
+use crate::apdu::*;
 use crate::consts::*;
 use crate::u2ftypes::*;
-use crate::util::io_err;
 
-////////////////////////////////////////////////////////////////////////
-// Device Commands
-////////////////////////////////////////////////////////////////////////
-
-pub fn u2f_init_device<T>(dev: &mut T) -> bool
+impl<T> APDUDevice for T
 where
     T: U2FDevice + Read + Write,
 {
-    let mut nonce = [0u8; 8];
-    thread_rng().fill_bytes(&mut nonce);
+    fn init_apdu(&mut self) -> io::Result<()> {
+        let mut nonce = [0u8; 8];
+        thread_rng().fill_bytes(&mut nonce);
 
-    // Initialize the device and check its version.
-    init_device(dev, &nonce).is_ok() && is_v2_device(dev).unwrap_or(false)
-}
-
-pub fn u2f_register<T>(dev: &mut T, challenge: &[u8], application: &[u8]) -> io::Result<Vec<u8>>
-where
-    T: U2FDevice + Read + Write,
-{
-    if challenge.len() != PARAMETER_SIZE || application.len() != PARAMETER_SIZE {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "Invalid parameter sizes",
-        ));
+        // Initialize the device and check its version.
+        init_device(self, &nonce)
+            .and(apdu_is_v2_device(self))
+            .map(|_| ())
     }
 
-    let mut register_data = Vec::with_capacity(2 * PARAMETER_SIZE);
-    register_data.extend(challenge);
-    register_data.extend(application);
+    fn send_apdu(&mut self, cmd: u8, p1: u8, send: &[u8]) -> io::Result<(Vec<u8>, [u8; 2])> {
+        let apdu = APDU::serialize_long(cmd, p1, send)?;
+        let data = sendrecv(self, U2FHID_MSG, &apdu)?;
 
-    let flags = U2F_REQUEST_USER_PRESENCE;
-    let (resp, status) = send_apdu(dev, U2F_REGISTER, flags, &register_data)?;
-    status_word_to_result(status, resp)
-}
-
-pub fn u2f_sign<T>(
-    dev: &mut T,
-    challenge: &[u8],
-    application: &[u8],
-    key_handle: &[u8],
-) -> io::Result<Vec<u8>>
-where
-    T: U2FDevice + Read + Write,
-{
-    if challenge.len() != PARAMETER_SIZE || application.len() != PARAMETER_SIZE {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "Invalid parameter sizes",
-        ));
+        APDU::deserialize(data)
     }
-
-    if key_handle.len() > 256 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "Key handle too large",
-        ));
-    }
-
-    let mut sign_data = Vec::with_capacity(2 * PARAMETER_SIZE + 1 + key_handle.len());
-    sign_data.extend(challenge);
-    sign_data.extend(application);
-    sign_data.push(key_handle.len() as u8);
-    sign_data.extend(key_handle);
-
-    let flags = U2F_REQUEST_USER_PRESENCE;
-    let (resp, status) = send_apdu(dev, U2F_AUTHENTICATE, flags, &sign_data)?;
-    status_word_to_result(status, resp)
-}
-
-pub fn u2f_is_keyhandle_valid<T>(
-    dev: &mut T,
-    challenge: &[u8],
-    application: &[u8],
-    key_handle: &[u8],
-) -> io::Result<bool>
-where
-    T: U2FDevice + Read + Write,
-{
-    if challenge.len() != PARAMETER_SIZE || application.len() != PARAMETER_SIZE {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "Invalid parameter sizes",
-        ));
-    }
-
-    if key_handle.len() > 256 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "Key handle too large",
-        ));
-    }
-
-    let mut sign_data = Vec::with_capacity(2 * PARAMETER_SIZE + 1 + key_handle.len());
-    sign_data.extend(challenge);
-    sign_data.extend(application);
-    sign_data.push(key_handle.len() as u8);
-    sign_data.extend(key_handle);
-
-    let flags = U2F_CHECK_IS_REGISTERED;
-    let (_, status) = send_apdu(dev, U2F_AUTHENTICATE, flags, &sign_data)?;
-    Ok(status == SW_CONDITIONS_NOT_SATISFIED)
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -151,32 +69,6 @@ where
     Ok(())
 }
 
-fn is_v2_device<T>(dev: &mut T) -> io::Result<bool>
-where
-    T: U2FDevice + Read + Write,
-{
-    let (data, status) = send_apdu(dev, U2F_VERSION, 0x00, &[])?;
-    let actual = CString::new(data)?;
-    let expected = CString::new("U2F_V2")?;
-    status_word_to_result(status, actual == expected)
-}
-
-////////////////////////////////////////////////////////////////////////
-// Error Handling
-////////////////////////////////////////////////////////////////////////
-
-fn status_word_to_result<T>(status: [u8; 2], val: T) -> io::Result<T> {
-    use self::io::ErrorKind::{InvalidData, InvalidInput};
-
-    match status {
-        SW_NO_ERROR => Ok(val),
-        SW_WRONG_DATA => Err(io::Error::new(InvalidData, "wrong data")),
-        SW_WRONG_LENGTH => Err(io::Error::new(InvalidInput, "wrong length")),
-        SW_CONDITIONS_NOT_SATISFIED => Err(io_err("conditions not satisfied")),
-        _ => Err(io_err(&format!("failed with status {:?}", status))),
-    }
-}
-
 ////////////////////////////////////////////////////////////////////////
 // Device Communication Functions
 ////////////////////////////////////////////////////////////////////////
@@ -210,22 +102,6 @@ where
     Ok(data)
 }
 
-fn send_apdu<T>(dev: &mut T, cmd: u8, p1: u8, send: &[u8]) -> io::Result<(Vec<u8>, [u8; 2])>
-where
-    T: U2FDevice + Read + Write,
-{
-    let apdu = U2FAPDUHeader::serialize(cmd, p1, send)?;
-    let mut data = sendrecv(dev, U2FHID_MSG, &apdu)?;
-
-    if data.len() < 2 {
-        return Err(io_err("unexpected response"));
-    }
-
-    let split_at = data.len() - 2;
-    let status = data.split_off(split_at);
-    Ok((data, [status[0], status[1]]))
-}
-
 ////////////////////////////////////////////////////////////////////////
 // Tests
 ////////////////////////////////////////////////////////////////////////
@@ -234,7 +110,8 @@ where
 mod tests {
     use rand::{thread_rng, RngCore};
 
-    use super::{init_device, send_apdu, sendrecv, U2FDevice};
+    use super::{init_device, sendrecv, U2FDevice, U2FInfoQueryable};
+    use crate::apdu::APDUDevice;
     use crate::consts::{CID_BROADCAST, SW_NO_ERROR, U2FHID_INIT, U2FHID_MSG, U2FHID_PING};
 
     mod platform {
@@ -242,7 +119,7 @@ mod tests {
         use std::io::{Read, Write};
 
         use crate::consts::CID_BROADCAST;
-        use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
+        use crate::u2ftypes::{U2FDevice, U2FDeviceInfo, U2FInfoQueryable};
 
         const IN_HID_RPT_SIZE: usize = 64;
         const OUT_HID_RPT_SIZE: usize = 64;
@@ -335,12 +212,15 @@ mod tests {
             fn get_property(&self, prop_name: &str) -> io::Result<String> {
                 Ok(format!("{} not implemented", prop_name))
             }
-            fn get_device_info(&self) -> U2FDeviceInfo {
-                self.dev_info.clone().unwrap()
-            }
 
             fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {
                 self.dev_info = Some(dev_info);
+            }
+        }
+
+        impl U2FInfoQueryable for TestDevice {
+            fn get_device_info(&self) -> U2FDeviceInfo {
+                self.dev_info.clone().unwrap()
             }
         }
     }
@@ -443,7 +323,7 @@ mod tests {
         msg.extend_from_slice(&SW_NO_ERROR);
         device.add_read(&msg, 0);
 
-        let (result, status) = send_apdu(&mut device, U2FHID_PING, 0xaa, &data).unwrap();
+        let (result, status) = device.send_apdu(U2FHID_PING, 0xaa, &data).unwrap();
         assert_eq!(result, &data);
         assert_eq!(status, SW_NO_ERROR);
     }
