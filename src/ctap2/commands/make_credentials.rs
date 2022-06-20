@@ -15,10 +15,15 @@ use crate::ctap2::server::{
 };
 use crate::transport::errors::{ApduErrorStatus, HIDError};
 use crate::u2ftypes::{U2FAPDUHeader, U2FDevice};
-use nom::{do_parse, named, number::complete::be_u8, tag, take};
+use nom::{
+    bytes::complete::{tag, take},
+    error::VerboseError,
+    number::complete::be_u8,
+};
 #[cfg(test)]
 use serde::Deserialize;
 use serde::{
+    de::Error as DesError,
     ser::{Error as SerError, SerializeMap},
     Serialize, Serializer,
 };
@@ -276,25 +281,20 @@ impl RequestCtap1 for MakeCredentials {
         }
 
         if self.is_ctap2_request() {
-            named!(
-                parse_register<(&[u8], &[u8])>,
-                do_parse!(
-                    _reserved: tag!(&[0x05])
-                        >> public_key: take!(65)
-                        >> key_handle_len: be_u8
-                        >> key_handle: take!(key_handle_len)
-                        >> (public_key, key_handle)
-                )
-            );
-
-            let (rest, (public_key, key_handle)) = parse_register(input)
-                .map_err(|e| {
-                    error!("error while parsing registration = {:?}", e);
-                    io::Error::new(io::ErrorKind::Other, "unable to parse registration")
+            let parse_register = |input| {
+                let (rest, _) = tag(&[0x05])(input)?;
+                let (rest, public_key) = take(65u8)(rest)?;
+                let (rest, key_handle_len) = be_u8(rest)?;
+                let (rest, key_handle) = take(key_handle_len)(rest)?;
+                Ok((rest, public_key, key_handle))
+            };
+            let (rest, public_key, key_handle) = parse_register(input)
+                .map_err(|e: nom::Err<VerboseError<_>>| {
+                    error!("error while parsing registration: {:?}", e);
+                    CommandError::Deserializing(DesError::custom("unable to parse registration"))
                 })
-                .map_err(|e| HIDError::IO(None, e))
+                .map_err(HIDError::Command)
                 .map_err(Retryable::Error)?;
-
             // TODO(MS): This is currently not parsed within the crate, but outside by a user-provided function
             //           See examples/main.rs: u2f_get_key_handle_from_register_response()
             //           We would need to add a DER parser as a dependency, which I don't want to do right now.
