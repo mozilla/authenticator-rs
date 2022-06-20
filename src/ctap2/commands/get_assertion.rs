@@ -17,8 +17,9 @@ use crate::transport::errors::{ApduErrorStatus, HIDError};
 use crate::transport::FidoDevice;
 use crate::u2ftypes::{U2FAPDUHeader, U2FDevice};
 use nom::{
-    do_parse, named,
+    error::VerboseError,
     number::complete::{be_u32, be_u8},
+    sequence::tuple,
 };
 use serde::{
     de::{Error as DesError, MapAccess, Visitor},
@@ -424,26 +425,19 @@ impl RequestCtap1 for GetAssertion {
         }
 
         if self.is_ctap2_request() {
-            named!(
-                parse_authentication<(u8, u32)>,
-                do_parse!(user_presence: be_u8 >> counter: be_u32 >> (user_presence, counter))
-            );
-
-            let (user_presence, counter, signature) = match parse_authentication(input) {
-                Ok((input, (user_presence, counter))) => {
-                    let signature = Vec::from(input);
-                    Ok((user_presence, counter, signature))
-                }
-                Err(e) => {
+            let parse_authentication = |input| {
+                // Parsing an u8, then a u32, and the rest is the signature
+                let (rest, (user_presence, counter)) = tuple((be_u8, be_u32))(input)?;
+                let signature = Vec::from(rest);
+                Ok((user_presence, counter, signature))
+            };
+            let (user_presence, counter, signature) = parse_authentication(input)
+                .map_err(|e: nom::Err<VerboseError<_>>| {
                     error!("error while parsing authentication: {:?}", e);
-                    Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        "unable to parse authentication",
-                    ))
-                    .map_err(|e| HIDError::IO(None, e))
-                    .map_err(Retryable::Error)
-                }
-            }?;
+                    CommandError::Deserializing(DesError::custom("unable to parse authentication"))
+                })
+                .map_err(HIDError::Command)
+                .map_err(Retryable::Error)?;
 
             let mut flags = AuthenticatorDataFlags::empty();
             if user_presence == 1 {
