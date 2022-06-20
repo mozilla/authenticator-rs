@@ -13,6 +13,7 @@ use crate::consts::{CID_BROADCAST, MAX_HID_RPT_SIZE};
 use crate::platform::uhid;
 use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
 use crate::util::from_unix_result;
+use crate::util::io_err;
 
 #[derive(Debug)]
 pub struct Device {
@@ -35,8 +36,51 @@ impl Device {
         })
     }
 
-    pub fn is_u2f(&self) -> bool {
-        uhid::is_u2f_device(self.fd)
+    pub fn is_u2f(&mut self) -> bool {
+        if !uhid::is_u2f_device(self.fd) {
+            return false;
+        }
+        if let Err(_) = self.ping() {
+            return false;
+        }
+        true
+    }
+
+    fn ping(&mut self) -> io::Result<()> {
+        for i in 0..10 {
+            let mut buf = vec![0u8; 1 + MAX_HID_RPT_SIZE];
+
+            buf[0] = 0; // report number
+            buf[1] = 0xff; // CID_BROADCAST
+            buf[2] = 0xff;
+            buf[3] = 0xff;
+            buf[4] = 0xff;
+            buf[5] = 0x81; // ping
+            buf[6] = 0;
+            buf[7] = 1; // one byte
+
+            self.write(&buf[..])?;
+
+            // Wait for response
+            let mut pfd: libc::pollfd = unsafe { std::mem::zeroed() };
+            pfd.fd = self.fd;
+            pfd.events = libc::POLLIN;
+            let nfds = unsafe { libc::poll(&mut pfd, 1, 100) };
+            if nfds == -1 {
+                return Err(io::Error::last_os_error());
+            }
+            if nfds == 0 {
+                debug!("device timeout {}", i);
+                continue;
+            }
+
+            // Read response
+            self.read(&mut buf[..])?;
+
+            return Ok(());
+        }
+
+        Err(io_err("no response from device"))
     }
 }
 
