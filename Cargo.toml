@@ -57,8 +57,8 @@ log = "0.4"
 libc = "0.2"
 runloop = "0.1.0"
 bitflags = "1.0"
-tokio = { version = "0.2", optional = true, features = ["macros"] }
-warp = { version = "0.2.4", optional = true }
+tokio = { version = "1.17", optional = true, features = ["macros", "rt-multi-thread"] }
+warp = { version = "0.3.2", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_bytes = "0.11"
 serde_cbor = "0.11"
