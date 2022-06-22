@@ -14,6 +14,8 @@ travis-ci = { repository = "mozilla/authenticator-rs", branch = "master" }
 maintenance = { status = "actively-developed" }
 
 [features]
+default = ["c-api"]
+c-api = []
 binding-recompile = ["bindgen"]
 webdriver = ["base64", "bytes", "warp", "tokio", "serde", "serde_json"]
 

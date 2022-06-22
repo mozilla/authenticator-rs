@@ -70,7 +70,9 @@ mod u2ftypes;
 mod manager;
 pub use crate::manager::U2FManager;
 
+#[cfg(feature = "c-api")]
 mod capi;
+#[cfg(feature = "c-api")]
 pub use crate::capi::*;
 
 pub mod errors;
