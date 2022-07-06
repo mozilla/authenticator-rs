@@ -28,13 +28,6 @@ pub struct Device {
     authenticator_info: Option<AuthenticatorInfo>,
 }
 
-impl Drop for Device {
-    fn drop(&mut self) {
-        // Close the fd, ignore any errors.
-        let _ = unsafe { libc::close(self.fd.as_raw_fd()) };
-    }
-}
-
 impl PartialEq for Device {
     fn eq(&self, other: &Device) -> bool {
         // The path should be the only identifying member for a device
