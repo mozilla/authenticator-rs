@@ -306,6 +306,64 @@ impl Request<GetAssertionResult> for GetAssertion {
     }
 }
 
+/// This command is used to check which key_handle is valid for this
+/// token. This is sent before a GetAssertion command, to determine which
+/// is valid for a specific token and which key_handle GetAssertion
+/// should send to the token. Or before a MakeCredential command, to determine
+/// if this token is already registered or not.
+#[derive(Debug)]
+pub(crate) struct CheckKeyHandle<'assertion> {
+    pub(crate) key_handle: &'assertion [u8],
+    pub(crate) client_data: &'assertion CollectedClientData,
+    pub(crate) rp: &'assertion RelyingPartyWrapper,
+}
+
+impl<'assertion> RequestCtap1 for CheckKeyHandle<'assertion> {
+    type Output = ();
+
+    fn apdu_format<Dev>(&self, _dev: &mut Dev) -> Result<Vec<u8>, HIDError>
+    where
+        Dev: U2FDevice + io::Read + io::Write + fmt::Debug,
+    {
+        let flags = U2F_CHECK_IS_REGISTERED;
+        // TODO(MS): Need to check "up" here. If up==false, set to 0x08? Or not? Spec is
+        // ambiguous
+        let mut auth_data = Vec::with_capacity(2 * PARAMETER_SIZE + 1 + self.key_handle.len());
+
+        auth_data.extend_from_slice(
+            self.client_data
+                .hash()
+                .map_err(|e| HIDError::Command(CommandError::Json(e)))?
+                .as_ref(),
+        );
+        auth_data.extend_from_slice(self.rp.hash().as_ref());
+        auth_data.extend_from_slice(&[self.key_handle.len() as u8]);
+        auth_data.extend_from_slice(self.key_handle);
+        let cmd = U2F_AUTHENTICATE;
+        let apdu = U2FAPDUHeader::serialize(cmd, flags, &auth_data)?;
+        Ok(apdu)
+    }
+
+    fn handle_response_ctap1(
+        &self,
+        status: Result<(), ApduErrorStatus>,
+        _input: &[u8],
+    ) -> Result<Self::Output, Retryable<HIDError>> {
+        // From the U2F-spec: https://fidoalliance.org/specs/fido-u2f-v1.2-ps-20170411/fido-u2f-raw-message-formats-v1.2-ps-20170411.html#registration-request-message---u2f_register
+        // if the control byte is set to 0x07 by the FIDO Client, the U2F token is supposed to
+        // simply check whether the provided key handle was originally created by this token,
+        // and whether it was created for the provided application parameter. If so, the U2F
+        // token MUST respond with an authentication response message:error:test-of-user-presence-required
+        // (note that despite the name this signals a success condition).
+        // If the key handle was not created by this U2F token, or if it was created for a different
+        // application parameter, the token MUST respond with an authentication response message:error:bad-key-handle.
+        match status {
+            Ok(_) | Err(ApduErrorStatus::ConditionsNotSatisfied) => Ok(()),
+            Err(e) => Err(Retryable::Error(HIDError::ApduStatus(e))),
+        }
+    }
+}
+
 impl RequestCtap1 for GetAssertion {
     type Output = GetAssertionResult;
 
@@ -313,56 +371,6 @@ impl RequestCtap1 for GetAssertion {
     where
         Dev: io::Read + io::Write + fmt::Debug + FidoDevice,
     {
-        /// This command is used to check which key_handle is valid for this
-        /// token this is sent before a GetAssertion command, to determine which
-        /// is valid for a specific token and which key_handle GetAssertion
-        /// should send to the token.
-        #[derive(Debug)]
-        struct GetAssertionCheck<'assertion> {
-            key_handle: &'assertion [u8],
-            client_data: &'assertion CollectedClientData,
-            rp: &'assertion RelyingPartyWrapper,
-        }
-
-        impl<'assertion> RequestCtap1 for GetAssertionCheck<'assertion> {
-            type Output = ();
-
-            fn apdu_format<Dev>(&self, _dev: &mut Dev) -> Result<Vec<u8>, HIDError>
-            where
-                Dev: U2FDevice + io::Read + io::Write + fmt::Debug,
-            {
-                let flags = U2F_CHECK_IS_REGISTERED;
-                // TODO(MS): Need to check "up" here. If up==false, set to 0x08? Or not? Spec is
-                // ambiguous
-                let mut auth_data =
-                    Vec::with_capacity(2 * PARAMETER_SIZE + 1 + self.key_handle.len());
-
-                auth_data.extend_from_slice(
-                    self.client_data
-                        .hash()
-                        .map_err(|e| HIDError::Command(CommandError::Json(e)))?
-                        .as_ref(),
-                );
-                auth_data.extend_from_slice(self.rp.hash().as_ref());
-                auth_data.extend_from_slice(&[self.key_handle.len() as u8]);
-                auth_data.extend_from_slice(self.key_handle);
-                let cmd = U2F_AUTHENTICATE;
-                let apdu = U2FAPDUHeader::serialize(cmd, flags, &auth_data)?;
-                Ok(apdu)
-            }
-
-            fn handle_response_ctap1(
-                &self,
-                status: Result<(), ApduErrorStatus>,
-                _input: &[u8],
-            ) -> Result<Self::Output, Retryable<HIDError>> {
-                match status {
-                    Ok(_) | Err(ApduErrorStatus::ConditionsNotSatisfied) => Ok(()),
-                    Err(e) => Err(Retryable::Error(HIDError::ApduStatus(e))),
-                }
-            }
-        }
-
         let key_handle = self
             .allow_list
             .iter()
@@ -371,7 +379,7 @@ impl RequestCtap1 for GetAssertion {
             // but the token only speaks CTAP1). If none is found, return an error.
             .filter(|allowed_handle| allowed_handle.id.len() < 256)
             .find_map(|allowed_handle| {
-                let check_command = GetAssertionCheck {
+                let check_command = CheckKeyHandle {
                     key_handle: allowed_handle.id.as_ref(),
                     client_data: &self.client_data,
                     rp: &self.rp,

@@ -8,12 +8,17 @@ use crate::ctap2::attestation::{
     AAGuid, AttestationObject, AttestationStatement, AttestedCredentialData, AuthenticatorData,
     AuthenticatorDataFlags,
 };
-use crate::ctap2::client_data::CollectedClientData;
+use crate::ctap2::client_data::{Challenge, CollectedClientData, WebauthnType};
 use crate::ctap2::commands::client_pin::{Pin, PinAuth};
+use crate::ctap2::commands::get_assertion::CheckKeyHandle;
 use crate::ctap2::server::{
-    PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingPartyWrapper, User,
+    PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty,
+    RelyingPartyWrapper, User,
 };
-use crate::transport::errors::{ApduErrorStatus, HIDError};
+use crate::transport::{
+    errors::{ApduErrorStatus, HIDError},
+    FidoDevice,
+};
 use crate::u2ftypes::{U2FAPDUHeader, U2FDevice};
 use nom::{
     bytes::complete::{tag, take},
@@ -230,9 +235,9 @@ impl Request<MakeCredentialsResult> for MakeCredentials {
 impl RequestCtap1 for MakeCredentials {
     type Output = MakeCredentialsResult;
 
-    fn apdu_format<Dev>(&self, _dev: &mut Dev) -> Result<Vec<u8>, HIDError>
+    fn apdu_format<Dev>(&self, dev: &mut Dev) -> Result<Vec<u8>, HIDError>
     where
-        Dev: U2FDevice,
+        Dev: io::Read + io::Write + fmt::Debug + FidoDevice,
     {
         // TODO(MS): Mandatory sanity checks are missing:
         // https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html#u2f-authenticatorMakeCredential-interoperability
@@ -240,6 +245,36 @@ impl RequestCtap1 for MakeCredentials {
         //  * pubKeyCredParams must use the ES256 algorithm (-7).
         //  * Options must not include "rk" set to true.
         //  * Options must not include "uv" set to true.
+
+        let is_already_registered = self
+            .exclude_list
+            .iter()
+            // key-handles in CTAP1 are limited to 255 bytes, but are not limited in CTAP2.
+            // Filter out key-handles that are too long (can happen if this is a CTAP2-request,
+            // but the token only speaks CTAP1). If none is found, return an error.
+            .filter(|exclude_handle| exclude_handle.id.len() < 256)
+            .map(|exclude_handle| {
+                let check_command = CheckKeyHandle {
+                    key_handle: exclude_handle.id.as_ref(),
+                    client_data: &self.client_data,
+                    rp: &self.rp,
+                };
+                let res = dev.send_apdu(&check_command);
+                res.is_ok()
+            })
+            .any(|x| x == true);
+
+        if is_already_registered {
+            // Now we need to send a dummy registration request, to make the token blink
+            // Spec says "dummy appid and invalid challenge". We use the same, as we do for
+            // making the token blink upon device selection.
+            let msg = dummy_make_credentials_cmd();
+            let _ = dev.send_apdu(&msg); // Ignore answer, return "CrednetialExcluded"
+            return Err(HIDError::Command(CommandError::StatusCode(
+                StatusCode::CredentialExcluded,
+                None,
+            )));
+        }
 
         let flags = if self.options.ask_user_verification() {
             U2F_REQUEST_USER_PRESENCE
@@ -399,6 +434,34 @@ impl RequestCtap2 for MakeCredentials {
             Err(HIDError::Command(CommandError::StatusCode(status, None)))
         }
     }
+}
+
+pub(crate) fn dummy_make_credentials_cmd() -> MakeCredentials {
+    MakeCredentials::new(
+        CollectedClientData {
+            webauthn_type: WebauthnType::Create,
+            challenge: Challenge::new(vec![0, 1, 2, 3, 4]),
+            origin: String::new(),
+            cross_origin: false,
+            token_binding: None,
+        },
+        RelyingPartyWrapper::Data(RelyingParty {
+            id: String::from("make.me.blink"),
+            ..Default::default()
+        }),
+        Some(User {
+            id: vec![0],
+            name: Some(String::from("make.me.blink")),
+            ..Default::default()
+        }),
+        vec![PublicKeyCredentialParameters {
+            alg: crate::COSEAlgorithm::ES256,
+        }],
+        vec![],
+        MakeCredentialsOptions::default(),
+        MakeCredentialsExtensions::default(),
+        None,
+    )
 }
 
 #[cfg(test)]

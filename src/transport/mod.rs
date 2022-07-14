@@ -1,24 +1,18 @@
 use crate::consts::{Capability, HIDCmd};
 use crate::crypto::ECDHSecret;
-use crate::ctap2::client_data::{Challenge, WebauthnType};
+
 use crate::ctap2::commands::client_pin::{GetKeyAgreement, PinAuth};
 use crate::ctap2::commands::get_info::{AuthenticatorInfo, GetInfo};
 use crate::ctap2::commands::get_version::GetVersion;
-use crate::ctap2::commands::make_credentials::{
-    MakeCredentials, MakeCredentialsExtensions, MakeCredentialsOptions,
-};
+use crate::ctap2::commands::make_credentials::dummy_make_credentials_cmd;
 use crate::ctap2::commands::selection::Selection;
 use crate::ctap2::commands::{
     CommandError, PinAuthCommand, Request, RequestCtap1, RequestCtap2, Retryable, StatusCode,
-};
-use crate::ctap2::server::{
-    PublicKeyCredentialParameters, RelyingParty, RelyingPartyWrapper, User,
 };
 use crate::transport::device_selector::BlinkResult;
 use crate::transport::errors::{ApduErrorStatus, HIDError};
 use crate::transport::hid::HIDDevice;
 use crate::util::io_err;
-use crate::CollectedClientData;
 use std::thread;
 use std::time::Duration;
 
@@ -191,31 +185,7 @@ pub trait FidoDevice: HIDDevice {
         } else {
             // We need to fake a blink-request, because FIDO2.0 forgot to specify one
             // See: https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html#using-pinToken-in-authenticatorMakeCredential
-            let mut msg = MakeCredentials::new(
-                CollectedClientData {
-                    webauthn_type: WebauthnType::Create,
-                    challenge: Challenge::new(vec![0, 1, 2, 3, 4]),
-                    origin: String::new(),
-                    cross_origin: false,
-                    token_binding: None,
-                },
-                RelyingPartyWrapper::Data(RelyingParty {
-                    id: String::from("make.me.blink"),
-                    ..Default::default()
-                }),
-                Some(User {
-                    id: vec![0],
-                    name: Some(String::from("make.me.blink")),
-                    ..Default::default()
-                }),
-                vec![PublicKeyCredentialParameters {
-                    alg: crate::COSEAlgorithm::ES256,
-                }],
-                vec![],
-                MakeCredentialsOptions::default(),
-                MakeCredentialsExtensions::default(),
-                None,
-            );
+            let mut msg = dummy_make_credentials_cmd();
             // Using a zero-length pinAuth will trigger the device to blink
             // For CTAP1, this gets ignored anyways and we do a 'normal' register
             // command, which also just blinks.
