@@ -8,13 +8,12 @@ use crate::authenticatorservice::{
 use crate::ctap2::attestation::AttestationStatement;
 use crate::ctap2::commands::get_assertion::{Assertion, AssertionObject, GetAssertionOptions};
 use crate::ctap2::commands::make_credentials::MakeCredentialsOptions;
-use crate::ctap2::commands::CommandError;
 use crate::ctap2::server::{
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, User,
 };
 use crate::errors::{AuthenticatorError, U2FTokenError};
 use crate::statecallback::StateCallback;
-use crate::{AttestationObject, CollectedClientData, Pin, StatusUpdate};
+use crate::{AttestationObject, CollectedClientDataWrapper, Pin, StatusUpdate};
 use crate::{RegisterResult, SignResult};
 use libc::size_t;
 use rand::{thread_rng, Rng};
@@ -143,9 +142,10 @@ pub extern "C" fn rust_ctap2_mgr_new() -> *mut AuthenticatorService {
     }
 }
 
-fn rewrap_client_data(client_data: CollectedClientData) -> Result<CString, AuthenticatorError> {
-    let client_data_str = serde_json::to_string(&client_data).map_err(|e| CommandError::Json(e))?;
-    let s = CString::new(client_data_str).map_err(|_| {
+fn rewrap_client_data(
+    client_data: CollectedClientDataWrapper,
+) -> Result<CString, AuthenticatorError> {
+    let s = CString::new(client_data.serialized_data.clone()).map_err(|_| {
         AuthenticatorError::Custom("Failed to transform client_data to C String".to_string())
     })?;
     Ok(s)
@@ -153,7 +153,7 @@ fn rewrap_client_data(client_data: CollectedClientData) -> Result<CString, Authe
 
 fn rewrap_register_result(
     attestation_object: AttestationObject,
-    client_data: CollectedClientData,
+    client_data: CollectedClientDataWrapper,
 ) -> Ctap2RegisterResult {
     let s = rewrap_client_data(client_data)?;
     Ok((attestation_object, s))
@@ -161,7 +161,7 @@ fn rewrap_register_result(
 
 fn rewrap_sign_result(
     assertion_object: AssertionObject,
-    client_data: CollectedClientData,
+    client_data: CollectedClientDataWrapper,
 ) -> Ctap2SignResult {
     let s = rewrap_client_data(client_data)?;
     Ok((assertion_object, s))

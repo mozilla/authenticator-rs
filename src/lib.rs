@@ -37,7 +37,7 @@ pub use crate::capi::*;
 
 pub mod ctap2;
 pub use ctap2::attestation::AttestationObject;
-pub use ctap2::client_data::CollectedClientData;
+pub use ctap2::client_data::{CollectedClientData, CollectedClientDataWrapper};
 pub use ctap2::commands::client_pin::{Pin, PinError};
 pub use ctap2::AssertionObject;
 
@@ -86,12 +86,12 @@ pub type AppId = Vec<u8>;
 
 pub enum RegisterResult {
     CTAP1(Vec<u8>, u2ftypes::U2FDeviceInfo),
-    CTAP2(AttestationObject, CollectedClientData),
+    CTAP2(AttestationObject, CollectedClientDataWrapper),
 }
 
 pub enum SignResult {
     CTAP1(AppId, Vec<u8>, Vec<u8>, u2ftypes::U2FDeviceInfo),
-    CTAP2(AssertionObject, CollectedClientData),
+    CTAP2(AssertionObject, CollectedClientDataWrapper),
 }
 
 pub type ResetResult = ();

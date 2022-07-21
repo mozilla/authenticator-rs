@@ -1,5 +1,5 @@
 use crate::crypto;
-use crate::ctap2::client_data::{ClientDataHash, CollectedClientData};
+use crate::ctap2::client_data::ClientDataHash;
 use crate::ctap2::commands::client_pin::{GetPinToken, GetRetries, Pin, PinAuth, PinError};
 use crate::errors::AuthenticatorError;
 use crate::transport::errors::{ApduErrorStatus, HIDError};
@@ -90,7 +90,7 @@ pub(crate) trait PinAuthCommand {
     fn set_pin(&mut self, pin: Option<Pin>);
     fn pin_auth(&self) -> &Option<PinAuth>;
     fn set_pin_auth(&mut self, pin_auth: Option<PinAuth>);
-    fn client_data(&self) -> &CollectedClientData;
+    fn client_data_hash(&self) -> ClientDataHash;
     fn unset_uv_option(&mut self);
     fn determine_pin_auth<D: FidoDevice>(&mut self, dev: &mut D) -> Result<(), AuthenticatorError> {
         if !dev.supports_ctap2() {
@@ -98,10 +98,7 @@ pub(crate) trait PinAuthCommand {
             return Ok(());
         }
 
-        let client_data_hash = self
-            .client_data()
-            .hash()
-            .map_err(|e| AuthenticatorError::HIDError(HIDError::Command(CommandError::Json(e))))?;
+        let client_data_hash = self.client_data_hash();
         let pin_auth = match calculate_pin_auth(dev, &client_data_hash, &self.pin()) {
             Ok(pin_auth) => pin_auth,
             Err(e) => {

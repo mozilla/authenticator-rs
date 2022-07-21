@@ -1,3 +1,5 @@
+use super::commands::CommandError;
+use crate::transport::errors::HIDError;
 use serde::de::{self, Deserializer, Error as SerdeError, MapAccess, Visitor};
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize, Serializer};
@@ -273,27 +275,41 @@ impl<'de> Deserialize<'de> for ClientDataHash {
     }
 }
 
-impl CollectedClientData {
-    pub fn hash(&self) -> json::Result<ClientDataHash> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CollectedClientDataWrapper {
+    pub client_data: CollectedClientData,
+    pub serialized_data: Vec<u8>,
+}
+
+impl CollectedClientDataWrapper {
+    pub fn new(client_data: CollectedClientData) -> Result<Self, HIDError> {
+        let serialized_data = json::to_vec(&client_data).map_err(CommandError::Json)?;
+        Ok(CollectedClientDataWrapper {
+            client_data,
+            serialized_data,
+        })
+    }
+
+    pub fn hash(&self) -> ClientDataHash {
         // WebIDL's dictionary definition specifies that the order of the struct
         // is exactly as the WebIDL specification declares it, with an algorithm
         // for partial dictionaries, so that's how interop works for these
         // things.
         // See: https://heycam.github.io/webidl/#dfn-dictionary
-
-        let data = json::to_vec(&self)?;
         let mut hasher = Sha256::new();
-        hasher.update(&data);
+        hasher.update(&self.serialized_data);
 
         let mut output = [0u8; 32];
         output.copy_from_slice(hasher.finalize().as_slice());
 
-        Ok(ClientDataHash(output))
+        ClientDataHash(output)
     }
 }
 
 #[cfg(test)]
 mod test {
+    use crate::CollectedClientDataWrapper;
+
     use super::{Challenge, ClientDataHash, CollectedClientData, TokenBinding, WebauthnType};
     use serde_json as json;
 
@@ -366,9 +382,10 @@ mod test {
             cross_origin: false,
             token_binding: Some(TokenBinding::Present("AAECAw".to_string())),
         };
-
+        let c =
+            CollectedClientDataWrapper::new(client_data).expect("Failed to serialize client_data");
         assert_eq!(
-            client_data.hash().unwrap(),
+            c.hash(),
             //  echo -n '{"type":"webauthn.create","challenge":"AAECAw","origin":"example.com","crossOrigin":false,"tokenBinding":{"status":"present","id":"AAECAw"}}' | sha256sum -t
             ClientDataHash {
                 0: [

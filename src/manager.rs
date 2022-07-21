@@ -430,7 +430,7 @@ impl AuthenticatorTransport for Manager {
                     None,
                 )
             }
-        };
+        }?;
 
         let action = QueueAction::RegisterCtap2 {
             timeout,
@@ -495,7 +495,7 @@ impl AuthenticatorTransport for Manager {
                             options,
                             Default::default(),
                             None,
-                        );
+                        )?;
 
                         let action = QueueAction::SignCtap2 {
                             timeout,
@@ -528,7 +528,7 @@ impl AuthenticatorTransport for Manager {
                     args.options,
                     args.extensions,
                     args.pin,
-                );
+                )?;
 
                 let action = QueueAction::SignCtap2 {
                     timeout,
