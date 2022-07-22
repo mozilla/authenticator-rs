@@ -340,8 +340,6 @@ pub enum AttestationStatement {
     //AndroidKey,
     //AndroidSafetyNet,
     FidoU2F(AttestationStatementFidoU2F),
-    // TODO(baloo): should we do an Unknow version? most likely
-    Unparsed(Vec<u8>),
 }
 
 // Not all crypto-backends currently provide "crypto::verify()", so we do not implement it yet.
@@ -542,11 +540,6 @@ impl Serialize for AttestationObject {
                 map.serialize_entry(&3, v)?;
             }
             AttestationStatement::FidoU2F(ref v) => {
-                map.serialize_entry(&1, &"fido-u2f")?;
-                map.serialize_entry(&3, v)?;
-            }
-            AttestationStatement::Unparsed(ref v) => {
-                // Unparsed is currently only used in the fido1.0/u2f-case
                 map.serialize_entry(&1, &"fido-u2f")?;
                 map.serialize_entry(&3, v)?;
             }
