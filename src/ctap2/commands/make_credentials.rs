@@ -120,7 +120,8 @@ pub struct MakeCredentials {
     pub(crate) options: MakeCredentialsOptions,
     pub(crate) pin: Option<Pin>,
     pub(crate) pin_auth: Option<PinAuth>,
-    // TODO(MS): pin_protocol
+    pub(crate) pin_auth_protocol: Option<u8>,
+    pub(crate) enterprise_attestation: Option<u32>,
 }
 
 impl MakeCredentials {
@@ -145,6 +146,8 @@ impl MakeCredentials {
             options,
             pin,
             pin_auth: None,
+            pin_auth_protocol: None,
+            enterprise_attestation: None,
         })
     }
 }
@@ -194,15 +197,18 @@ impl Serialize for MakeCredentials {
             map_len += 1;
         }
         if self.pin_auth.is_some() {
-            map_len += 2;
+            map_len += 2; // pin_auth_protocol is part of this
+        }
+        if self.enterprise_attestation.is_some() {
+            map_len += 1;
         }
 
         let mut map = serializer.serialize_map(Some(map_len))?;
         let client_data_hash = self.client_data_hash();
-        map.serialize_entry(&1, &client_data_hash)?;
+        map.serialize_entry(&0x01, &client_data_hash)?;
         match self.rp {
             RelyingPartyWrapper::Data(ref d) => {
-                map.serialize_entry(&2, &d)?;
+                map.serialize_entry(&0x02, &d)?;
             }
             _ => {
                 return Err(S::Error::custom(
@@ -210,20 +216,23 @@ impl Serialize for MakeCredentials {
                 ));
             }
         }
-        map.serialize_entry(&3, &self.user)?;
-        map.serialize_entry(&4, &self.pub_cred_params)?;
+        map.serialize_entry(&0x03, &self.user)?;
+        map.serialize_entry(&0x04, &self.pub_cred_params)?;
         if !self.exclude_list.is_empty() {
-            map.serialize_entry(&5, &self.exclude_list)?;
+            map.serialize_entry(&0x05, &self.exclude_list)?;
         }
         if self.extensions.has_extensions() {
-            map.serialize_entry(&6, &self.extensions)?;
+            map.serialize_entry(&0x06, &self.extensions)?;
         }
         if self.options.has_some() {
-            map.serialize_entry(&7, &self.options)?;
+            map.serialize_entry(&0x07, &self.options)?;
         }
         if let Some(pin_auth) = &self.pin_auth {
-            map.serialize_entry(&8, &pin_auth)?;
-            map.serialize_entry(&9, &1)?; // version
+            map.serialize_entry(&0x08, &pin_auth)?;
+            map.serialize_entry(&0x09, &self.pin_auth_protocol.unwrap_or(1))?; // version
+        }
+        if let Some(enterprise_attestation) = self.enterprise_attestation {
+            map.serialize_entry(&0x0a, &enterprise_attestation)?;
         }
         map.end()
     }
