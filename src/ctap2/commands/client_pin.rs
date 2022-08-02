@@ -17,8 +17,6 @@ use sha2::{Digest, Sha256};
 use std::error::Error as StdErrorT;
 use std::fmt;
 
-// use serde::Deserialize; cfg[test]
-
 #[derive(Debug, Copy, Clone)]
 #[repr(u8)]
 pub enum PINSubcommand {
@@ -26,7 +24,21 @@ pub enum PINSubcommand {
     GetKeyAgreement = 0x02,
     SetPIN = 0x03,
     ChangePIN = 0x04,
-    GetPINToken = 0x05,
+    GetPINToken = 0x05, // superseded by GetPinUvAuth*
+    GetPinUvAuthTokenUsingUvWithPermissions = 0x06,
+    GetUVRetries = 0x07,
+    GetPinUvAuthTokenUsingPinWithPermissions = 0x09, // Yes, 0x08 is missing
+}
+
+#[derive(Debug, Copy, Clone)]
+#[repr(u8)]
+pub enum PinUvAuthTokenPermission {
+    MakeCredential = 0x01,             // rp_id required
+    GetAssertion = 0x02,               // rp_id required
+    CredentialManagement = 0x04,       // rp_id optional
+    BioEnrollment = 0x08,              // rp_id ignored
+    LargeBlobWrite = 0x10,             // rp_id ignored
+    AuthenticatorConfiguration = 0x20, // rp_id ignored
 }
 
 #[derive(Debug)]
@@ -37,6 +49,8 @@ pub struct ClientPIN {
     pin_auth: Option<PinAuth>,
     new_pin_enc: Option<ByteBuf>,
     pin_hash_enc: Option<ByteBuf>,
+    permissions: Option<u8>,
+    rp_id: Option<String>,
 }
 
 impl Default for ClientPIN {
@@ -48,6 +62,8 @@ impl Default for ClientPIN {
             pin_auth: None,
             new_pin_enc: None,
             pin_hash_enc: None,
+            permissions: None,
+            rp_id: None,
         }
     }
 }
@@ -75,6 +91,12 @@ impl Serialize for ClientPIN {
         if self.pin_hash_enc.is_some() {
             map_len += 1;
         }
+        if self.permissions.is_some() {
+            map_len += 1;
+        }
+        if self.rp_id.is_some() {
+            map_len += 1;
+        }
 
         let mut map = serializer.serialize_map(Some(map_len))?;
         if let Some(ref pin_protocol) = self.pin_protocol {
@@ -94,6 +116,13 @@ impl Serialize for ClientPIN {
         if let Some(ref pin_hash_enc) = self.pin_hash_enc {
             map.serialize_entry(&6, pin_hash_enc)?;
         }
+        if let Some(ref permissions) = self.permissions {
+            // TODO(MS): Should test that permissions are not 0
+            map.serialize_entry(&9, permissions)?;
+        }
+        if let Some(ref rp_id) = self.rp_id {
+            map.serialize_entry(&0x0A, rp_id)?;
+        }
 
         map.end()
     }
@@ -109,7 +138,9 @@ struct ClientPinResponse {
     key_agreement: Option<COSEKey>,
     pin_token: Option<EncryptedPinToken>,
     /// Number of PIN attempts remaining before lockout.
-    retries: Option<u8>,
+    pin_retries: Option<u8>,
+    power_cycle_state: Option<bool>,
+    uv_retries: Option<u8>,
 }
 
 impl<'de> Deserialize<'de> for ClientPinResponse {
@@ -132,7 +163,9 @@ impl<'de> Deserialize<'de> for ClientPinResponse {
             {
                 let mut key_agreement = None;
                 let mut pin_token = None;
-                let mut retries = None;
+                let mut pin_retries = None;
+                let mut power_cycle_state = None;
+                let mut uv_retries = None;
                 while let Some(key) = map.next_key()? {
                     match key {
                         1 => {
@@ -148,10 +181,22 @@ impl<'de> Deserialize<'de> for ClientPinResponse {
                             pin_token = map.next_value()?;
                         }
                         3 => {
-                            if retries.is_some() {
-                                return Err(SerdeError::duplicate_field("retries"));
+                            if pin_retries.is_some() {
+                                return Err(SerdeError::duplicate_field("pin_retries"));
                             }
-                            retries = Some(map.next_value()?);
+                            pin_retries = Some(map.next_value()?);
+                        }
+                        4 => {
+                            if power_cycle_state.is_some() {
+                                return Err(SerdeError::duplicate_field("power_cycle_state"));
+                            }
+                            power_cycle_state = Some(map.next_value()?);
+                        }
+                        5 => {
+                            if uv_retries.is_some() {
+                                return Err(SerdeError::duplicate_field("uv_retries"));
+                            }
+                            uv_retries = Some(map.next_value()?);
                         }
                         k => return Err(M::Error::custom(format!("unexpected key: {:?}", k))),
                     }
@@ -159,7 +204,9 @@ impl<'de> Deserialize<'de> for ClientPinResponse {
                 Ok(ClientPinResponse {
                     key_agreement,
                     pin_token,
-                    retries,
+                    pin_retries,
+                    power_cycle_state,
+                    uv_retries,
                 })
             }
         }
@@ -208,6 +255,8 @@ impl ClientPINSubCommand for GetKeyAgreement {
 }
 
 #[derive(Debug)]
+/// Superseded by GetPinUvAuthTokenUsingUvWithPermissions or GetPinUvAuthTokenUsingPinWithPermissions,
+/// thus for backwards compatibility only
 pub struct GetPinToken<'sc, 'pin> {
     pin_protocol: u8,
     shared_secret: &'sc ECDHSecret,
@@ -273,6 +322,78 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinToken<'sc, 'pin> {
 }
 
 #[derive(Debug)]
+pub struct GetPinUvAuthTokenUsingPinWithPermissions<'sc, 'pin> {
+    pin_protocol: u8,
+    shared_secret: &'sc ECDHSecret,
+    pin: &'pin Pin,
+    permissions: PinUvAuthTokenPermission,
+    rp_id: Option<String>,
+}
+
+impl<'sc, 'pin> GetPinUvAuthTokenUsingPinWithPermissions<'sc, 'pin> {
+    pub fn new(
+        info: &AuthenticatorInfo,
+        shared_secret: &'sc ECDHSecret,
+        pin: &'pin Pin,
+        permissions: PinUvAuthTokenPermission,
+        rp_id: Option<String>,
+    ) -> Result<Self, CommandError> {
+        // TODO(MS)!
+        if info.pin_protocols.contains(&1) {
+            Ok(GetPinUvAuthTokenUsingPinWithPermissions {
+                pin_protocol: 1,
+                shared_secret,
+                pin,
+                permissions,
+                rp_id,
+            })
+        } else {
+            Err(CommandError::UnsupportedPinProtocol)
+        }
+    }
+}
+
+impl<'sc, 'pin> ClientPINSubCommand for GetPinUvAuthTokenUsingPinWithPermissions<'sc, 'pin> {
+    type Output = PinToken;
+
+    fn as_client_pin(&self) -> Result<ClientPIN, CommandError> {
+        let input = self.pin.for_pin_token();
+        let pin_hash_enc = encrypt(self.shared_secret.shared_secret(), input.as_ref())
+            .map_err(|e| CryptoError::Backend(e))?;
+
+        Ok(ClientPIN {
+            pin_protocol: Some(self.pin_protocol),
+            subcommand: PINSubcommand::GetPinUvAuthTokenUsingPinWithPermissions,
+            key_agreement: Some(self.shared_secret.my_public_key().clone()),
+            pin_hash_enc: Some(ByteBuf::from(pin_hash_enc)),
+            permissions: Some(self.permissions as u8),
+            rp_id: self.rp_id.clone(), // TODO: This could probably be done less wasteful with &str all the way
+            ..ClientPIN::default()
+        })
+    }
+
+    fn parse_response_payload(&self, input: &[u8]) -> Result<Self::Output, CommandError> {
+        let value: Value = from_slice(input).map_err(CommandError::Deserializing)?;
+        debug!("GetKeyAgreement::parse_response_payload {:?}", value);
+
+        let get_pin_response: ClientPinResponse =
+            from_slice(input).map_err(CommandError::Deserializing)?;
+        match get_pin_response.pin_token {
+            Some(encrypted_pin_token) => {
+                let pin_token = decrypt(
+                    self.shared_secret.shared_secret(),
+                    encrypted_pin_token.as_ref(),
+                )
+                .map_err(|e| CryptoError::Backend(e))?;
+                let pin_token = PinToken(pin_token);
+                Ok(pin_token)
+            }
+            None => Err(CommandError::MissingRequiredField("key_agreement")),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct GetRetries {}
 
 impl GetRetries {
@@ -297,9 +418,9 @@ impl ClientPINSubCommand for GetRetries {
 
         let get_pin_response: ClientPinResponse =
             from_slice(input).map_err(CommandError::Deserializing)?;
-        match get_pin_response.retries {
-            Some(retries) => Ok(retries),
-            None => Err(CommandError::MissingRequiredField("retries")),
+        match get_pin_response.pin_retries {
+            Some(pin_retries) => Ok(pin_retries),
+            None => Err(CommandError::MissingRequiredField("pin_retries")),
         }
     }
 }
@@ -450,6 +571,8 @@ impl<'sc, 'pin> ClientPINSubCommand for ChangeExistingPin<'sc, 'pin> {
             new_pin_enc: Some(ByteBuf::from(new_pin_enc)),
             pin_hash_enc: Some(ByteBuf::from(pin_hash_enc)),
             pin_auth: Some(pin_auth),
+            permissions: None,
+            rp_id: None,
         })
     }
 
@@ -631,8 +754,8 @@ impl fmt::Display for PinError {
             PinError::InvalidKeyLen => write!(f, "PinError: invalid key len"),
             PinError::InvalidPin(ref e) => {
                 let mut res = write!(f, "PinError: Invalid Pin.");
-                if let Some(retries) = e {
-                    res = write!(f, " Retries left: {:?}", retries)
+                if let Some(pin_retries) = e {
+                    res = write!(f, " Retries left: {:?}", pin_retries)
                 }
                 res
             }
