@@ -512,39 +512,38 @@ impl<'de> Deserialize<'de> for AttestationObject {
 }
 
 impl Serialize for AttestationObject {
+    /// Serialize can be used to repackage the CBOR answer we get from the token using CTAP-format
+    /// to webauthn-format (string-keys like "authData" instead of numbers). Yes, the specs are weird.
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        // serializer.serialize_bytes(&v)
-        let mut map_len = 2;
-        if self.att_statement != AttestationStatement::None {
-            map_len += 1;
-        }
-
+        let map_len = 3;
         let mut map = serializer.serialize_map(Some(map_len))?;
 
-        map.serialize_entry(
-            &2,
-            &self
-                .auth_data
-                .to_vec()
-                .map_err(|_| SerError::custom("Failed to serialize auth_data"))?,
-        )?;
+        let auth_data = self
+            .auth_data
+            .to_vec()
+            .map(|v| serde_cbor::Value::Bytes(v))
+            .map_err(|_| SerError::custom("Failed to serialize auth_data"))?;
+
+        map.serialize_entry(&"authData", &auth_data)?;
         match self.att_statement {
             AttestationStatement::None => {
-                map.serialize_entry(&1, &"none")?;
+                // Even with Att None, an empty map is returned in the cbor!
+                map.serialize_entry(&"fmt", &"none")?;
+                let v = serde_cbor::Value::Map(std::collections::BTreeMap::new());
+                map.serialize_entry(&"attStmt", &v)?;
             }
             AttestationStatement::Packed(ref v) => {
-                map.serialize_entry(&1, &"packed")?;
-                map.serialize_entry(&3, v)?;
+                map.serialize_entry(&"fmt", &"packed")?;
+                map.serialize_entry(&"attStmt", v)?;
             }
             AttestationStatement::FidoU2F(ref v) => {
-                map.serialize_entry(&1, &"fido-u2f")?;
-                map.serialize_entry(&3, v)?;
+                map.serialize_entry(&"fmt", &"fido-u2f")?;
+                map.serialize_entry(&"attStmt", v)?;
             }
         }
-
         map.end()
     }
 }

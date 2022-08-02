@@ -39,13 +39,6 @@ const SIGN_RESULT_SIGNATURE: u8 = 3;
 const SIGN_RESULT_USER_ID: u8 = 4;
 const SIGN_RESULT_USER_NAME: u8 = 5;
 
-const REGISTER_RESULT_ATTESTATION_STATEMENT: u8 = 1;
-const REGISTER_RESULT_AUTH_DATA: u8 = 2;
-
-const ATTESTATION_FORMAT_NONE: u8 = 0;
-const ATTESTATION_FORMAT_U2F: u8 = 1;
-const ATTESTATION_FORMAT_PACKED: u8 = 2;
-
 #[repr(C)]
 pub struct AuthenticatorArgsUser {
     id_ptr: *const u8,
@@ -70,6 +63,7 @@ pub struct AuthenticatorArgsOptions {
     resident_key: bool,
     user_verification: bool,
     user_presence: bool,
+    force_none_attestation: bool,
 }
 
 // Generates a new 64-bit transaction id with collision probability 2^-32.
@@ -237,6 +231,7 @@ pub unsafe extern "C" fn rust_ctap2_mgr_register(
     let origin = CStr::from_ptr(origin_ptr).to_string_lossy().to_string();
     let challenge = from_raw(challenge.ptr, challenge.len);
     let exclude_list = (*exclude_list).clone();
+    let force_none_attestation = options.force_none_attestation;
 
     let (status_tx, status_rx) = channel::<crate::StatusUpdate>();
     thread::spawn(move || loop {
@@ -261,7 +256,10 @@ pub unsafe extern "C" fn rust_ctap2_mgr_register(
                 "rust_ctap2_mgr_register",
                 2,
             )),
-            Ok(RegisterResult::CTAP2(attestation_object, client_data)) => {
+            Ok(RegisterResult::CTAP2(mut attestation_object, client_data)) => {
+                if force_none_attestation {
+                    attestation_object.att_statement = AttestationStatement::None;
+                }
                 rewrap_register_result(attestation_object, client_data)
             }
             Err(e) => Err(e),
@@ -542,79 +540,25 @@ pub unsafe extern "C" fn rust_ctap2_sign_result_client_data_copy(
     client_data_copy(res, dst)
 }
 
-fn register_result_item_len(attestation: &AttestationObject, item_idx: u8) -> Option<usize> {
-    match item_idx {
-        REGISTER_RESULT_ATTESTATION_STATEMENT => match &attestation.att_statement {
-            AttestationStatement::None => None,
-            AttestationStatement::Packed(x) => serde_cbor::to_vec(&x).ok().map(|x| x.len()),
-            AttestationStatement::FidoU2F(x) => serde_cbor::to_vec(&x).ok().map(|x| x.len()),
-        },
-        REGISTER_RESULT_AUTH_DATA => attestation.auth_data.to_vec().ok().map(|x| x.len()),
-        _ => None,
-    }
-}
-
 /// # Safety
 ///
 /// This function is used to get how long the specific item is.
 #[no_mangle]
-pub unsafe extern "C" fn rust_ctap2_register_result_item_len(
+pub unsafe extern "C" fn rust_ctap2_register_result_attestation_len(
     res: *const Ctap2RegisterResult,
-    item_idx: u8,
     len: *mut size_t,
 ) -> bool {
     if res.is_null() || len.is_null() {
         return false;
     }
 
-    match &*res {
-        Ok((attestation, _)) => {
-            if let Some(item_len) = register_result_item_len(&attestation, item_idx) {
-                *len = item_len;
-                true
-            } else {
-                false
-            }
+    if let Ok((attestation, _)) = &*res {
+        if let Some(item_len) = serde_cbor::to_vec(&attestation).ok().map(|x| x.len()) {
+            *len = item_len;
+            return true;
         }
-        Err(_) => false,
     }
-}
-
-unsafe fn register_result_item_copy(
-    attestation: &AttestationObject,
-    item_idx: u8,
-    dst: *mut u8,
-) -> bool {
-    if dst.is_null() {
-        return false;
-    }
-
-    let tmp_val;
-    let item: Option<&[u8]> = match item_idx {
-        REGISTER_RESULT_ATTESTATION_STATEMENT => match &attestation.att_statement {
-            AttestationStatement::None => None,
-            AttestationStatement::Packed(x) => {
-                tmp_val = serde_cbor::to_vec(&x).ok();
-                tmp_val.as_ref().map(|x| x.as_ref())
-            }
-            AttestationStatement::FidoU2F(x) => {
-                tmp_val = serde_cbor::to_vec(&x).ok();
-                tmp_val.as_ref().map(|x| x.as_ref())
-            }
-        },
-        REGISTER_RESULT_AUTH_DATA => {
-            tmp_val = attestation.auth_data.to_vec().ok();
-            tmp_val.as_ref().map(|x| x.as_ref())
-        }
-        _ => None,
-    };
-
-    if let Some(item) = item {
-        ptr::copy_nonoverlapping(item.as_ptr(), dst, item.len());
-        true
-    } else {
-        false
-    }
+    false
 }
 
 /// # Safety
@@ -622,41 +566,21 @@ unsafe fn register_result_item_copy(
 /// This method does not ensure anything about dst before copying, so
 /// ensure it is long enough (using rust_ctap2_register_result_item_len)
 #[no_mangle]
-pub unsafe extern "C" fn rust_ctap2_register_result_item_copy(
+pub unsafe extern "C" fn rust_ctap2_register_result_attestation_copy(
     res: *const Ctap2RegisterResult,
-    item_idx: u8,
     dst: *mut u8,
 ) -> bool {
     if res.is_null() || dst.is_null() {
         return false;
     }
 
-    match &*res {
-        Ok((attestation, _)) => register_result_item_copy(&attestation, item_idx, dst),
-        Err(_) => false,
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn rust_ctap2_register_result_attestation_format(
-    res: *const Ctap2RegisterResult,
-    fmt: *mut u8,
-) -> bool {
-    if res.is_null() || fmt.is_null() {
-        return false;
-    }
-
-    match &*res {
-        Ok((attestation_object, _client_data)) => {
-            *fmt = match &attestation_object.att_statement {
-                AttestationStatement::None => ATTESTATION_FORMAT_NONE,
-                AttestationStatement::FidoU2F(..) => ATTESTATION_FORMAT_U2F,
-                AttestationStatement::Packed(..) => ATTESTATION_FORMAT_PACKED,
-            };
-            true
+    if let Ok((attestation, _)) = &*res {
+        if let Ok(item) = serde_cbor::to_vec(&attestation) {
+            ptr::copy_nonoverlapping(item.as_ptr(), dst, item.len());
+            return true;
         }
-        Err(_) => false,
     }
+    false
 }
 
 /// This function is used to get how many assertions there are in total
