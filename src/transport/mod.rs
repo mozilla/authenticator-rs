@@ -89,7 +89,7 @@ pub trait FidoDevice: HIDDevice {
         if self.supports_ctap2() && msg.is_ctap2_request() {
             self.send_cbor(msg)
         } else {
-            self.send_apdu(msg)
+            self.send_ctap1(msg)
         }
     }
 
@@ -121,12 +121,12 @@ pub trait FidoDevice: HIDDevice {
         }
     }
 
-    fn send_apdu<'msg, Req: RequestCtap1>(
+    fn send_ctap1<'msg, Req: RequestCtap1>(
         &mut self,
         msg: &'msg Req,
     ) -> Result<Req::Output, HIDError> {
         debug!("sending {:?} to {:?}", msg, self);
-        let data = msg.apdu_format(self)?;
+        let data = msg.ctap1_format(self)?;
 
         loop {
             let (cmd, mut data) = self.sendrecv(HIDCmd::Msg, &data)?;
@@ -175,7 +175,7 @@ pub trait FidoDevice: HIDDevice {
         if self.supports_ctap1() {
             let command = GetVersion::default();
             // We don't really use the result here
-            self.send_apdu(&command)?;
+            self.send_ctap1(&command)?;
         }
         Ok(resp)
     }

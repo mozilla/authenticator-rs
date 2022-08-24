@@ -46,7 +46,7 @@ where
     register_data.extend(application);
 
     let flags = U2F_REQUEST_USER_PRESENCE;
-    let (resp, status) = send_apdu(dev, U2F_REGISTER, flags, &register_data)?;
+    let (resp, status) = send_ctap1(dev, U2F_REGISTER, flags, &register_data)?;
     status_word_to_result(status, resp)
 }
 
@@ -80,7 +80,7 @@ where
     sign_data.extend(key_handle);
 
     let flags = U2F_REQUEST_USER_PRESENCE;
-    let (resp, status) = send_apdu(dev, U2F_AUTHENTICATE, flags, &sign_data)?;
+    let (resp, status) = send_ctap1(dev, U2F_AUTHENTICATE, flags, &sign_data)?;
     status_word_to_result(status, resp)
 }
 
@@ -114,7 +114,7 @@ where
     sign_data.extend(key_handle);
 
     let flags = U2F_CHECK_IS_REGISTERED;
-    let (_, status) = send_apdu(dev, U2F_AUTHENTICATE, flags, &sign_data)?;
+    let (_, status) = send_ctap1(dev, U2F_AUTHENTICATE, flags, &sign_data)?;
     Ok(status == SW_CONDITIONS_NOT_SATISFIED)
 }
 
@@ -157,7 +157,7 @@ fn is_v2_device<T>(dev: &mut T) -> io::Result<bool>
 where
     T: U2FDevice + Read + Write,
 {
-    let (data, status) = send_apdu(dev, U2F_VERSION, 0x00, &[])?;
+    let (data, status) = send_ctap1(dev, U2F_VERSION, 0x00, &[])?;
     let actual = CString::new(data)?;
     let expected = CString::new("U2F_V2")?;
     status_word_to_result(status, actual == expected)
@@ -212,11 +212,11 @@ where
     Ok(data)
 }
 
-fn send_apdu<T>(dev: &mut T, cmd: u8, p1: u8, send: &[u8]) -> io::Result<(Vec<u8>, [u8; 2])>
+fn send_ctap1<T>(dev: &mut T, cmd: u8, p1: u8, send: &[u8]) -> io::Result<(Vec<u8>, [u8; 2])>
 where
     T: U2FDevice + Read + Write,
 {
-    let apdu = U2FAPDUHeader::serialize(cmd, p1, send)?;
+    let apdu = CTAP1RequestAPDU::serialize(cmd, p1, send)?;
     let mut data = sendrecv(dev, HIDCmd::Msg, &apdu)?;
 
     if data.len() < 2 {
@@ -234,7 +234,7 @@ where
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::{init_device, is_v2_device, send_apdu, sendrecv, U2FDevice};
+    use super::{init_device, is_v2_device, send_ctap1, sendrecv, U2FDevice};
     use crate::consts::{Capability, HIDCmd, CID_BROADCAST, SW_NO_ERROR};
     use crate::transport::device_selector::Device;
     use crate::transport::hid::HIDDevice;
@@ -295,10 +295,10 @@ pub(crate) mod tests {
         };
         device.set_device_info(info);
 
-        // ctap1 U2F_VERSION request
+        // ctap1.0 U2F_VERSION request
         let mut msg = cid.to_vec();
-        msg.extend(&[HIDCmd::Msg.into(), 0x0, 0x9]); // cmd + bcnt
-        msg.extend(&[0x0, 0x3, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0]);
+        msg.extend(&[HIDCmd::Msg.into(), 0x0, 0x7]); // cmd + bcnt
+        msg.extend(&[0x0, 0x3, 0x0, 0x0, 0x0, 0x0, 0x0]);
         device.add_write(&msg, 0);
 
         // fido response
@@ -384,7 +384,7 @@ pub(crate) mod tests {
         msg.extend_from_slice(&SW_NO_ERROR);
         device.add_read(&msg, 0);
 
-        let (result, status) = send_apdu(&mut device, HIDCmd::Ping.into(), 0xaa, &data).unwrap();
+        let (result, status) = send_ctap1(&mut device, HIDCmd::Ping.into(), 0xaa, &data).unwrap();
         assert_eq!(result, &data);
         assert_eq!(status, SW_NO_ERROR);
     }

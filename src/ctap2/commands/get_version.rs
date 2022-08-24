@@ -1,7 +1,7 @@
 use super::{CommandError, RequestCtap1, Retryable};
 use crate::consts::U2F_VERSION;
 use crate::transport::errors::{ApduErrorStatus, HIDError};
-use crate::u2ftypes::U2FAPDUHeader;
+use crate::u2ftypes::CTAP1RequestAPDU;
 use crate::u2ftypes::U2FDevice;
 
 #[allow(non_camel_case_types)]
@@ -42,14 +42,14 @@ impl RequestCtap1 for GetVersion {
         }
     }
 
-    fn apdu_format<Dev>(&self, _dev: &mut Dev) -> Result<Vec<u8>, HIDError>
+    fn ctap1_format<Dev>(&self, _dev: &mut Dev) -> Result<Vec<u8>, HIDError>
     where
         Dev: U2FDevice,
     {
         let flags = 0;
 
         let cmd = U2F_VERSION;
-        let data = U2FAPDUHeader::serialize(cmd, flags, &[])?;
+        let data = CTAP1RequestAPDU::serialize(cmd, flags, &[])?;
         Ok(data)
     }
 }
@@ -92,8 +92,8 @@ pub mod tests {
 
         // ctap1 U2F_VERSION request
         let mut msg = cid.to_vec();
-        msg.extend(&[HIDCmd::Msg.into(), 0x0, 0x9]); // cmd + bcnt
-        msg.extend(&[0x0, 0x3, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0]);
+        msg.extend(&[HIDCmd::Msg.into(), 0x0, 0x7]); // cmd + bcnt
+        msg.extend(&[0x0, 0x3, 0x0, 0x0, 0x0, 0x0, 0x0]);
         device.add_write(&msg, 0);
 
         // fido response

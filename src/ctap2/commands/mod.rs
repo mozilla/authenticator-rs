@@ -56,10 +56,14 @@ impl<T> From<T> for Retryable<T> {
 pub trait RequestCtap1: fmt::Debug {
     type Output;
 
-    fn apdu_format<Dev>(&self, dev: &mut Dev) -> Result<Vec<u8>, HIDError>
+    /// Serializes a request into FIDO v1.x / CTAP1 / U2F format.
+    ///
+    /// See [`crate::u2ftypes::CTAP1RequestAPDU::serialize()`]
+    fn ctap1_format<Dev>(&self, dev: &mut Dev) -> Result<Vec<u8>, HIDError>
     where
         Dev: FidoDevice + Read + Write + fmt::Debug;
 
+    /// Deserializes a response from FIDO v1.x / CTAP1 / U2Fv2 format.
     fn handle_response_ctap1(
         &self,
         status: Result<(), ApduErrorStatus>,
