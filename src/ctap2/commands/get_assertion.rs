@@ -15,7 +15,7 @@ use crate::ctap2::server::{PublicKeyCredentialDescriptor, RelyingPartyWrapper, U
 use crate::errors::AuthenticatorError;
 use crate::transport::errors::{ApduErrorStatus, HIDError};
 use crate::transport::FidoDevice;
-use crate::u2ftypes::{U2FAPDUHeader, U2FDevice};
+use crate::u2ftypes::{CTAP1RequestAPDU, U2FDevice};
 use nom::{
     error::VerboseError,
     number::complete::{be_u32, be_u8},
@@ -319,7 +319,7 @@ pub(crate) struct CheckKeyHandle<'assertion> {
 impl<'assertion> RequestCtap1 for CheckKeyHandle<'assertion> {
     type Output = ();
 
-    fn apdu_format<Dev>(&self, _dev: &mut Dev) -> Result<Vec<u8>, HIDError>
+    fn ctap1_format<Dev>(&self, _dev: &mut Dev) -> Result<Vec<u8>, HIDError>
     where
         Dev: U2FDevice + io::Read + io::Write + fmt::Debug,
     {
@@ -333,7 +333,7 @@ impl<'assertion> RequestCtap1 for CheckKeyHandle<'assertion> {
         auth_data.extend_from_slice(&[self.key_handle.len() as u8]);
         auth_data.extend_from_slice(self.key_handle);
         let cmd = U2F_AUTHENTICATE;
-        let apdu = U2FAPDUHeader::serialize(cmd, flags, &auth_data)?;
+        let apdu = CTAP1RequestAPDU::serialize(cmd, flags, &auth_data)?;
         Ok(apdu)
     }
 
@@ -360,7 +360,7 @@ impl<'assertion> RequestCtap1 for CheckKeyHandle<'assertion> {
 impl RequestCtap1 for GetAssertion {
     type Output = GetAssertionResult;
 
-    fn apdu_format<Dev>(&self, dev: &mut Dev) -> Result<Vec<u8>, HIDError>
+    fn ctap1_format<Dev>(&self, dev: &mut Dev) -> Result<Vec<u8>, HIDError>
     where
         Dev: io::Read + io::Write + fmt::Debug + FidoDevice,
     {
@@ -377,7 +377,7 @@ impl RequestCtap1 for GetAssertion {
                     client_data_wrapper: &self.client_data_wrapper,
                     rp: &self.rp,
                 };
-                let res = dev.send_apdu(&check_command);
+                let res = dev.send_ctap1(&check_command);
                 match res {
                     Ok(_) => Some(allowed_handle.id.clone()),
                     _ => None,
@@ -410,7 +410,7 @@ impl RequestCtap1 for GetAssertion {
         auth_data.extend_from_slice(key_handle.as_ref());
 
         let cmd = U2F_AUTHENTICATE;
-        let apdu = U2FAPDUHeader::serialize(cmd, flags, &auth_data)?;
+        let apdu = CTAP1RequestAPDU::serialize(cmd, flags, &auth_data)?;
         Ok(apdu)
     }
 
@@ -936,7 +936,7 @@ pub mod test {
             U2F_CHECK_IS_REGISTERED,
             SW_CONDITIONS_NOT_SATISFIED,
         );
-        let ctap1_request = assertion.apdu_format(&mut device).unwrap();
+        let ctap1_request = assertion.ctap1_format(&mut device).unwrap();
         // Check if the request is going to be correct
         assert_eq!(ctap1_request, GET_ASSERTION_SAMPLE_REQUEST_CTAP1);
 
@@ -949,7 +949,7 @@ pub mod test {
         );
         fill_device_ctap1(&mut device, cid, U2F_REQUEST_USER_PRESENCE, SW_NO_ERROR);
 
-        let response = device.send_apdu(&assertion).unwrap();
+        let response = device.send_ctap1(&assertion).unwrap();
 
         // Check if response is correct
         let expected_auth_data = AuthenticatorData {
@@ -1023,14 +1023,14 @@ pub mod test {
         device.set_cid(cid);
 
         assert_matches!(
-            assertion.apdu_format(&mut device),
+            assertion.ctap1_format(&mut device),
             Err(HIDError::DeviceNotSupported)
         );
 
         assertion.allow_list = vec![too_long_key_handle.clone(); 5];
 
         assert_matches!(
-            assertion.apdu_format(&mut device),
+            assertion.ctap1_format(&mut device),
             Err(HIDError::DeviceNotSupported)
         );
         let ok_key_handle = PublicKeyCredentialDescriptor {
@@ -1058,8 +1058,7 @@ pub mod test {
             U2F_CHECK_IS_REGISTERED,
             SW_CONDITIONS_NOT_SATISFIED,
         );
-        let ctap1_request = assertion.apdu_format(&mut device).unwrap();
-
+        let ctap1_request = assertion.ctap1_format(&mut device).unwrap();
         // Check if the request is going to be correct
         assert_eq!(ctap1_request, GET_ASSERTION_SAMPLE_REQUEST_CTAP1);
 
@@ -1072,7 +1071,7 @@ pub mod test {
         );
         fill_device_ctap1(&mut device, cid, U2F_REQUEST_USER_PRESENCE, SW_NO_ERROR);
 
-        let response = device.send_apdu(&assertion).unwrap();
+        let response = device.send_ctap1(&assertion).unwrap();
 
         // Check if response is correct
         let expected_auth_data = AuthenticatorData {
@@ -1152,11 +1151,11 @@ pub mod test {
 
     const GET_ASSERTION_SAMPLE_REQUEST_CTAP1: [u8; 138] = [
         // CBOR Header
-        0x0, // leading zero
-        0x2, // CMD U2F_Authenticate
-        0x3, // Flags (user presence)
-        0x0, 0x0, // zero bits
-        0x0, 0x81, // size
+        0x0, // CLA
+        0x2, // INS U2F_Authenticate
+        0x3, // P1 Flags (user presence)
+        0x0, // P2
+        0x0, 0x0, 0x81, // Lc
         // NOTE: This has been taken from CTAP2.0 spec, but the clientDataHash has been replaced
         //       to be able to operate with known values for CollectedClientData (spec doesn't say
         //       what values led to the provided example hash)
@@ -1175,7 +1174,9 @@ pub mod test {
         0xAC, 0x7B, 0x2B, 0x9C, 0x5C, 0xEF, 0x17, 0x36, 0xC3, 0x71, 0x7D, 0xA4, 0x85, 0x34, 0xC8,
         0xC6, 0xB6, 0x54, 0xD7, 0xFF, 0x94, 0x5F, 0x50, 0xB5, 0xCC, 0x4E, 0x78, 0x05, 0x5B, 0xDD,
         0x39, 0x6B, 0x64, 0xF7, 0x8D, 0xA2, 0xC5, 0xF9, 0x62, 0x00, 0xCC, 0xD4, 0x15, 0xCD, 0x08,
-        0xFE, 0x42, 0x00, 0x38, 0x0, 0x0, // 2 trailing zeros from protocol
+        0xFE, 0x42, 0x00, 0x38, // ..
+        // Le (Ne=65536):
+        0x0, 0x0,
     ];
 
     const GET_ASSERTION_SAMPLE_REQUEST_CTAP2: [u8; 138] = [

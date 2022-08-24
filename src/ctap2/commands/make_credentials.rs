@@ -24,7 +24,7 @@ use crate::transport::{
     errors::{ApduErrorStatus, HIDError},
     FidoDevice,
 };
-use crate::u2ftypes::{U2FAPDUHeader, U2FDevice};
+use crate::u2ftypes::{CTAP1RequestAPDU, U2FDevice};
 use nom::{
     bytes::complete::{tag, take},
     error::VerboseError,
@@ -238,7 +238,7 @@ impl Request<MakeCredentialsResult> for MakeCredentials {
 impl RequestCtap1 for MakeCredentials {
     type Output = MakeCredentialsResult;
 
-    fn apdu_format<Dev>(&self, dev: &mut Dev) -> Result<Vec<u8>, HIDError>
+    fn ctap1_format<Dev>(&self, dev: &mut Dev) -> Result<Vec<u8>, HIDError>
     where
         Dev: io::Read + io::Write + fmt::Debug + FidoDevice,
     {
@@ -262,7 +262,7 @@ impl RequestCtap1 for MakeCredentials {
                     client_data_wrapper: &self.client_data_wrapper,
                     rp: &self.rp,
                 };
-                let res = dev.send_apdu(&check_command);
+                let res = dev.send_ctap1(&check_command);
                 res.is_ok()
             })
             .any(|x| x == true);
@@ -272,7 +272,7 @@ impl RequestCtap1 for MakeCredentials {
             // Spec says "dummy appid and invalid challenge". We use the same, as we do for
             // making the token blink upon device selection.
             let msg = dummy_make_credentials_cmd()?;
-            let _ = dev.send_apdu(&msg); // Ignore answer, return "CrednetialExcluded"
+            let _ = dev.send_ctap1(&msg); // Ignore answer, return "CrednetialExcluded"
             return Err(HIDError::Command(CommandError::StatusCode(
                 StatusCode::CredentialExcluded,
                 None,
@@ -298,7 +298,7 @@ impl RequestCtap1 for MakeCredentials {
         }
         register_data.extend_from_slice(self.rp.hash().as_ref());
         let cmd = U2F_REGISTER;
-        let apdu = U2FAPDUHeader::serialize(cmd, flags, &register_data)?;
+        let apdu = CTAP1RequestAPDU::serialize(cmd, flags, &register_data)?;
 
         Ok(apdu)
     }
@@ -669,7 +669,7 @@ pub mod test {
 
         let mut device = Device::new("commands/make_credentials").unwrap(); // not really used (all functions ignore it)
         let req_serialized = req
-            .apdu_format(&mut device)
+            .ctap1_format(&mut device)
             .expect("Failed to serialize MakeCredentials request");
         assert_eq!(
             req_serialized, MAKE_CREDENTIALS_SAMPLE_REQUEST_CTAP1,
@@ -932,11 +932,11 @@ pub mod test {
 
     pub const MAKE_CREDENTIALS_SAMPLE_REQUEST_CTAP1: [u8; 73] = [
         // CBOR Header
-        0x0, // leading zero
-        0x1, // CMD U2F_Register
-        0x0, // Flags
-        0x0, 0x0, // zero bits
-        0x0, 0x40, // size
+        0x0, // CLA
+        0x1, // INS U2F_Register
+        0x0, // P1 Flags
+        0x0, // P2
+        0x0, 0x0, 0x40, // Lc
         // NOTE: This has been taken from CTAP2.0 spec, but the clientDataHash has been replaced
         //       to be able to operate with known values for CollectedClientData (spec doesn't say
         //       what values led to the provided example hash)
@@ -947,7 +947,9 @@ pub mod test {
         // rpIdHash:
         0xA3, 0x79, 0xA6, 0xF6, 0xEE, 0xAF, 0xB9, 0xA5, 0x5E, 0x37, 0x8C, 0x11, 0x80, 0x34, 0xE2,
         0x75, 0x1E, 0x68, 0x2F, 0xAB, 0x9F, 0x2D, 0x30, 0xAB, 0x13, 0xD2, 0x12, 0x55, 0x86, 0xCE,
-        0x19, 0x47, 0x0, 0x0, // 2 trailing zeros from protocol
+        0x19, 0x47, // ..
+        // Le (Ne=65536):
+        0x0, 0x0,
     ];
 
     pub const MAKE_CREDENTIALS_SAMPLE_RESPONSE_CTAP1: [u8; 792] = [
