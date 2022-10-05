@@ -47,5 +47,8 @@ include!("ioctl_aarch64be.rs");
 #[cfg(all(target_arch = "s390x", target_endian = "big"))]
 include!("ioctl_s390xbe.rs");
 
+#[cfg(all(target_arch = "sparc64", target_endian = "big"))]
+include!("ioctl_sparc64.rs");
+
 #[cfg(all(target_arch = "riscv64", target_endian = "little"))]
 include!("ioctl_riscv64.rs");
