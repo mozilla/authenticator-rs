@@ -283,10 +283,10 @@ impl CollectedClientData {
 
         let data = json::to_vec(&self)?;
         let mut hasher = Sha256::new();
-        hasher.input(&data);
+        hasher.update(&data);
 
         let mut output = [0u8; 32];
-        output.copy_from_slice(hasher.result().as_slice());
+        output.copy_from_slice(hasher.finalize().as_slice());
 
         Ok(ClientDataHash(output))
     }

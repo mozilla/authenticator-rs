@@ -4,9 +4,11 @@ use crate::ctap2::commands::CommandError;
 use crate::ctap2::server::RpIdHash;
 use crate::{crypto::COSEKey, errors::AuthenticatorError};
 use nom::{
-    cond, do_parse, map, map_res, named,
+    bytes::complete::take,
+    combinator::{cond, map},
+    error::Error as NomError,
     number::complete::{be_u16, be_u32, be_u8},
-    take, Err as NomErr, IResult,
+    Err as NomErr, IResult,
 };
 use serde::ser::{Error as SerError, SerializeMap, Serializer};
 use serde::{
@@ -78,10 +80,9 @@ pub struct Extension {
     pub hmac_secret: Option<HmacSecretResponse>,
 }
 
-named!(
-    parse_extensions<Extension>,
-    do_parse!(extensions: serde_to_nom >> (extensions))
-);
+fn parse_extensions<'a>(input: &'a [u8]) -> IResult<&'a [u8], Extension, NomError<&'a [u8]>> {
+    serde_to_nom(input)
+}
 
 #[derive(Serialize, PartialEq, Default, Eq, Clone)]
 pub struct AAGuid(pub [u8; 16]);
@@ -102,7 +103,7 @@ impl fmt::Debug for AAGuid {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "AAGuid({:x}{:x}{:x}{:x}-{:x}{:x}-{:x}{:x}-{:x}{:x}-{:x}{:x}{:x}{:x}{:x}{:x})",
+            "AAGuid({:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x})",
             self.0[0],
             self.0[1],
             self.0[2],
@@ -174,20 +175,24 @@ where
     //         .map_err(|_| NomErr::Error(Context::Code(input, ErrorKind::Custom(42))))
 }
 
-named!(
-    parse_attested_cred_data<AttestedCredentialData>,
-    do_parse!(
-        aaguid: map_res!(take!(16), AAGuid::from)
-            >> cred_len: be_u16
-            >> credential_id: map!(take!(cred_len), Vec::from)
-            >> credential_public_key: serde_to_nom
-            >> (AttestedCredentialData {
-                aaguid,
-                credential_id,
-                credential_public_key: credential_public_key,
-            })
-    )
-);
+fn parse_attested_cred_data<'a>(
+    input: &'a [u8],
+) -> IResult<&'a [u8], AttestedCredentialData, NomError<&'a [u8]>> {
+    let (rest, aaguid_res) = map(take(16u8), AAGuid::from)(input)?;
+    // // We can unwrap here, since we _know_ the input will be 16 bytes error out before calling from()
+    let aaguid = aaguid_res.unwrap();
+    let (rest, cred_len) = be_u16(rest)?;
+    let (rest, credential_id) = map(take(cred_len), Vec::from)(rest)?;
+    let (rest, credential_public_key) = serde_to_nom(rest)?;
+    Ok((
+        rest,
+        (AttestedCredentialData {
+            aaguid,
+            credential_id,
+            credential_public_key: credential_public_key,
+        }),
+    ))
+}
 
 bitflags! {
     pub struct AuthenticatorDataFlags: u8 {
@@ -207,28 +212,36 @@ pub struct AuthenticatorData {
     pub extensions: Extension,
 }
 
-named!(
-    parse_ad<AuthenticatorData>,
-    do_parse!(
-        rp_id_hash: map_res!(take!(32), RpIdHash::from) >>
-        // be conservative, there is a couple of reserved values in
-        // AuthenticatorDataFlags, just truncate the one we don't know
-        flags: map!(be_u8, AuthenticatorDataFlags::from_bits_truncate) >>
-        counter: be_u32 >>
-        credential_data: cond!(flags.contains(AuthenticatorDataFlags::ATTESTED), parse_attested_cred_data) >>
-        extensions: cond!(flags.contains(AuthenticatorDataFlags::EXTENSION_DATA), parse_extensions) >>
-        // TODO(baloo): we should check for end of buffer and raise a parse
-        //              parse error if data is still in the buffer
-        //eof!() >>
-        (AuthenticatorData{
+fn parse_ad<'a>(input: &'a [u8]) -> IResult<&'a [u8], AuthenticatorData, NomError<&'a [u8]>> {
+    let (rest, rp_id_hash_res) = map(take(32u8), RpIdHash::from)(input)?;
+    // We can unwrap here, since we _know_ the input to from() will be 32 bytes or error out before calling from()
+    let rp_id_hash = rp_id_hash_res.unwrap();
+    // be conservative, there is a couple of reserved values in
+    // AuthenticatorDataFlags, just truncate the one we don't know
+    let (rest, flags) = map(be_u8, AuthenticatorDataFlags::from_bits_truncate)(rest)?;
+    let (rest, counter) = be_u32(rest)?;
+    let (rest, credential_data) = cond(
+        flags.contains(AuthenticatorDataFlags::ATTESTED),
+        parse_attested_cred_data,
+    )(rest)?;
+    let (rest, extensions) = cond(
+        flags.contains(AuthenticatorDataFlags::EXTENSION_DATA),
+        parse_extensions,
+    )(rest)?;
+    // TODO(baloo): we should check for end of buffer and raise a parse
+    //              parse error if data is still in the buffer
+    //eof!() >>
+    Ok((
+        rest,
+        AuthenticatorData {
             rp_id_hash,
             flags,
             counter,
             credential_data,
             extensions: extensions.unwrap_or_default(),
-        })
-    )
-);
+        },
+    ))
+}
 
 impl<'de> Deserialize<'de> for AuthenticatorData {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -252,7 +265,7 @@ impl<'de> Deserialize<'de> for AuthenticatorData {
                     .map(|(_input, value)| value)
                     .map_err(|e| match e {
                         NomErr::Incomplete(nom::Needed::Size(len)) => {
-                            E::invalid_length(v.len(), &format!("{}", v.len() + len).as_ref())
+                            E::invalid_length(v.len(), &format!("{}", v.len() + len.get()).as_ref())
                         }
                         NomErr::Incomplete(nom::Needed::Unknown) => {
                             E::invalid_length(v.len(), &"unknown") // We don't know the expected value
@@ -327,8 +340,6 @@ pub enum AttestationStatement {
     //AndroidKey,
     //AndroidSafetyNet,
     FidoU2F(AttestationStatementFidoU2F),
-    // TODO(baloo): should we do an Unknow version? most likely
-    Unparsed(Vec<u8>),
 }
 
 // Not all crypto-backends currently provide "crypto::verify()", so we do not implement it yet.
@@ -529,11 +540,6 @@ impl Serialize for AttestationObject {
                 map.serialize_entry(&3, v)?;
             }
             AttestationStatement::FidoU2F(ref v) => {
-                map.serialize_entry(&1, &"fido-u2f")?;
-                map.serialize_entry(&3, v)?;
-            }
-            AttestationStatement::Unparsed(ref v) => {
-                // Unparsed is currently only used in the fido1.0/u2f-case
                 map.serialize_entry(&1, &"fido-u2f")?;
                 map.serialize_entry(&3, v)?;
             }
@@ -777,5 +783,18 @@ mod test {
                 0x87, 0xD6, 0x29, 0x0F, 0xD4, 0x7A, 0x40, 0xC4,
             ]))
         );
+    }
+
+    /// See: https://github.com/mozilla/authenticator-rs/issues/187
+    #[test]
+    fn test_aaguid_output() {
+        let input = [
+            0xcb, 0x69, 0x48, 0x1e, 0x8f, 0xf0, 0x00, 0x39, 0x93, 0xec, 0x0a, 0x27, 0x29, 0xa1,
+            0x54, 0xa8,
+        ];
+        let expected = "AAGuid(cb69481e-8ff0-0039-93ec-0a2729a154a8)";
+        let result = AAGuid::from(&input).expect("Failed to parse AAGuid");
+        let res_str = format!("{:?}", result);
+        assert_eq!(expected, &res_str);
     }
 }

@@ -3,24 +3,16 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use crate::transport::hid::HIDDevice;
+use crate::transport::FidoDevice;
 use crate::transport::{AuthenticatorInfo, ECDHSecret, HIDError};
 use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
+use std::hash::{Hash, Hasher};
 use std::io;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Device {}
-
-impl Device {
-    pub fn new(path: String) -> io::Result<Self> {
-        panic!("not implemented");
-    }
-
-    pub fn is_u2f(&self) -> bool {
-        panic!("not implemented");
-    }
-}
 
 impl Read for Device {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
@@ -72,7 +64,7 @@ impl HIDDevice for Device {
     type BuildParameters = PathBuf;
     type Id = PathBuf;
 
-    fn new(parameters: Self::BuildParameters) -> Result<Self, HIDError> {
+    fn new(parameters: Self::BuildParameters) -> Result<Self, (HIDError, Self::Id)> {
         unimplemented!();
     }
 
@@ -81,6 +73,10 @@ impl HIDDevice for Device {
     }
 
     fn id(&self) -> Self::Id {
+        unimplemented!()
+    }
+
+    fn is_u2f(&self) -> bool {
         unimplemented!()
     }
 
@@ -99,4 +95,16 @@ impl HIDDevice for Device {
     fn get_shared_secret(&self) -> Option<&ECDHSecret> {
         unimplemented!()
     }
+
+    fn clone_device_as_write_only(&self) -> Result<Self, HIDError> {
+        unimplemented!()
+    }
 }
+
+impl Hash for Device {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        unimplemented!()
+    }
+}
+
+impl FidoDevice for Device {}

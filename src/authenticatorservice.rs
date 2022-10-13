@@ -235,7 +235,7 @@ impl AuthenticatorService {
         }
 
         for key_handle in &args.key_handles {
-            if key_handle.credential.len() > 256 {
+            if key_handle.credential.len() >= 256 {
                 return Err(AuthenticatorError::InvalidRelyingPartyInput);
             }
         }
@@ -278,10 +278,6 @@ impl AuthenticatorService {
         status: Sender<crate::StatusUpdate>,
         callback: StateCallback<crate::Result<crate::RegisterResult>>,
     ) -> crate::Result<()> {
-        if args.exclude_list.iter().any(|x| x.id.len() > 256) {
-            return Err(AuthenticatorError::InvalidRelyingPartyInput);
-        }
-
         let iterable_transports = self.transports.clone();
         if iterable_transports.is_empty() {
             return Err(AuthenticatorError::NoConfiguredTransports);
@@ -348,7 +344,7 @@ impl AuthenticatorService {
         }
 
         for key_handle in &args.key_handles {
-            if key_handle.credential.len() > 256 {
+            if key_handle.credential.len() >= 256 {
                 return Err(AuthenticatorError::InvalidRelyingPartyInput);
             }
         }
@@ -488,11 +484,13 @@ impl AuthenticatorService {
 #[cfg(test)]
 mod tests {
     use super::{
-        AuthenticatorService, AuthenticatorTransport, CtapVersion, Pin, RegisterArgs,
-        RegisterArgsCtap1, SignArgs, SignArgsCtap1,
+        AuthenticatorService, AuthenticatorTransport, CtapVersion, Pin,
+        PublicKeyCredentialDescriptor, RegisterArgs, RegisterArgsCtap1, RegisterArgsCtap2,
+        SignArgs, SignArgsCtap1, SignArgsCtap2, User,
     };
     use crate::consts::Capability;
     use crate::consts::PARAMETER_SIZE;
+    use crate::ctap2::server::RelyingParty;
     use crate::statecallback::StateCallback;
     use crate::{AuthenticatorTransports, KeyHandle, RegisterFlags, SignFlags, StatusUpdate};
     use crate::{RegisterResult, SignResult};
@@ -789,6 +787,68 @@ mod tests {
             .unwrap_err(),
             crate::errors::AuthenticatorError::InvalidRelyingPartyInput
         );
+    }
+
+    #[test]
+    fn test_large_keys_ctap2() {
+        init();
+        let (status_tx, _) = channel::<StatusUpdate>();
+
+        let large_key = KeyHandle {
+            credential: vec![0; 1000],
+            transports: AuthenticatorTransports::USB,
+        };
+
+        let mut s = AuthenticatorService::new(CtapVersion::CTAP2).unwrap();
+        s.add_transport(Box::new(TestTransportDriver::new(true).unwrap()));
+
+        let ctap2_register_args = RegisterArgsCtap2 {
+            challenge: mk_challenge(),
+            relying_party: RelyingParty {
+                id: "example.com".to_string(),
+                name: None,
+                icon: None,
+            },
+            origin: "example.com".to_string(),
+            user: User {
+                id: "user_id".as_bytes().to_vec(),
+                icon: None,
+                name: Some("A. User".to_string()),
+                display_name: None,
+            },
+            pub_cred_params: vec![],
+            exclude_list: vec![(&large_key).into()],
+            options: Default::default(),
+            extensions: Default::default(),
+            pin: None,
+        };
+
+        assert!(s
+            .register(
+                1_000,
+                ctap2_register_args.into(),
+                status_tx.clone(),
+                StateCallback::new(Box::new(move |_rv| {})),
+            )
+            .is_ok(),);
+
+        let ctap2_sign_args = SignArgsCtap2 {
+            challenge: mk_challenge(),
+            origin: "example.com".to_string(),
+            relying_party_id: "example.com".to_string(),
+            allow_list: vec![(&large_key).into()],
+            options: Default::default(),
+            extensions: Default::default(),
+            pin: None,
+        };
+        assert!(s
+            .sign(
+                1_000,
+                ctap2_sign_args.into(),
+                status_tx,
+                StateCallback::new(Box::new(move |_rv| {})),
+            )
+            .is_ok(),);
     }
 
     #[test]

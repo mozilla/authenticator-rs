@@ -22,8 +22,6 @@ const uint8_t CTAP2_REGISTER_RESULT_AUTH_DATA = 2;
 const uint8_t CTAP2_ATTESTATION_FORMAT_NONE = 0;
 const uint8_t CTAP2_ATTESTATION_FORMAT_U2F = 1;
 const uint8_t CTAP2_ATTESTATION_FORMAT_PACKED = 2;
-const uint8_t CTAP2_ATTESTATION_FORMAT_UNPARSED = 3; // TODO(MS): Needs to go away
-
 
 typedef struct {
     const uint8_t *id_ptr;

@@ -4,17 +4,17 @@
 
 use authenticator::{
     authenticatorservice::{
-        AuthenticatorService, CtapVersion, GetAssertionExtensions, GetAssertionOptions,
-        HmacSecretExtension, MakeCredentialsExtensions, MakeCredentialsOptions, RegisterArgsCtap2,
-        SignArgsCtap2,
+        AuthenticatorService, CtapVersion, MakeCredentialsOptions, RegisterArgsCtap2,
     },
+    ctap2::commands::StatusCode,
     ctap2::server::{
         PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, Transport, User,
     },
-    errors::PinError,
+    errors::{AuthenticatorError, CommandError, HIDError, PinError},
     statecallback::StateCallback,
-    COSEAlgorithm, Pin, RegisterResult, SignResult, StatusUpdate,
+    COSEAlgorithm, Pin, RegisterResult, StatusUpdate,
 };
+
 use getopts::Options;
 use sha2::{Digest, Sha256};
 use std::sync::mpsc::{channel, RecvError};
@@ -32,14 +32,12 @@ fn main() {
     let program = args[0].clone();
 
     let mut opts = Options::new();
-    opts.optflag("x", "no-u2f-usb-hid", "do not enable u2f-usb-hid platforms");
     opts.optflag("h", "help", "print this help menu").optopt(
         "t",
         "timeout",
         "timeout in seconds",
         "SEC",
     );
-    opts.optflag("s", "hmac_secret", "With hmac-secret");
     opts.optflag("h", "help", "print this help menu");
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
@@ -53,9 +51,7 @@ fn main() {
     let mut manager = AuthenticatorService::new(CtapVersion::CTAP2)
         .expect("The auth service should initialize safely");
 
-    if !matches.opt_present("no-u2f-usb-hid") {
-        manager.add_u2f_usb_hid_platform_transports();
-    }
+    manager.add_u2f_usb_hid_platform_transports();
 
     let timeout_ms = match matches.opt_get_default::<u64>("timeout", 25) {
         Ok(timeout_s) => {
@@ -144,7 +140,7 @@ fn main() {
         display_name: None,
     };
     let origin = "https://example.com".to_string();
-    let ctap_args = RegisterArgsCtap2 {
+    let mut ctap_args = RegisterArgsCtap2 {
         challenge: chall_bytes.clone(),
         relying_party: RelyingParty {
             id: "example.com".to_string(),
@@ -161,31 +157,15 @@ fn main() {
                 alg: COSEAlgorithm::RS256,
             },
         ],
-        exclude_list: vec![PublicKeyCredentialDescriptor {
-            id: vec![
-                0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
-                0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b,
-                0x1c, 0x1d, 0x1e, 0x1f,
-            ],
-            transports: vec![Transport::USB, Transport::NFC],
-        }],
+        exclude_list: vec![],
         options: MakeCredentialsOptions {
             resident_key: None,
             user_verification: None,
         },
-        extensions: MakeCredentialsExtensions {
-            hmac_secret: if matches.opt_present("hmac_secret") {
-                Some(true)
-            } else {
-                None
-            },
-            ..Default::default()
-        },
+        extensions: Default::default(),
         pin: None,
     };
 
-    let attestation_object;
-    let client_data;
     loop {
         let (register_tx, register_rx) = channel();
         let callback = StateCallback::new(Box::new(move |rv| {
@@ -206,85 +186,26 @@ fn main() {
             .expect("Problem receiving, unable to continue");
         match register_result {
             Ok(RegisterResult::CTAP1(_, _)) => panic!("Requested CTAP2, but got CTAP1 results!"),
-            Ok(RegisterResult::CTAP2(a, c)) => {
+            Ok(RegisterResult::CTAP2(a, _c)) => {
                 println!("Ok!");
-                attestation_object = a;
-                client_data = c;
+                println!("Registering again with the key_handle we just got back. This should result in a 'already registered' error.");
+                let registered_key_handle =
+                    a.auth_data.credential_data.unwrap().credential_id.clone();
+                ctap_args.exclude_list = vec![PublicKeyCredentialDescriptor {
+                    id: registered_key_handle.clone(),
+                    transports: vec![Transport::USB],
+                }];
+                continue;
+            }
+            Err(AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
+                StatusCode::CredentialExcluded,
+                None,
+            )))) => {
+                println!("Got an 'already registered' error. Quitting.");
                 break;
             }
             Err(e) => panic!("Registration failed: {:?}", e),
         };
     }
-
-    println!("Register result: {:?}", &attestation_object);
-    println!("Collected client data: {:?}", &client_data);
-
-    println!("");
-    println!("*********************************************************************");
-    println!("Asking a security key to sign now, with the data from the register...");
-    println!("*********************************************************************");
-
-    let allow_list;
-    if let Some(cred_data) = attestation_object.auth_data.credential_data {
-        allow_list = vec![PublicKeyCredentialDescriptor {
-            id: cred_data.credential_id.clone(),
-            transports: vec![Transport::USB],
-        }];
-    } else {
-        allow_list = Vec::new();
-    }
-
-    let ctap_args = SignArgsCtap2 {
-        challenge: chall_bytes,
-        origin,
-        relying_party_id: "example.com".to_string(),
-        allow_list,
-        options: GetAssertionOptions::default(),
-        extensions: GetAssertionExtensions {
-            hmac_secret: if matches.opt_present("hmac_secret") {
-                Some(HmacSecretExtension::new(
-                    vec![
-                        0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0x10, 0x11, 0x12, 0x13,
-                        0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25,
-                        0x26, 0x27, 0x28, 0x29, 0x30, 0x31, 0x32, 0x33, 0x34,
-                    ],
-                    None,
-                ))
-            } else {
-                None
-            },
-        },
-        pin: None,
-    };
-
-    loop {
-        let (sign_tx, sign_rx) = channel();
-
-        let callback = StateCallback::new(Box::new(move |rv| {
-            sign_tx.send(rv).unwrap();
-        }));
-
-        if let Err(e) = manager.sign(
-            timeout_ms,
-            ctap_args.clone().into(),
-            status_tx.clone(),
-            callback,
-        ) {
-            panic!("Couldn't sign: {:?}", e);
-        }
-
-        let sign_result = sign_rx
-            .recv()
-            .expect("Problem receiving, unable to continue");
-
-        match sign_result {
-            Ok(SignResult::CTAP1(..)) => panic!("Requested CTAP2, but got CTAP1 sign results!"),
-            Ok(SignResult::CTAP2(assertion_object, _client_data)) => {
-                println!("Assertion Object: {:?}", assertion_object);
-                println!("Done.");
-                break;
-            }
-            Err(e) => panic!("Signing failed: {:?}", e),
-        }
-    }
+    println!("Done")
 }
