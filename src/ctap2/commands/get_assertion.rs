@@ -306,6 +306,64 @@ impl Request<GetAssertionResult> for GetAssertion {
     }
 }
 
+/// This command is used to check which key_handle is valid for this
+/// token. This is sent before a GetAssertion command, to determine which
+/// is valid for a specific token and which key_handle GetAssertion
+/// should send to the token. Or before a MakeCredential command, to determine
+/// if this token is already registered or not.
+#[derive(Debug)]
+pub(crate) struct CheckKeyHandle<'assertion> {
+    pub(crate) key_handle: &'assertion [u8],
+    pub(crate) client_data: &'assertion CollectedClientData,
+    pub(crate) rp: &'assertion RelyingPartyWrapper,
+}
+
+impl<'assertion> RequestCtap1 for CheckKeyHandle<'assertion> {
+    type Output = ();
+
+    fn apdu_format<Dev>(&self, _dev: &mut Dev) -> Result<Vec<u8>, HIDError>
+    where
+        Dev: U2FDevice + io::Read + io::Write + fmt::Debug,
+    {
+        let flags = U2F_CHECK_IS_REGISTERED;
+        // TODO(MS): Need to check "up" here. If up==false, set to 0x08? Or not? Spec is
+        // ambiguous
+        let mut auth_data = Vec::with_capacity(2 * PARAMETER_SIZE + 1 + self.key_handle.len());
+
+        auth_data.extend_from_slice(
+            self.client_data
+                .hash()
+                .map_err(|e| HIDError::Command(CommandError::Json(e)))?
+                .as_ref(),
+        );
+        auth_data.extend_from_slice(self.rp.hash().as_ref());
+        auth_data.extend_from_slice(&[self.key_handle.len() as u8]);
+        auth_data.extend_from_slice(self.key_handle);
+        let cmd = U2F_AUTHENTICATE;
+        let apdu = U2FAPDUHeader::serialize(cmd, flags, &auth_data)?;
+        Ok(apdu)
+    }
+
+    fn handle_response_ctap1(
+        &self,
+        status: Result<(), ApduErrorStatus>,
+        _input: &[u8],
+    ) -> Result<Self::Output, Retryable<HIDError>> {
+        // From the U2F-spec: https://fidoalliance.org/specs/fido-u2f-v1.2-ps-20170411/fido-u2f-raw-message-formats-v1.2-ps-20170411.html#registration-request-message---u2f_register
+        // if the control byte is set to 0x07 by the FIDO Client, the U2F token is supposed to
+        // simply check whether the provided key handle was originally created by this token,
+        // and whether it was created for the provided application parameter. If so, the U2F
+        // token MUST respond with an authentication response message:error:test-of-user-presence-required
+        // (note that despite the name this signals a success condition).
+        // If the key handle was not created by this U2F token, or if it was created for a different
+        // application parameter, the token MUST respond with an authentication response message:error:bad-key-handle.
+        match status {
+            Ok(_) | Err(ApduErrorStatus::ConditionsNotSatisfied) => Ok(()),
+            Err(e) => Err(Retryable::Error(HIDError::ApduStatus(e))),
+        }
+    }
+}
+
 impl RequestCtap1 for GetAssertion {
     type Output = GetAssertionResult;
 
@@ -313,61 +371,15 @@ impl RequestCtap1 for GetAssertion {
     where
         Dev: io::Read + io::Write + fmt::Debug + FidoDevice,
     {
-        /// This command is used to check which key_handle is valid for this
-        /// token this is sent before a GetAssertion command, to determine which
-        /// is valid for a specific token and which key_handle GetAssertion
-        /// should send to the token.
-        #[derive(Debug)]
-        struct GetAssertionCheck<'assertion> {
-            key_handle: &'assertion [u8],
-            client_data: &'assertion CollectedClientData,
-            rp: &'assertion RelyingPartyWrapper,
-        }
-
-        impl<'assertion> RequestCtap1 for GetAssertionCheck<'assertion> {
-            type Output = ();
-
-            fn apdu_format<Dev>(&self, _dev: &mut Dev) -> Result<Vec<u8>, HIDError>
-            where
-                Dev: U2FDevice + io::Read + io::Write + fmt::Debug,
-            {
-                let flags = U2F_CHECK_IS_REGISTERED;
-                // TODO(MS): Need to check "up" here. If up==false, set to 0x08? Or not? Spec is
-                // ambiguous
-                let mut auth_data =
-                    Vec::with_capacity(2 * PARAMETER_SIZE + 1 + self.key_handle.len());
-
-                auth_data.extend_from_slice(
-                    self.client_data
-                        .hash()
-                        .map_err(|e| HIDError::Command(CommandError::Json(e)))?
-                        .as_ref(),
-                );
-                auth_data.extend_from_slice(self.rp.hash().as_ref());
-                auth_data.extend_from_slice(&[self.key_handle.len() as u8]);
-                auth_data.extend_from_slice(self.key_handle);
-                let cmd = U2F_AUTHENTICATE;
-                let apdu = U2FAPDUHeader::serialize(cmd, flags, &auth_data)?;
-                Ok(apdu)
-            }
-
-            fn handle_response_ctap1(
-                &self,
-                status: Result<(), ApduErrorStatus>,
-                _input: &[u8],
-            ) -> Result<Self::Output, Retryable<HIDError>> {
-                match status {
-                    Ok(_) | Err(ApduErrorStatus::ConditionsNotSatisfied) => Ok(()),
-                    Err(e) => Err(Retryable::Error(HIDError::ApduStatus(e))),
-                }
-            }
-        }
-
         let key_handle = self
             .allow_list
             .iter()
+            // key-handles in CTAP1 are limited to 255 bytes, but are not limited in CTAP2.
+            // Filter out key-handles that are too long (can happen if this is a CTAP2-request,
+            // but the token only speaks CTAP1). If none is found, return an error.
+            .filter(|allowed_handle| allowed_handle.id.len() < 256)
             .find_map(|allowed_handle| {
-                let check_command = GetAssertionCheck {
+                let check_command = CheckKeyHandle {
                     key_handle: allowed_handle.id.as_ref(),
                     client_data: &self.client_data,
                     rp: &self.rp,
@@ -658,7 +670,7 @@ impl<'de> Deserialize<'de> for GetAssertionResponse {
 
 #[cfg(test)]
 pub mod test {
-    use super::{Assertion, GetAssertion, GetAssertionOptions, GetAssertionResult};
+    use super::{Assertion, GetAssertion, GetAssertionOptions, GetAssertionResult, HIDError};
     use crate::consts::{
         HIDCmd, SW_CONDITIONS_NOT_SATISFIED, SW_NO_ERROR, U2F_CHECK_IS_REGISTERED,
         U2F_REQUEST_USER_PRESENCE,
@@ -918,7 +930,7 @@ pub mod test {
 
         device.set_cid(cid);
 
-        // ctap2 request
+        // ctap1 request
         fill_device_ctap1(
             &mut device,
             cid,
@@ -926,6 +938,122 @@ pub mod test {
             SW_CONDITIONS_NOT_SATISFIED,
         );
         let ctap1_request = assertion.apdu_format(&mut device).unwrap();
+        // Check if the request is going to be correct
+        assert_eq!(ctap1_request, GET_ASSERTION_SAMPLE_REQUEST_CTAP1);
+
+        // Now do it again, but parse the actual response
+        fill_device_ctap1(
+            &mut device,
+            cid,
+            U2F_CHECK_IS_REGISTERED,
+            SW_CONDITIONS_NOT_SATISFIED,
+        );
+        fill_device_ctap1(&mut device, cid, U2F_REQUEST_USER_PRESENCE, SW_NO_ERROR);
+
+        let response = device.send_apdu(&assertion).unwrap();
+
+        // Check if response is correct
+        let expected_auth_data = AuthenticatorData {
+            rp_id_hash: RpIdHash(RELYING_PARTY_HASH),
+            flags: AuthenticatorDataFlags::USER_PRESENT,
+            counter: 0x3B,
+            credential_data: None,
+            extensions: Default::default(),
+        };
+
+        let expected_assertion = Assertion {
+            credentials: None,
+            signature: vec![
+                0x30, 0x44, 0x02, 0x20, 0x7B, 0xDE, 0x0A, 0x52, 0xAC, 0x1F, 0x4C, 0x8B, 0x27, 0xE0,
+                0x03, 0xA3, 0x70, 0xCD, 0x66, 0xA4, 0xC7, 0x11, 0x8D, 0xD2, 0x2D, 0x54, 0x47, 0x83,
+                0x5F, 0x45, 0xB9, 0x9C, 0x68, 0x42, 0x3F, 0xF7, 0x02, 0x20, 0x3C, 0x51, 0x7B, 0x47,
+                0x87, 0x7F, 0x85, 0x78, 0x2D, 0xE1, 0x00, 0x86, 0xA7, 0x83, 0xD1, 0xE7, 0xDF, 0x4E,
+                0x36, 0x39, 0xE7, 0x71, 0xF5, 0xF6, 0xAF, 0xA3, 0x5A, 0xAD, 0x53, 0x73, 0x85, 0x8E,
+            ],
+            user: None,
+            auth_data: expected_auth_data,
+        };
+
+        let expected =
+            GetAssertionResult::CTAP2(AssertionObject(vec![expected_assertion]), client_data);
+
+        assert_eq!(response, expected);
+    }
+
+    #[test]
+    fn test_get_assertion_ctap1_long_keys() {
+        let client_data = CollectedClientData {
+            webauthn_type: WebauthnType::Create,
+            challenge: Challenge::from(vec![0x00, 0x01, 0x02, 0x03]),
+            origin: String::from("example.com"),
+            cross_origin: false,
+            token_binding: Some(TokenBinding::Present(String::from("AAECAw"))),
+        };
+
+        let too_long_key_handle = PublicKeyCredentialDescriptor {
+            id: vec![0; 1000],
+            transports: vec![Transport::USB],
+        };
+        let mut assertion = GetAssertion::new(
+            client_data.clone(),
+            RelyingPartyWrapper::Data(RelyingParty {
+                id: String::from("example.com"),
+                name: Some(String::from("Acme")),
+                icon: None,
+            }),
+            vec![too_long_key_handle.clone()],
+            GetAssertionOptions {
+                user_presence: Some(true),
+                user_verification: None,
+            },
+            Default::default(),
+            None,
+        );
+        let mut device = Device::new("commands/get_assertion").unwrap(); // not really used (all functions ignore it)
+                                                                         // channel id
+        let mut cid = [0u8; 4];
+        thread_rng().fill_bytes(&mut cid);
+
+        device.set_cid(cid);
+
+        assert_matches!(
+            assertion.apdu_format(&mut device),
+            Err(HIDError::DeviceNotSupported)
+        );
+
+        assertion.allow_list = vec![too_long_key_handle.clone(); 5];
+
+        assert_matches!(
+            assertion.apdu_format(&mut device),
+            Err(HIDError::DeviceNotSupported)
+        );
+        let ok_key_handle = PublicKeyCredentialDescriptor {
+            id: vec![
+                0x3E, 0xBD, 0x89, 0xBF, 0x77, 0xEC, 0x50, 0x97, 0x55, 0xEE, 0x9C, 0x26, 0x35, 0xEF,
+                0xAA, 0xAC, 0x7B, 0x2B, 0x9C, 0x5C, 0xEF, 0x17, 0x36, 0xC3, 0x71, 0x7D, 0xA4, 0x85,
+                0x34, 0xC8, 0xC6, 0xB6, 0x54, 0xD7, 0xFF, 0x94, 0x5F, 0x50, 0xB5, 0xCC, 0x4E, 0x78,
+                0x05, 0x5B, 0xDD, 0x39, 0x6B, 0x64, 0xF7, 0x8D, 0xA2, 0xC5, 0xF9, 0x62, 0x00, 0xCC,
+                0xD4, 0x15, 0xCD, 0x08, 0xFE, 0x42, 0x00, 0x38,
+            ],
+            transports: vec![Transport::USB],
+        };
+        assertion.allow_list = vec![
+            too_long_key_handle.clone(),
+            too_long_key_handle.clone(),
+            too_long_key_handle.clone(),
+            ok_key_handle,
+            too_long_key_handle.clone(),
+        ];
+
+        // ctap1 request
+        fill_device_ctap1(
+            &mut device,
+            cid,
+            U2F_CHECK_IS_REGISTERED,
+            SW_CONDITIONS_NOT_SATISFIED,
+        );
+        let ctap1_request = assertion.apdu_format(&mut device).unwrap();
+
         // Check if the request is going to be correct
         assert_eq!(ctap1_request, GET_ASSERTION_SAMPLE_REQUEST_CTAP1);
 

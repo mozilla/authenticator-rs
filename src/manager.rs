@@ -166,7 +166,7 @@ impl AuthenticatorTransport for U2FManager {
         }
 
         for key_handle in &args.key_handles {
-            if key_handle.credential.len() > 256 {
+            if key_handle.credential.len() >= 256 {
                 return Err(AuthenticatorError::InvalidRelyingPartyInput);
             }
         }
@@ -209,7 +209,7 @@ impl AuthenticatorTransport for U2FManager {
         }
 
         for key_handle in &args.key_handles {
-            if key_handle.credential.len() > 256 {
+            if key_handle.credential.len() >= 256 {
                 return Err(AuthenticatorError::InvalidRelyingPartyInput);
             }
         }
@@ -418,7 +418,10 @@ impl AuthenticatorTransport for Manager {
                     vec![PublicKeyCredentialParameters {
                         alg: COSEAlgorithm::ES256,
                     }],
-                    vec![], // TODO(MS): Implement excludeList. See spec.
+                    args.key_handles
+                        .iter()
+                        .map(|k| k.into())
+                        .collect::<Vec<_>>(),
                     MakeCredentialsOptions {
                         resident_key: None,
                         user_verification: None,
@@ -478,7 +481,7 @@ impl AuthenticatorTransport for Manager {
                         return Err(AuthenticatorError::InvalidRelyingPartyInput);
                     }
                     for key_handle in &args.key_handles {
-                        if key_handle.credential.len() > 256 {
+                        if key_handle.credential.len() >= 256 {
                             return Err(AuthenticatorError::InvalidRelyingPartyInput);
                         }
                         let rp = RelyingPartyWrapper::Hash(RpIdHash::from(&app_id)?);
