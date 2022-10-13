@@ -103,7 +103,7 @@ impl fmt::Debug for AAGuid {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "AAGuid({:x}{:x}{:x}{:x}-{:x}{:x}-{:x}{:x}-{:x}{:x}-{:x}{:x}{:x}{:x}{:x}{:x})",
+            "AAGuid({:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x})",
             self.0[0],
             self.0[1],
             self.0[2],
@@ -783,5 +783,18 @@ mod test {
                 0x87, 0xD6, 0x29, 0x0F, 0xD4, 0x7A, 0x40, 0xC4,
             ]))
         );
+    }
+
+    /// See: https://github.com/mozilla/authenticator-rs/issues/187
+    #[test]
+    fn test_aaguid_output() {
+        let input = [
+            0xcb, 0x69, 0x48, 0x1e, 0x8f, 0xf0, 0x00, 0x39, 0x93, 0xec, 0x0a, 0x27, 0x29, 0xa1,
+            0x54, 0xa8,
+        ];
+        let expected = "AAGuid(cb69481e-8ff0-0039-93ec-0a2729a154a8)";
+        let result = AAGuid::from(&input).expect("Failed to parse AAGuid");
+        let res_str = format!("{:?}", result);
+        assert_eq!(expected, &res_str);
     }
 }
