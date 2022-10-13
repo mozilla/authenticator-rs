@@ -6,7 +6,15 @@
 #![allow(dead_code)]
 
 pub const MAX_HID_RPT_SIZE: usize = 64;
+
+/// Minimum size of the U2F Raw Message header (FIDO v1.x) in extended mode,
+/// including expected response length (L<sub>e</sub>).
+///
+/// Fields `CLA`, `INS`, `P1` and `P2` are 1 byte each, and L<sub>e</sub> is 3
+/// bytes. If there is a data payload, add 2 bytes (L<sub>c</sub> is 3 bytes,
+/// and L<sub>e</sub> is 2 bytes).
 pub const U2FAPDUHEADER_SIZE: usize = 7;
+
 pub const CID_BROADCAST: [u8; 4] = [0xff, 0xff, 0xff, 0xff];
 pub const TYPE_MASK: u8 = 0x80;
 pub const TYPE_INIT: u8 = 0x80;

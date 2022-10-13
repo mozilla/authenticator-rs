@@ -46,7 +46,7 @@ where
     register_data.extend(application);
 
     let flags = U2F_REQUEST_USER_PRESENCE;
-    let (resp, status) = send_apdu(dev, U2F_REGISTER, flags, &register_data)?;
+    let (resp, status) = send_ctap1(dev, U2F_REGISTER, flags, &register_data)?;
     status_word_to_result(status, resp)
 }
 
@@ -80,7 +80,7 @@ where
     sign_data.extend(key_handle);
 
     let flags = U2F_REQUEST_USER_PRESENCE;
-    let (resp, status) = send_apdu(dev, U2F_AUTHENTICATE, flags, &sign_data)?;
+    let (resp, status) = send_ctap1(dev, U2F_AUTHENTICATE, flags, &sign_data)?;
     status_word_to_result(status, resp)
 }
 
@@ -114,7 +114,7 @@ where
     sign_data.extend(key_handle);
 
     let flags = U2F_CHECK_IS_REGISTERED;
-    let (_, status) = send_apdu(dev, U2F_AUTHENTICATE, flags, &sign_data)?;
+    let (_, status) = send_ctap1(dev, U2F_AUTHENTICATE, flags, &sign_data)?;
     Ok(status == SW_CONDITIONS_NOT_SATISFIED)
 }
 
@@ -155,7 +155,7 @@ fn is_v2_device<T>(dev: &mut T) -> io::Result<bool>
 where
     T: U2FDevice + Read + Write,
 {
-    let (data, status) = send_apdu(dev, U2F_VERSION, 0x00, &[])?;
+    let (data, status) = send_ctap1(dev, U2F_VERSION, 0x00, &[])?;
     let actual = CString::new(data)?;
     let expected = CString::new("U2F_V2")?;
     status_word_to_result(status, actual == expected)
@@ -210,11 +210,11 @@ where
     Ok(data)
 }
 
-fn send_apdu<T>(dev: &mut T, cmd: u8, p1: u8, send: &[u8]) -> io::Result<(Vec<u8>, [u8; 2])>
+fn send_ctap1<T>(dev: &mut T, cmd: u8, p1: u8, send: &[u8]) -> io::Result<(Vec<u8>, [u8; 2])>
 where
     T: U2FDevice + Read + Write,
 {
-    let apdu = U2FAPDUHeader::serialize(cmd, p1, send)?;
+    let apdu = CTAP1RequestAPDU::serialize(cmd, p1, send)?;
     let mut data = sendrecv(dev, U2FHID_MSG, &apdu)?;
 
     if data.len() < 2 {
@@ -234,7 +234,7 @@ where
 mod tests {
     use rand::{thread_rng, RngCore};
 
-    use super::{init_device, send_apdu, sendrecv, U2FDevice};
+    use super::{init_device, is_v2_device, send_ctap1, sendrecv, U2FDevice, U2FDeviceInfo};
     use crate::consts::{CID_BROADCAST, SW_NO_ERROR, U2FHID_INIT, U2FHID_MSG, U2FHID_PING};
 
     mod platform {
@@ -380,6 +380,43 @@ mod tests {
     }
 
     #[test]
+    fn test_get_version() {
+        let mut device = platform::TestDevice::new();
+        // channel id
+        let mut cid = [0u8; 4];
+        thread_rng().fill_bytes(&mut cid);
+
+        device.set_cid(cid.clone());
+
+        let info = U2FDeviceInfo {
+            vendor_name: Vec::new(),
+            device_name: Vec::new(),
+            version_interface: 0x02,
+            version_major: 0x04,
+            version_minor: 0x01,
+            version_build: 0x08,
+            cap_flags: 0x01,
+        };
+        device.set_device_info(info);
+
+        // ctap1.0 U2F_VERSION request
+        let mut msg = cid.to_vec();
+        msg.extend(&[U2FHID_MSG, 0x0, 0x7]); // cmd + bcnt
+        msg.extend(&[0x0, 0x3, 0x0, 0x0, 0x0, 0x0, 0x0]);
+        device.add_write(&msg, 0);
+
+        // fido response
+        let mut msg = cid.to_vec();
+        msg.extend(&[U2FHID_MSG, 0x0, 0x08]); // cmd + bcnt
+        msg.extend(&[0x55, 0x32, 0x46, 0x5f, 0x56, 0x32]); // 'U2F_V2'
+        msg.extend(&SW_NO_ERROR);
+        device.add_read(&msg, 0);
+
+        let res = is_v2_device(&mut device).expect("Failed to get version");
+        assert!(res);
+    }
+
+    #[test]
     fn test_sendrecv_multiple() {
         let mut device = platform::TestDevice::new();
         let cid = [0x01, 0x02, 0x03, 0x04];
@@ -443,7 +480,7 @@ mod tests {
         msg.extend_from_slice(&SW_NO_ERROR);
         device.add_read(&msg, 0);
 
-        let (result, status) = send_apdu(&mut device, U2FHID_PING, 0xaa, &data).unwrap();
+        let (result, status) = send_ctap1(&mut device, U2FHID_PING, 0xaa, &data).unwrap();
         assert_eq!(result, &data);
         assert_eq!(status, SW_NO_ERROR);
     }
