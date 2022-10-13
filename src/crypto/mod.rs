@@ -627,7 +627,7 @@ impl Serialize for COSEKey {
 pub enum CryptoError {
     // DecodingFailure,
     // LibraryFailure,
-    // MalformedInput,
+    MalformedInput,
     // MissingHeader,
     // UnexpectedHeaderValue,
     // UnexpectedTag,
@@ -687,6 +687,62 @@ impl fmt::Debug for ECDHSecret {
             self.my_public_key()
         )
     }
+}
+
+pub struct U2FRegisterAnswer<'a> {
+    pub certificate: &'a [u8],
+    pub signature: &'a [u8],
+}
+
+// We will only return MalformedInput here
+pub fn parse_u2f_der_certificate(data: &[u8]) -> Result<U2FRegisterAnswer, CryptoError> {
+    // So we don't panic below, when accessing individual bytes
+    if data.len() < 4 {
+        return Err(CryptoError::MalformedInput);
+    }
+    // Check if it is a SEQUENCE
+    if data[0] != 0x30 {
+        return Err(CryptoError::MalformedInput);
+    }
+
+    // This algorithm is taken from mozilla-central/security/nss/lib/mozpkix/lib/pkixder.cpp
+    // The short form of length is a single byte with the high order bit set
+    // to zero. The long form of length is one byte with the high order bit
+    // set, followed by N bytes, where N is encoded in the lowest 7 bits of
+    // the first byte.
+    let end = if (data[1] & 0x80) == 0 {
+        2 + data[1] as usize
+    } else if data[1] == 0x81 {
+        // The next byte specifies the length
+
+        if data[2] < 128 {
+            // Not shortest possible encoding
+            // Forbidden by DER-format
+            return Err(CryptoError::MalformedInput);
+        }
+        3 + data[2] as usize
+    } else if data[1] == 0x82 {
+        // The next 2 bytes specify the length
+        let l = u16::from_be_bytes([data[2], data[3]]);
+        if l < 256 {
+            // Not shortest possible encoding
+            // Forbidden by DER-format
+            return Err(CryptoError::MalformedInput);
+        }
+        4 + l as usize
+    } else {
+        // We don't support lengths larger than 2^16 - 1.
+        return Err(CryptoError::MalformedInput);
+    };
+
+    if data.len() < end {
+        return Err(CryptoError::MalformedInput);
+    }
+
+    Ok(U2FRegisterAnswer {
+        certificate: &data[0..end],
+        signature: &data[end..],
+    })
 }
 
 #[cfg(all(test, not(feature = "crypto_dummy")))]

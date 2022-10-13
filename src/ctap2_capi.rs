@@ -45,7 +45,6 @@ const REGISTER_RESULT_AUTH_DATA: u8 = 2;
 const ATTESTATION_FORMAT_NONE: u8 = 0;
 const ATTESTATION_FORMAT_U2F: u8 = 1;
 const ATTESTATION_FORMAT_PACKED: u8 = 2;
-const ATTESTATION_FORMAT_UNPARSED: u8 = 3; // TODO(MS): Needs to go away
 
 #[repr(C)]
 pub struct AuthenticatorArgsUser {
@@ -549,7 +548,6 @@ fn register_result_item_len(attestation: &AttestationObject, item_idx: u8) -> Op
             AttestationStatement::None => None,
             AttestationStatement::Packed(x) => serde_cbor::to_vec(&x).ok().map(|x| x.len()),
             AttestationStatement::FidoU2F(x) => serde_cbor::to_vec(&x).ok().map(|x| x.len()),
-            AttestationStatement::Unparsed(x) => Some(x.len()),
         },
         REGISTER_RESULT_AUTH_DATA => attestation.auth_data.to_vec().ok().map(|x| x.len()),
         _ => None,
@@ -592,7 +590,7 @@ unsafe fn register_result_item_copy(
     }
 
     let tmp_val;
-    let item = match item_idx {
+    let item: Option<&[u8]> = match item_idx {
         REGISTER_RESULT_ATTESTATION_STATEMENT => match &attestation.att_statement {
             AttestationStatement::None => None,
             AttestationStatement::Packed(x) => {
@@ -603,7 +601,6 @@ unsafe fn register_result_item_copy(
                 tmp_val = serde_cbor::to_vec(&x).ok();
                 tmp_val.as_ref().map(|x| x.as_ref())
             }
-            AttestationStatement::Unparsed(x) => Some(x.as_slice()),
         },
         REGISTER_RESULT_AUTH_DATA => {
             tmp_val = attestation.auth_data.to_vec().ok();
@@ -655,7 +652,6 @@ pub unsafe extern "C" fn rust_ctap2_register_result_attestation_format(
                 AttestationStatement::None => ATTESTATION_FORMAT_NONE,
                 AttestationStatement::FidoU2F(..) => ATTESTATION_FORMAT_U2F,
                 AttestationStatement::Packed(..) => ATTESTATION_FORMAT_PACKED,
-                AttestationStatement::Unparsed(..) => ATTESTATION_FORMAT_UNPARSED,
             };
             true
         }
