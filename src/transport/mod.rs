@@ -185,7 +185,12 @@ pub trait FidoDevice: HIDDevice {
         } else {
             // We need to fake a blink-request, because FIDO2.0 forgot to specify one
             // See: https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html#using-pinToken-in-authenticatorMakeCredential
-            let mut msg = dummy_make_credentials_cmd();
+            let mut msg = match dummy_make_credentials_cmd() {
+                Ok(m) => m,
+                Err(_) => {
+                    return BlinkResult::Cancelled;
+                }
+            };
             // Using a zero-length pinAuth will trigger the device to blink
             // For CTAP1, this gets ignored anyways and we do a 'normal' register
             // command, which also just blinks.

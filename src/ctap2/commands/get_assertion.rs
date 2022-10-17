@@ -7,7 +7,7 @@ use crate::consts::{
 };
 use crate::crypto::{authenticate, encrypt, COSEKey, CryptoError, ECDHSecret};
 use crate::ctap2::attestation::{AuthenticatorData, AuthenticatorDataFlags};
-use crate::ctap2::client_data::CollectedClientData;
+use crate::ctap2::client_data::{ClientDataHash, CollectedClientData, CollectedClientDataWrapper};
 use crate::ctap2::commands::client_pin::{Pin, PinAuth};
 use crate::ctap2::commands::get_next_assertion::GetNextAssertion;
 use crate::ctap2::commands::make_credentials::UserVerification;
@@ -35,7 +35,7 @@ use std::io;
 #[derive(Debug, PartialEq)]
 pub enum GetAssertionResult {
     CTAP1(Vec<u8>),
-    CTAP2(AssertionObject, CollectedClientData),
+    CTAP2(AssertionObject, CollectedClientDataWrapper),
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -178,7 +178,7 @@ impl GetAssertionExtensions {
 
 #[derive(Debug, Clone)]
 pub struct GetAssertion {
-    pub(crate) client_data: CollectedClientData,
+    pub(crate) client_data_wrapper: CollectedClientDataWrapper,
     pub(crate) rp: RelyingPartyWrapper,
     pub(crate) allow_list: Vec<PublicKeyCredentialDescriptor>,
 
@@ -197,22 +197,23 @@ pub struct GetAssertion {
 
 impl GetAssertion {
     pub fn new(
-        client_data: CollectedClientData,
+        client_data_wrapper: CollectedClientData,
         rp: RelyingPartyWrapper,
         allow_list: Vec<PublicKeyCredentialDescriptor>,
         options: GetAssertionOptions,
         extensions: GetAssertionExtensions,
         pin: Option<Pin>,
-    ) -> Self {
-        Self {
-            client_data,
+    ) -> Result<Self, HIDError> {
+        let client_data_wrapper = CollectedClientDataWrapper::new(client_data_wrapper)?;
+        Ok(Self {
+            client_data_wrapper,
             rp,
             allow_list,
             extensions,
             options,
             pin,
             pin_auth: None,
-        }
+        })
     }
 }
 
@@ -233,8 +234,8 @@ impl PinAuthCommand for GetAssertion {
         self.pin_auth = pin_auth;
     }
 
-    fn client_data(&self) -> &CollectedClientData {
-        &self.client_data
+    fn client_data_hash(&self) -> ClientDataHash {
+        self.client_data_wrapper.hash()
     }
 
     fn unset_uv_option(&mut self) {
@@ -275,10 +276,7 @@ impl Serialize for GetAssertion {
             }
         }
 
-        let client_data_hash = self
-            .client_data
-            .hash()
-            .map_err(|e| S::Error::custom(format!("error while hashing client data: {}", e)))?;
+        let client_data_hash = self.client_data_hash();
         map.serialize_entry(&2, &client_data_hash)?;
         if !self.allow_list.is_empty() {
             map.serialize_entry(&3, &self.allow_list)?;
@@ -314,7 +312,7 @@ impl Request<GetAssertionResult> for GetAssertion {
 #[derive(Debug)]
 pub(crate) struct CheckKeyHandle<'assertion> {
     pub(crate) key_handle: &'assertion [u8],
-    pub(crate) client_data: &'assertion CollectedClientData,
+    pub(crate) client_data_wrapper: &'assertion CollectedClientDataWrapper,
     pub(crate) rp: &'assertion RelyingPartyWrapper,
 }
 
@@ -330,12 +328,7 @@ impl<'assertion> RequestCtap1 for CheckKeyHandle<'assertion> {
         // ambiguous
         let mut auth_data = Vec::with_capacity(2 * PARAMETER_SIZE + 1 + self.key_handle.len());
 
-        auth_data.extend_from_slice(
-            self.client_data
-                .hash()
-                .map_err(|e| HIDError::Command(CommandError::Json(e)))?
-                .as_ref(),
-        );
+        auth_data.extend_from_slice(self.client_data_wrapper.hash().as_ref());
         auth_data.extend_from_slice(self.rp.hash().as_ref());
         auth_data.extend_from_slice(&[self.key_handle.len() as u8]);
         auth_data.extend_from_slice(self.key_handle);
@@ -381,7 +374,7 @@ impl RequestCtap1 for GetAssertion {
             .find_map(|allowed_handle| {
                 let check_command = CheckKeyHandle {
                     key_handle: allowed_handle.id.as_ref(),
-                    client_data: &self.client_data,
+                    client_data_wrapper: &self.client_data_wrapper,
                     rp: &self.rp,
                 };
                 let res = dev.send_apdu(&check_command);
@@ -403,16 +396,13 @@ impl RequestCtap1 for GetAssertion {
             Vec::with_capacity(2 * PARAMETER_SIZE + 1 /* key_handle_len */ + key_handle.len());
 
         if self.is_ctap2_request() {
-            auth_data.extend_from_slice(
-                self.client_data
-                    .hash()
-                    .map_err(|e| HIDError::Command(CommandError::Json(e)))?
-                    .as_ref(),
-            );
+            auth_data.extend_from_slice(self.client_data_hash().as_ref());
         } else {
-            let decoded =
-                base64::decode_config(&self.client_data.challenge.0, base64::URL_SAFE_NO_PAD)
-                    .map_err(|_| HIDError::DeviceError)?; // We encoded it, so this should never fail
+            let decoded = base64::decode_config(
+                &self.client_data_wrapper.client_data.challenge.0,
+                base64::URL_SAFE_NO_PAD,
+            )
+            .map_err(|_| HIDError::DeviceError)?; // We encoded it, so this should never fail
             auth_data.extend_from_slice(&decoded);
         }
         auth_data.extend_from_slice(self.rp.hash().as_ref());
@@ -471,7 +461,7 @@ impl RequestCtap1 for GetAssertion {
 
             Ok(GetAssertionResult::CTAP2(
                 AssertionObject(vec![assertion]),
-                self.client_data.clone(),
+                self.client_data_wrapper.clone(),
             ))
         } else {
             Ok(GetAssertionResult::CTAP1(input.to_vec()))
@@ -528,7 +518,7 @@ impl RequestCtap2 for GetAssertion {
 
                 Ok(GetAssertionResult::CTAP2(
                     AssertionObject(assertions),
-                    self.client_data.clone(),
+                    self.client_data_wrapper.clone(),
                 ))
             } else {
                 let data: Value = from_slice(&input[1..]).map_err(CommandError::Deserializing)?;
@@ -676,7 +666,9 @@ pub mod test {
         U2F_REQUEST_USER_PRESENCE,
     };
     use crate::ctap2::attestation::{AuthenticatorData, AuthenticatorDataFlags};
-    use crate::ctap2::client_data::{Challenge, CollectedClientData, TokenBinding, WebauthnType};
+    use crate::ctap2::client_data::{
+        Challenge, CollectedClientData, CollectedClientDataWrapper, TokenBinding, WebauthnType,
+    };
     use crate::ctap2::commands::get_assertion::AssertionObject;
     use crate::ctap2::commands::RequestCtap1;
     use crate::ctap2::server::{
@@ -720,7 +712,8 @@ pub mod test {
             },
             Default::default(),
             None,
-        );
+        )
+        .expect("Failed to create GetAssertion");
         let mut device = Device::new("commands/get_assertion").unwrap();
         let mut cid = [0u8; 4];
         thread_rng().fill_bytes(&mut cid);
@@ -846,8 +839,13 @@ pub mod test {
             auth_data: expected_auth_data,
         };
 
-        let expected =
-            GetAssertionResult::CTAP2(AssertionObject(vec![expected_assertion]), client_data);
+        let expected = GetAssertionResult::CTAP2(
+            AssertionObject(vec![expected_assertion]),
+            CollectedClientDataWrapper {
+                client_data,
+                serialized_data: CLIENT_DATA_VEC.to_vec(),
+            },
+        );
         let response = device.send_cbor(&assertion).unwrap();
         assert_eq!(response, expected);
     }
@@ -922,7 +920,8 @@ pub mod test {
             },
             Default::default(),
             None,
-        );
+        )
+        .expect("Failed to create GetAssertion");
         let mut device = Device::new("commands/get_assertion").unwrap(); // not really used (all functions ignore it)
                                                                          // channel id
         let mut cid = [0u8; 4];
@@ -974,8 +973,13 @@ pub mod test {
             auth_data: expected_auth_data,
         };
 
-        let expected =
-            GetAssertionResult::CTAP2(AssertionObject(vec![expected_assertion]), client_data);
+        let expected = GetAssertionResult::CTAP2(
+            AssertionObject(vec![expected_assertion]),
+            CollectedClientDataWrapper {
+                client_data,
+                serialized_data: CLIENT_DATA_VEC.to_vec(),
+            },
+        );
 
         assert_eq!(response, expected);
     }
@@ -1008,7 +1012,9 @@ pub mod test {
             },
             Default::default(),
             None,
-        );
+        )
+        .expect("Failed to create GetAssertion");
+
         let mut device = Device::new("commands/get_assertion").unwrap(); // not really used (all functions ignore it)
                                                                          // channel id
         let mut cid = [0u8; 4];
@@ -1090,11 +1096,40 @@ pub mod test {
             auth_data: expected_auth_data,
         };
 
-        let expected =
-            GetAssertionResult::CTAP2(AssertionObject(vec![expected_assertion]), client_data);
+        let expected = GetAssertionResult::CTAP2(
+            AssertionObject(vec![expected_assertion]),
+            CollectedClientDataWrapper {
+                client_data,
+                serialized_data: CLIENT_DATA_VEC.to_vec(),
+            },
+        );
 
         assert_eq!(response, expected);
     }
+
+    // Manually assembled according to https://www.w3.org/TR/webauthn-2/#clientdatajson-serialization
+    const CLIENT_DATA_VEC: [u8; 140] = [
+        0x7b, 0x22, 0x74, 0x79, 0x70, 0x65, 0x22, 0x3a, // {"type":
+        0x22, 0x77, 0x65, 0x62, 0x61, 0x75, 0x74, 0x68, 0x6e, 0x2e, 0x63, 0x72, 0x65, 0x61, 0x74,
+        0x65, 0x22, // "webauthn.create"
+        0x2c, 0x22, 0x63, 0x68, 0x61, 0x6c, 0x6c, 0x65, 0x6e, 0x67, 0x65, 0x22,
+        0x3a, // (,"challenge":
+        0x22, 0x41, 0x41, 0x45, 0x43, 0x41, 0x77, 0x22, // challenge in base64
+        0x2c, 0x22, 0x6f, 0x72, 0x69, 0x67, 0x69, 0x6e, 0x22, 0x3a, // ,"origin":
+        0x22, 0x65, 0x78, 0x61, 0x6d, 0x70, 0x6c, 0x65, 0x2e, 0x63, 0x6f, 0x6d,
+        0x22, // "example.com"
+        0x2c, 0x22, 0x63, 0x72, 0x6f, 0x73, 0x73, 0x4f, 0x72, 0x69, 0x67, 0x69, 0x6e, 0x22,
+        0x3a, // ,"crossOrigin":
+        0x66, 0x61, 0x6c, 0x73, 0x65, // false
+        0x2c, 0x22, 0x74, 0x6f, 0x6b, 0x65, 0x6e, 0x42, 0x69, 0x6e, 0x64, 0x69, 0x6e, 0x67, 0x22,
+        0x3a, // ,"tokenBinding":
+        0x7b, 0x22, 0x73, 0x74, 0x61, 0x74, 0x75, 0x73, 0x22, 0x3a, // {"status":
+        0x22, 0x70, 0x72, 0x65, 0x73, 0x65, 0x6e, 0x74, 0x22, // "present"
+        0x2c, 0x22, 0x69, 0x64, 0x22, 0x3a, // ,"id":
+        0x22, 0x41, 0x41, 0x45, 0x43, 0x41, 0x77, 0x22, // "AAECAw"
+        0x7d, // }
+        0x7d, // }
+    ];
 
     const CLIENT_DATA_HASH: [u8; 32] = [
         0x75, 0x35, 0x35, 0x7d, 0x49, 0x6e, 0x33, 0xc8, 0x18, 0x7f, 0xea, 0x8d, 0x11, // hash

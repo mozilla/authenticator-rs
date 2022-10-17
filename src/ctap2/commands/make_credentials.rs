@@ -11,7 +11,9 @@ use crate::ctap2::attestation::{
     AAGuid, AttestationObject, AttestationStatement, AttestationStatementFidoU2F,
     AttestedCredentialData, AuthenticatorData, AuthenticatorDataFlags,
 };
-use crate::ctap2::client_data::{Challenge, CollectedClientData, WebauthnType};
+use crate::ctap2::client_data::{
+    Challenge, ClientDataHash, CollectedClientData, CollectedClientDataWrapper, WebauthnType,
+};
 use crate::ctap2::commands::client_pin::{Pin, PinAuth};
 use crate::ctap2::commands::get_assertion::CheckKeyHandle;
 use crate::ctap2::server::{
@@ -42,7 +44,7 @@ use std::io;
 #[derive(Debug)]
 pub enum MakeCredentialsResult {
     CTAP1(Vec<u8>),
-    CTAP2(AttestationObject, CollectedClientData),
+    CTAP2(AttestationObject, CollectedClientDataWrapper),
 }
 
 #[derive(Copy, Clone, Debug, Serialize)]
@@ -101,7 +103,7 @@ impl MakeCredentialsExtensions {
 
 #[derive(Debug, Clone)]
 pub struct MakeCredentials {
-    pub(crate) client_data: CollectedClientData,
+    pub(crate) client_data_wrapper: CollectedClientDataWrapper,
     pub(crate) rp: RelyingPartyWrapper,
     // Note(baloo): If none -> ctap1
     pub(crate) user: Option<User>,
@@ -131,9 +133,10 @@ impl MakeCredentials {
         options: MakeCredentialsOptions,
         extensions: MakeCredentialsExtensions,
         pin: Option<Pin>,
-    ) -> Self {
-        Self {
-            client_data,
+    ) -> Result<Self, HIDError> {
+        let client_data_wrapper = CollectedClientDataWrapper::new(client_data)?;
+        Ok(Self {
+            client_data_wrapper,
             rp,
             user,
             pub_cred_params,
@@ -142,7 +145,7 @@ impl MakeCredentials {
             options,
             pin,
             pin_auth: None,
-        }
+        })
     }
 }
 
@@ -163,8 +166,8 @@ impl PinAuthCommand for MakeCredentials {
         self.pin_auth = pin_auth;
     }
 
-    fn client_data(&self) -> &CollectedClientData {
-        &self.client_data
+    fn client_data_hash(&self) -> ClientDataHash {
+        self.client_data_wrapper.hash()
     }
 
     fn unset_uv_option(&mut self) {
@@ -195,10 +198,7 @@ impl Serialize for MakeCredentials {
         }
 
         let mut map = serializer.serialize_map(Some(map_len))?;
-        let client_data_hash = self
-            .client_data
-            .hash()
-            .map_err(|e| S::Error::custom(format!("error while hashing client data: {}", e)))?;
+        let client_data_hash = self.client_data_hash();
         map.serialize_entry(&1, &client_data_hash)?;
         match self.rp {
             RelyingPartyWrapper::Data(ref d) => {
@@ -259,7 +259,7 @@ impl RequestCtap1 for MakeCredentials {
             .map(|exclude_handle| {
                 let check_command = CheckKeyHandle {
                     key_handle: exclude_handle.id.as_ref(),
-                    client_data: &self.client_data,
+                    client_data_wrapper: &self.client_data_wrapper,
                     rp: &self.rp,
                 };
                 let res = dev.send_apdu(&check_command);
@@ -271,7 +271,7 @@ impl RequestCtap1 for MakeCredentials {
             // Now we need to send a dummy registration request, to make the token blink
             // Spec says "dummy appid and invalid challenge". We use the same, as we do for
             // making the token blink upon device selection.
-            let msg = dummy_make_credentials_cmd();
+            let msg = dummy_make_credentials_cmd()?;
             let _ = dev.send_apdu(&msg); // Ignore answer, return "CrednetialExcluded"
             return Err(HIDError::Command(CommandError::StatusCode(
                 StatusCode::CredentialExcluded,
@@ -287,16 +287,13 @@ impl RequestCtap1 for MakeCredentials {
 
         let mut register_data = Vec::with_capacity(2 * PARAMETER_SIZE);
         if self.is_ctap2_request() {
-            register_data.extend_from_slice(
-                self.client_data
-                    .hash()
-                    .map_err(|e| HIDError::Command(CommandError::Json(e)))?
-                    .as_ref(),
-            );
+            register_data.extend_from_slice(self.client_data_hash().as_ref());
         } else {
-            let decoded =
-                base64::decode_config(&self.client_data.challenge.0, base64::URL_SAFE_NO_PAD)
-                    .map_err(|_| HIDError::DeviceError)?; // We encoded it, so this should never fail
+            let decoded = base64::decode_config(
+                &self.client_data_wrapper.client_data.challenge.0,
+                base64::URL_SAFE_NO_PAD,
+            )
+            .map_err(|_| HIDError::DeviceError)?; // We encoded it, so this should never fail
             register_data.extend_from_slice(&decoded);
         }
         register_data.extend_from_slice(self.rp.hash().as_ref());
@@ -373,7 +370,7 @@ impl RequestCtap1 for MakeCredentials {
                 auth_data,
                 att_statement,
             };
-            let client_data = self.client_data.clone();
+            let client_data = self.client_data_wrapper.clone();
 
             Ok(MakeCredentialsResult::CTAP2(
                 attestation_object,
@@ -416,7 +413,7 @@ impl RequestCtap2 for MakeCredentials {
         if input.len() > 1 {
             if status.is_ok() {
                 let attestation = from_slice(&input[1..]).map_err(CommandError::Deserializing)?;
-                let client_data = self.client_data.clone();
+                let client_data = self.client_data_wrapper.clone();
                 Ok(MakeCredentialsResult::CTAP2(attestation, client_data))
             } else {
                 let data: Value = from_slice(&input[1..]).map_err(CommandError::Deserializing)?;
@@ -433,7 +430,7 @@ impl RequestCtap2 for MakeCredentials {
     }
 }
 
-pub(crate) fn dummy_make_credentials_cmd() -> MakeCredentials {
+pub(crate) fn dummy_make_credentials_cmd() -> Result<MakeCredentials, HIDError> {
     MakeCredentials::new(
         CollectedClientData {
             webauthn_type: WebauthnType::Create,
@@ -520,7 +517,8 @@ pub mod test {
             },
             Default::default(),
             None,
-        );
+        )
+        .expect("Failed to create MakeCredentials");
 
         let mut device = Device::new("commands/make_credentials").unwrap(); // not really used (all functions ignore it)
         let req_serialized = req
@@ -666,7 +664,8 @@ pub mod test {
             },
             Default::default(),
             None,
-        );
+        )
+        .expect("Failed to create MakeCredentials");
 
         let mut device = Device::new("commands/make_credentials").unwrap(); // not really used (all functions ignore it)
         let req_serialized = req
