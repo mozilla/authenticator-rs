@@ -16,13 +16,6 @@ const uint8_t CTAP2_SIGN_RESULT_SIGNATURE = 3;
 const uint8_t CTAP2_SIGN_RESULT_USER_ID = 4;
 const uint8_t CTAP2_SIGN_RESULT_USER_NAME = 5;
 
-const uint8_t CTAP2_REGISTER_RESULT_ATTESTATION = 1;
-const uint8_t CTAP2_REGISTER_RESULT_AUTH_DATA = 2;
-
-const uint8_t CTAP2_ATTESTATION_FORMAT_NONE = 0;
-const uint8_t CTAP2_ATTESTATION_FORMAT_U2F = 1;
-const uint8_t CTAP2_ATTESTATION_FORMAT_PACKED = 2;
-
 typedef struct {
     const uint8_t *id_ptr;
     size_t id_len;
@@ -43,6 +36,7 @@ typedef struct {
     bool resident_key;
     bool user_verification;
     bool user_presence;
+    bool force_none_attestation;
 } AuthenticatorArgsOptions;
 
 // NOTE: Preconditions
@@ -130,20 +124,10 @@ bool rust_ctap2_register_result_client_data_copy(
 
 /// # Safety
 ///
-/// This function is used to get the attestation format,
-/// represented by CTAP2_ATTESTATION_FORMAT_*
-bool rust_ctap2_register_result_attestation_format(
-    const rust_ctap2_register_result *res,
-    uint8_t *fmt
-);
-
-/// # Safety
-///
 /// This function is used to get the length, prior to calling
 /// rust_ctap2_register_result_item_copy()
-bool rust_ctap2_register_result_item_len(
+bool rust_ctap2_register_result_attestation_len(
     const rust_ctap2_register_result *res,
-    uint8_t item_idx,
     size_t *len
 );
 
@@ -151,9 +135,8 @@ bool rust_ctap2_register_result_item_len(
 ///
 /// This method does not ensure anything about dst before copying, so
 /// ensure it is long enough (using rust_ctap2_register_result_item_len)
-bool rust_ctap2_register_result_item_copy(
+bool rust_ctap2_register_result_attestation_copy(
     const rust_ctap2_register_result* res,
-    uint8_t item_idx,
     uint8_t *dst
 );
 /// # Safety
