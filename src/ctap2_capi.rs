@@ -81,7 +81,7 @@ unsafe fn from_raw(ptr: *const u8, len: usize) -> Vec<u8> {
 #[no_mangle]
 pub unsafe extern "C" fn rust_ctap2_mgr_free(mgr: *mut AuthenticatorService) {
     if !mgr.is_null() {
-        Box::from_raw(mgr);
+        drop(Box::from_raw(mgr));
     }
 }
 
@@ -116,7 +116,7 @@ pub unsafe extern "C" fn rust_ctap2_pkcd_add(
 #[no_mangle]
 pub unsafe extern "C" fn rust_ctap2_pkcd_free(khs: *mut Ctap2PubKeyCredDescriptors) {
     if !khs.is_null() {
-        Box::from_raw(khs);
+        drop(Box::from_raw(khs));
     }
 }
 
@@ -435,7 +435,7 @@ pub unsafe extern "C" fn rust_ctap2_sign_result_error(res: *const Ctap2SignResul
 #[no_mangle]
 pub unsafe extern "C" fn rust_ctap2_register_res_free(res: *mut Ctap2RegisterResult) {
     if !res.is_null() {
-        let _ = Box::from_raw(res);
+        drop(Box::from_raw(res));
     }
 }
 
@@ -446,7 +446,7 @@ pub unsafe extern "C" fn rust_ctap2_register_res_free(res: *mut Ctap2RegisterRes
 #[no_mangle]
 pub unsafe extern "C" fn rust_ctap2_sign_res_free(res: *mut Ctap2SignResult) {
     if !res.is_null() {
-        let _ = Box::from_raw(res);
+        drop(Box::from_raw(res));
     }
 }
 
@@ -940,6 +940,6 @@ pub unsafe extern "C" fn rust_ctap2_destroy_status_update_res(res: *mut StatusUp
         return false;
     }
     // Dropping it when we go out of scope
-    let _ = Box::from_raw(res);
+    drop(Box::from_raw(res));
     true
 }

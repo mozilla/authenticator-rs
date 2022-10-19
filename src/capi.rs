@@ -63,7 +63,7 @@ pub extern "C" fn rust_u2f_mgr_new() -> *mut AuthenticatorService {
 #[no_mangle]
 pub unsafe extern "C" fn rust_u2f_mgr_free(mgr: *mut AuthenticatorService) {
     if !mgr.is_null() {
-        Box::from_raw(mgr);
+        drop(Box::from_raw(mgr));
     }
 }
 
@@ -94,7 +94,7 @@ pub unsafe extern "C" fn rust_u2f_app_ids_add(
 #[no_mangle]
 pub unsafe extern "C" fn rust_u2f_app_ids_free(ids: *mut U2FAppIds) {
     if !ids.is_null() {
-        Box::from_raw(ids);
+        drop(Box::from_raw(ids));
     }
 }
 
@@ -129,7 +129,7 @@ pub unsafe extern "C" fn rust_u2f_khs_add(
 #[no_mangle]
 pub unsafe extern "C" fn rust_u2f_khs_free(khs: *mut U2FKeyHandles) {
     if !khs.is_null() {
-        Box::from_raw(khs);
+        drop(Box::from_raw(khs));
     }
 }
 
@@ -219,7 +219,7 @@ pub unsafe extern "C" fn rust_u2f_resbuf_copy(
 #[no_mangle]
 pub unsafe extern "C" fn rust_u2f_res_free(res: *mut U2FResult) {
     if !res.is_null() {
-        Box::from_raw(res);
+        drop(Box::from_raw(res));
     }
 }
 
