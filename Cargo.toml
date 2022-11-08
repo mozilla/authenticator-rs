@@ -24,7 +24,7 @@ webdriver = ["bytes", "warp", "tokio"]
 crypto_dummy = []
 crypto_ring = ["ring"]
 crypto_openssl = ["openssl", "openssl-sys"]
-crypto_nss = ["nss", "nss_sys", "rc_crypto"]
+crypto_nss = ["nss-sys"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libudev = "^0.2"
@@ -72,9 +72,7 @@ cfg-if = "1.0"
 ring = { version = "0.16", optional = true }
 openssl-sys = { version = "0.9", optional = true}
 openssl = { version = "0.10", optional = true}
-rc_crypto = { git = "https://github.com/mozilla/application-services", rev="2689788cecf24c385e6b7440e3aa1a89c511f14a", optional = true, feature="gecko"}
-nss = { git = "https://github.com/mozilla/application-services", rev="2689788cecf24c385e6b7440e3aa1a89c511f14a", optional = true, feature="gecko"}
-nss_sys = { git = "https://github.com/mozilla/application-services", rev="2689788cecf24c385e6b7440e3aa1a89c511f14a", optional = true, feature="gecko"}
+nss-sys = { git = "https://github.com/andyleiserson/nss-sys.git", optional = true }
 
 [dev-dependencies]
 env_logger = "^0.6"
