@@ -20,12 +20,8 @@ jobs:
             TARGET: x86_64-unknown-linux-gnu
             ADD_INSTALL: |
                 sudo apt-get update
-                sudo apt-get install -y libudev-dev libnss3
-                # This last part is a really ugly hack, but I fail to find another way,
-                # since rc_crypto is expecting a dir with ./lib/ and ./include/ in it,
-                # with all NSS-libs located in ./libs/ (we can ignore ./include/ luckily).
-                sudo ln -s /usr/lib/x86_64-linux-gnu/nss/ /usr/lib/x86_64-linux-gnu/lib
-            BUILD_OPTIONS: 
+                sudo apt-get install -y libudev-dev mercurial node-gyp ninja-build
+            BUILD_OPTIONS: --features crypto_nss --no-default-features
 
           # Linux openSSL crypto
           - OS: ubuntu-latest
@@ -46,9 +42,6 @@ jobs:
             BUILD_OPTIONS: --features crypto_dummy --no-default-features --target=x86_64-pc-windows-gnu
 
     runs-on: ${{ matrix.OS }}
-    env:
-        # Setting this for all, as it's the easiest right now
-        NSS_DIR: /usr/lib/x86_64-linux-gnu/
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -64,4 +57,4 @@ jobs:
         run: cargo build --all --release ${{ matrix.BUILD_OPTIONS }}
 
       - name: Test
-        run: cargo test ${{ matrix.BUILD_OPTIONS }} -- nocapture
+        run: cargo test ${{ matrix.BUILD_OPTIONS }} -- --show-output
