@@ -24,7 +24,7 @@ webdriver = ["bytes", "warp", "tokio"]
 crypto_dummy = []
 crypto_ring = ["ring"]
 crypto_openssl = ["openssl", "openssl-sys"]
-crypto_nss = ["nss-sys/gecko"]
+crypto_nss = ["nss-gk-api"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libudev = "^0.2"
@@ -72,7 +72,7 @@ cfg-if = "1.0"
 ring = { version = "0.16", optional = true }
 openssl-sys = { version = "0.9", optional = true}
 openssl = { version = "0.10", optional = true}
-nss-sys = { git = "https://github.com/andyleiserson/nss-sys.git", optional = true, feature="gecko" }
+nss-gk-api = { git = "https://github.com/jschanck/nss-gk-api.git", optional = true }
 
 [dev-dependencies]
 env_logger = "^0.6"

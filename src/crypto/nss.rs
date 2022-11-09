@@ -1,5 +1,5 @@
 use super::{COSEAlgorithm, COSEEC2Key, COSEKey, COSEKeyType, ECDHSecret, ECDSACurve};
-use nss_sys::p11::{
+use nss_gk_api::p11::{
     PK11Origin, PK11_CreateContextBySymKey, PK11_Decrypt, PK11_DigestFinal, PK11_DigestOp,
     PK11_Encrypt, PK11_ExtractKeyValue, PK11_GenerateKeyPairWithOpFlags, PK11_GetInternalSlot,
     PK11_GetKeyData, PK11_ImportDataKey, PK11_PubDeriveWithKDF, PK11_ReadRawAttribute, PrivateKey,
@@ -8,7 +8,7 @@ use nss_sys::p11::{
     CKM_SHA256_HMAC, CKM_SHA512_HMAC, CKO_PUBLIC_KEY, CK_FLAGS, CK_MECHANISM_TYPE,
     PK11_ATTR_INSENSITIVE, PK11_ATTR_PUBLIC, PK11_ATTR_SESSION, SEC_ASN1_OBJECT_ID, SHA256_LENGTH,
 };
-use nss_sys::{Error as NSSError, IntoResult, SECItem, SECItemBorrowed, SECItemMut, PR_FALSE};
+use nss_gk_api::{Error as NSSError, IntoResult, SECItem, SECItemBorrowed, SECItemMut, PR_FALSE};
 use serde::Serialize;
 use serde_bytes::ByteBuf;
 use std::convert::{TryFrom, TryInto};
