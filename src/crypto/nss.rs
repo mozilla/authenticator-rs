@@ -6,7 +6,7 @@ use nss_gk_api::p11::{
     PublicKey, SECOID_FindOIDByTag, SECOidTag, AES_BLOCK_SIZE, CKA_EC_POINT, CKA_ENCRYPT, CKA_SIGN,
     CKD_SHA256_KDF, CKF_DERIVE, CKM_AES_CBC, CKM_ECDH1_DERIVE, CKM_EC_KEY_PAIR_GEN,
     CKM_SHA256_HMAC, CKM_SHA512_HMAC, CKO_PUBLIC_KEY, CK_FLAGS, CK_MECHANISM_TYPE,
-    PK11_ATTR_INSENSITIVE, PK11_ATTR_PUBLIC, PK11_ATTR_SESSION, SEC_ASN1_OBJECT_ID, SHA256_LENGTH,
+    PK11_ATTR_INSENSITIVE, PK11_ATTR_PUBLIC, PK11_ATTR_SESSION, SEC_ASN1_OBJECT_ID,
 };
 use nss_gk_api::{Error as NSSError, IntoResult, SECItem, SECItemBorrowed, SECItemMut, PR_FALSE};
 use serde::Serialize;
@@ -316,7 +316,7 @@ pub(crate) fn authenticate(token: &[u8], input: &[u8]) -> Result<Vec<u8>> {
         .into_result()?
     };
     unsafe { PK11_DigestOp(*context, input.as_ptr(), input.len().try_into()?).into_result()? };
-    let mut digest = vec![0u8; SHA256_LENGTH as usize];
+    let mut digest = vec![0u8; 32];
     let mut digest_len = 0u32;
     unsafe {
         PK11_DigestFinal(
@@ -327,7 +327,7 @@ pub(crate) fn authenticate(token: &[u8], input: &[u8]) -> Result<Vec<u8>> {
         )
         .into_result()?
     }
-    assert_eq!(digest_len, SHA256_LENGTH);
+    assert_eq!(digest_len, 32);
     Ok(digest)
 }
 
