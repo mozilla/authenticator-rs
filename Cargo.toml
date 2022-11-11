@@ -73,7 +73,7 @@ cfg-if = "1.0"
 ring = { version = "0.16", optional = true }
 openssl-sys = { version = "0.9", optional = true}
 openssl = { version = "0.10", optional = true}
-nss-gk-api = { git = "https://github.com/jschanck/nss-gk-api.git", optional = true }
+nss-gk-api = { version = "0.1", optional = true }
 
 [dev-dependencies]
 env_logger = "^0.6"

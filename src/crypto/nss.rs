@@ -1,21 +1,22 @@
 use super::{COSEAlgorithm, COSEEC2Key, COSEKey, COSEKeyType, ECDHSecret, ECDSACurve};
 use nss_gk_api::p11::{
     PK11Origin, PK11_CreateContextBySymKey, PK11_Decrypt, PK11_DigestFinal, PK11_DigestOp,
-    PK11_Encrypt, PK11_ExtractKeyValue, PK11_GenerateKeyPairWithOpFlags, PK11_GetInternalSlot,
-    PK11_GetKeyData, PK11_ImportDataKey, PK11_PubDeriveWithKDF, PK11_ReadRawAttribute, PrivateKey,
-    PublicKey, SECOID_FindOIDByTag, SECOidTag, AES_BLOCK_SIZE, CKA_EC_POINT, CKA_ENCRYPT, CKA_SIGN,
-    CKD_SHA256_KDF, CKF_DERIVE, CKM_AES_CBC, CKM_ECDH1_DERIVE, CKM_EC_KEY_PAIR_GEN,
-    CKM_SHA256_HMAC, CKM_SHA512_HMAC, CKO_PUBLIC_KEY, CK_FLAGS, CK_MECHANISM_TYPE,
-    PK11_ATTR_INSENSITIVE, PK11_ATTR_PUBLIC, PK11_ATTR_SESSION, SEC_ASN1_OBJECT_ID,
+    PK11_Encrypt, PK11_GenerateKeyPairWithOpFlags, PK11_HashBuf, PK11_ImportSymKey,
+    PK11_PubDeriveWithKDF, PrivateKey, PublicKey, SECKEY_DecodeDERSubjectPublicKeyInfo,
+    SECKEY_ExtractPublicKey, SECOidTag, Slot, SubjectPublicKeyInfo, CKA_DERIVE, CKA_ENCRYPT,
+    CKA_SIGN, CKD_NULL, CKF_DERIVE, CKM_AES_CBC, CKM_ECDH1_DERIVE, CKM_EC_KEY_PAIR_GEN,
+    CKM_SHA256_HMAC, CKM_SHA512_HMAC, PK11_ATTR_INSENSITIVE, PK11_ATTR_PUBLIC, PK11_ATTR_SESSION,
 };
-use nss_gk_api::{Error as NSSError, IntoResult, SECItem, SECItemBorrowed, SECItemMut, PR_FALSE};
+use nss_gk_api::{Error as NSSError, IntoResult, SECItem, SECItemBorrowed, PR_FALSE};
 use serde::Serialize;
 use serde_bytes::ByteBuf;
 use std::convert::{TryFrom, TryInto};
-use std::ffi::c_void;
 use std::num::TryFromIntError;
-use std::os::raw::{c_uchar, c_uint};
+use std::os::raw::c_uint;
 use std::ptr;
+
+#[cfg(test)]
+use nss_gk_api::p11::{PK11_ImportDERPrivateKeyInfoAndReturnKey, SECKEY_ConvertToPublicKey};
 
 /// Errors that can be returned from COSE functions.
 #[derive(Clone, Debug, Serialize)]
@@ -41,46 +42,29 @@ impl From<TryFromIntError> for BackendError {
 
 pub type Result<T> = std::result::Result<T, BackendError>;
 
-/// A key agreement algorithm.
-#[derive(PartialEq)]
-pub struct Algorithm {
-    curve_id: SECOidTag::Type,
-}
+// Object identifiers in DER tag-length-value form
 
-pub static ECDH_P256: Algorithm = Algorithm {
-    curve_id: SECOidTag::SEC_OID_ANSIX962_EC_PRIME256V1,
-};
+const DER_OID_EC_PUBLIC_KEY_BYTES: &[u8] = &[
+    0x06, 0x07,
+    /* {iso(1) member-body(2) us(840) ansi-x962(10045) keyType(2) ecPublicKey(1)} */
+    0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01,
+];
 
-pub static ECDH_P384: Algorithm = Algorithm {
-    curve_id: SECOidTag::SEC_OID_SECG_EC_SECP384R1,
-};
-
-pub enum Curve {
-    P256,
-    P384,
-}
-
-fn to_nss_alg(curve: COSEAlgorithm) -> Result<&'static Algorithm> {
-    match curve {
-        // TODO(MS): Are these correct / complete?
-        COSEAlgorithm::ES256
-        | COSEAlgorithm::PS256
-        | COSEAlgorithm::ECDH_ES_HKDF256
-        | COSEAlgorithm::ECDH_SS_HKDF256 => Ok(&ECDH_P256),
-        COSEAlgorithm::ES384 => Ok(&ECDH_P384),
-        x => Err(BackendError::UnsupportedAlgorithm(x)),
-    }
-}
-
-fn to_nss_curve(curve: ECDSACurve) -> Result<Curve> {
-    match curve {
-        // TODO(MS): Are these correct / complete?
-        ECDSACurve::SECP256R1 => Ok(Curve::P256),
-        ECDSACurve::SECP384R1 => Ok(Curve::P256),
-        ECDSACurve::SECP521R1 => Ok(Curve::P384),
-        x => Err(BackendError::UnsupportedCurve(x)),
-    }
-}
+const DER_OID_P256_BYTES: &[u8] = &[
+    0x06, 0x08,
+    /* {iso(1) member-body(2) us(840) ansi-x962(10045) curves(3) prime(1) prime256v1(7)} */
+    0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07,
+];
+const DER_OID_P384_BYTES: &[u8] = &[
+    0x06, 0x05,
+    /* {iso(1) identified-organization(3) certicom(132) curve(0) ansip384r1(34)} */
+    0x2b, 0x81, 0x04, 0x00, 0x22,
+];
+const DER_OID_P521_BYTES: &[u8] = &[
+    0x06, 0x05,
+    /* {iso(1) identified-organization(3) certicom(132) curve(0) ansip521r1(35)} */
+    0x2b, 0x81, 0x04, 0x00, 0x23,
+];
 
 /* From CTAP2.1 spec:
 
@@ -112,194 +96,313 @@ pub(crate) fn serialize_key(_curve: ECDSACurve, key: &[u8]) -> Result<(ByteBuf, 
     ))
 }
 
-pub(crate) fn parse_key(curve: ECDSACurve, x: &[u8], y: &[u8]) -> Result<Vec<u8>> {
-    todo!()
-    /*
-    let nss_name = to_nss_curve(curve)?;
-    // Note:: NSSPublicKey does not provide the from_coordinates-function, so we have to go via EcKey
-    //        and fake a private key.
-    let key =
-        EcKey::from_coordinates(nss_name, &[], x, y).map_err(|e| NSSError::from(e))?;
+pub(crate) fn parse_key(_curve: ECDSACurve, x: &[u8], y: &[u8]) -> Result<Vec<u8>> {
+    if x.len() != y.len() {
+        return Err(BackendError::NSSError(
+            "EC coordinates not equally long".to_string(),
+        ));
+    }
+    let mut buf = Vec::with_capacity(2 * x.len() + 1);
+    // The uncompressed point format is defined in Section 2.3.3 of "SEC 1: Elliptic Curve
+    // Cryptography" https://www.secg.org/sec1-v2.pdf.
+    buf.push(0x04);
+    buf.extend_from_slice(x);
+    buf.extend_from_slice(y);
+    Ok(buf)
+}
 
-    Ok(key.public_key().to_vec())
-    */
+fn der_spki_from_cose(cose_key: &COSEKey) -> Result<Vec<u8>> {
+    let ec2key = match cose_key.key {
+        COSEKeyType::EC2(ref ec2key) => ec2key,
+        _ => return Err(BackendError::UnsupportedKeyType),
+    };
+
+    let (curve_oid, seq_len, alg_len, spk_len) = match ec2key.curve {
+        ECDSACurve::SECP256R1 => (
+            DER_OID_P256_BYTES,
+            [0x59].as_slice(),
+            [0x13].as_slice(),
+            [0x42].as_slice(),
+        ),
+        ECDSACurve::SECP384R1 => (
+            DER_OID_P384_BYTES,
+            [0x76].as_slice(),
+            [0x10].as_slice(),
+            [0x62].as_slice(),
+        ),
+        ECDSACurve::SECP521R1 => (
+            DER_OID_P521_BYTES,
+            [0x81, 0x9b].as_slice(),
+            [0x10].as_slice(),
+            [0x8a, 0xdf].as_slice(),
+        ),
+        x => return Err(BackendError::UnsupportedCurve(x)),
+    };
+
+    let cose_key_sec1 = parse_key(ec2key.curve, &ec2key.x, &ec2key.y)?;
+
+    // [RFC 5280]
+    let mut spki: Vec<u8> = vec![];
+    // SubjectPublicKeyInfo
+    spki.push(0x30);
+    spki.extend_from_slice(seq_len);
+    //      AlgorithmIdentifier
+    spki.push(0x30);
+    spki.extend_from_slice(alg_len);
+    //          ObjectIdentifier
+    spki.extend_from_slice(DER_OID_EC_PUBLIC_KEY_BYTES);
+    //          RFC 5480 ECParameters
+    spki.extend_from_slice(curve_oid);
+    //      BIT STRING encoding uncompressed SEC1 public point
+    spki.push(0x03);
+    spki.extend_from_slice(spk_len);
+    spki.push(0x0); // no trailing zeros
+    spki.extend_from_slice(&cose_key_sec1);
+
+    Ok(spki)
 }
 
 /// This is run by the platform when starting a series of transactions with a specific authenticator.
-// pub(crate) fn initialize() {
-//     unimplemented!()
-// }
-
-fn create_ec_params(algorithm: &Algorithm) -> Result<Vec<u8>> {
-    // The following code is adapted from application-services/components/support/rc_crypto/nss/src/ec.rs and
-    // https://searchfox.org/mozilla-central/rev/ec489aa170b6486891cf3625717d6fa12bcd11c1/dom/crypto/WebCryptoCommon.h#299
-    let oid_data = unsafe { SECOID_FindOIDByTag(algorithm.curve_id as u32).into_result() }?;
-    // Set parameters
-    let oid_data_len = unsafe { (*oid_data).oid.len };
-    let mut buf = vec![0u8; usize::try_from(oid_data_len)? + 2];
-    buf[0] = c_uchar::try_from(SEC_ASN1_OBJECT_ID)?;
-    buf[1] = c_uchar::try_from(oid_data_len)?;
-    let oid_data_data =
-        unsafe { std::slice::from_raw_parts((*oid_data).oid.data, usize::try_from(oid_data_len)?) };
-    buf[2..].copy_from_slice(oid_data_data);
-    Ok(buf)
-}
+//pub(crate) fn initialize() { }
 
 /// Generates an encapsulation for the authenticator’s public key and returns the message
 /// to transmit and the shared secret.
 ///
 /// `key` is the authenticator's (peer's) public key.
-pub(crate) fn encapsulate(key: &COSEKey) -> Result<ECDHSecret> {
-    // TODO: ensure_nss_initialized();
-    let slot = unsafe { PK11_GetInternalSlot().into_result() }?;
-    if let COSEKeyType::EC2(ec2key) = &key.key {
-        // Generate an ephmeral keypair to do ECDH with the authenticator.
-        // This is "platformKeyAgreementKey".
-        let alg = to_nss_alg(key.alg)?;
-        let params = create_ec_params(alg)?;
-        let mut public_ptr = ptr::null_mut();
-        let private = unsafe {
-            // Type of `param` argument depends on mechanism. For EC keygen it is
-            // `SECKEYECParams *` which is a typedef for `SECItem *`.
-            PK11_GenerateKeyPairWithOpFlags(
-                *slot,
-                CK_MECHANISM_TYPE::from(CKM_EC_KEY_PAIR_GEN),
-                SECItemBorrowed::wrap(&params).as_mut() as *mut SECItem as *mut c_void,
-                &mut public_ptr,
-                PK11_ATTR_SESSION | PK11_ATTR_INSENSITIVE | PK11_ATTR_PUBLIC,
-                CK_FLAGS::from(CKF_DERIVE),
-                CK_FLAGS::from(CKF_DERIVE),
-                ptr::null_mut(),
-            )
-            .into_result()?
-        };
-        // The only error that can be returned here is a null pointer, which
-        // shouldn't happen if the call above succeeded, but check anyways.
-        let public = unsafe { PublicKey::from_ptr(public_ptr) }?;
-        encapsulate_helper(ec2key, key.alg, public, private)
-    } else {
-        Err(BackendError::UnsupportedKeyType)
-    }
+pub(crate) fn encapsulate(peer_cose_key: &COSEKey) -> Result<ECDHSecret> {
+    // Generate an ephmeral keypair to do ECDH with the authenticator.
+    // This is "platformKeyAgreementKey".
+    let ec2key = match peer_cose_key.key {
+        COSEKeyType::EC2(ref ec2key) => ec2key,
+        _ => return Err(BackendError::UnsupportedKeyType),
+    };
+
+    let mut oid = match ec2key.curve {
+        ECDSACurve::SECP256R1 => SECItemBorrowed::wrap(DER_OID_P256_BYTES),
+        ECDSACurve::SECP384R1 => SECItemBorrowed::wrap(DER_OID_P384_BYTES),
+        ECDSACurve::SECP521R1 => SECItemBorrowed::wrap(DER_OID_P521_BYTES),
+        x => return Err(BackendError::UnsupportedCurve(x)),
+    };
+    let oid_ptr: *mut SECItem = oid.as_mut();
+
+    let slot = Slot::internal()?;
+
+    let mut client_public_ptr = ptr::null_mut();
+    let client_private = unsafe {
+        // Type of `param` argument depends on mechanism. For EC keygen it is
+        // `SECKEYECParams *` which is a typedef for `SECItem *`.
+        PK11_GenerateKeyPairWithOpFlags(
+            *slot,
+            CKM_EC_KEY_PAIR_GEN,
+            oid_ptr.cast(),
+            &mut client_public_ptr,
+            PK11_ATTR_SESSION | PK11_ATTR_INSENSITIVE | PK11_ATTR_PUBLIC,
+            CKF_DERIVE,
+            CKF_DERIVE,
+            ptr::null_mut(),
+        )
+        .into_result()?
+    };
+
+    let peer_spki = der_spki_from_cose(peer_cose_key)?;
+    let peer_public = nss_public_key_from_der_spki(&peer_spki)?;
+    let shared_secret = encapsulate_helper(peer_public, client_private)?;
+
+    let client_public = unsafe { PublicKey::from_ptr(client_public_ptr)? };
+    let client_cose_key = cose_key_from_nss_public(peer_cose_key.alg, ec2key.curve, client_public)?;
+
+    Ok(ECDHSecret {
+        remote: COSEKey {
+            alg: peer_cose_key.alg,
+            key: COSEKeyType::EC2(ec2key.clone()),
+        },
+        my: client_cose_key,
+        shared_secret,
+    })
+}
+
+fn nss_public_key_from_der_spki(spki: &[u8]) -> Result<PublicKey> {
+    let mut spki_item = SECItemBorrowed::wrap(&spki);
+    let spki_item_ptr: *mut SECItem = spki_item.as_mut();
+    let nss_spki = unsafe {
+        SubjectPublicKeyInfo::from_ptr(SECKEY_DecodeDERSubjectPublicKeyInfo(spki_item_ptr))?
+    };
+    let public_key = unsafe { PublicKey::from_ptr(SECKEY_ExtractPublicKey(*nss_spki))? };
+    Ok(public_key)
+}
+
+fn cose_key_from_nss_public(
+    alg: COSEAlgorithm,
+    curve: ECDSACurve,
+    nss_public: PublicKey,
+) -> Result<COSEKey> {
+    let public_data = nss_public.key_data()?;
+    let (public_x, public_y) = serialize_key(curve, &public_data)?;
+    Ok(COSEKey {
+        alg,
+        key: COSEKeyType::EC2(COSEEC2Key {
+            curve,
+            x: public_x.to_vec(),
+            y: public_y.to_vec(),
+        }),
+    })
 }
 
 // `key`: The authenticator's public key.
-// `public_key`: Our ephemeral public key.
 // `private_key`: Our ephemeral private key.
-fn encapsulate_helper(
-    key: &COSEEC2Key,
-    alg: COSEAlgorithm,
-    public_key: PublicKey,
-    private_key: PrivateKey,
-) -> Result<ECDHSecret> {
-    let mut public_key_point = SECItemMut::make_empty();
-    unsafe {
-        PK11_ReadRawAttribute(
-            CKO_PUBLIC_KEY,
-            (*public_key).cast(),
-            CKA_EC_POINT.into(),
-            public_key_point.as_mut(),
-        );
-    }
-    let (x, y) = serialize_key(key.curve, public_key_point.as_slice())?;
-
-    let my_public_key = COSEKey {
-        alg,
-        key: COSEKeyType::EC2(COSEEC2Key {
-            curve: key.curve.clone(),
-            x: x.to_vec(),
-            y: y.to_vec(),
-        }),
-    };
-
-    // CKM_SHA512_HMAC and CKA_SIGN are key type and usage attributes of the
-    // derived symmetric key and don't matter because we ignore them anyway.
-    let sym_key = unsafe {
+fn encapsulate_helper(peer_public: PublicKey, client_private: PrivateKey) -> Result<Vec<u8>> {
+    let ecdh_x_coord = unsafe {
         PK11_PubDeriveWithKDF(
-            *private_key,
-            *public_key,
-            PR_FALSE as i32,
+            *client_private,
+            *peer_public,
+            PR_FALSE,
             std::ptr::null_mut(),
             std::ptr::null_mut(),
-            CKM_ECDH1_DERIVE.into(),
-            CKM_SHA512_HMAC.into(),
-            CKA_SIGN.into(),
+            CKM_ECDH1_DERIVE,
+            CKM_SHA512_HMAC, // unused
+            CKA_DERIVE,      // unused
             0,
-            CKD_SHA256_KDF.into(),
+            CKD_NULL,
             std::ptr::null_mut(),
             std::ptr::null_mut(),
         )
         .into_result()?
     };
-
-    unsafe { PK11_ExtractKeyValue(*sym_key).into_result()? }
-
-    // PK11_GetKeyData returns a `SECItem *`. Both the SECItem structure and the
-    // buffer it refers to are owned by the SymKey. We don't need to free them.
-    let shared_secret = unsafe { (*PK11_GetKeyData(*sym_key)).as_slice().to_owned() };
-
-    Ok(ECDHSecret {
-        remote: COSEKey {
-            alg,
-            key: COSEKeyType::EC2(key.clone()),
-        },
-        my: my_public_key,
-        shared_secret,
-    })
-}
-
-/*
-#[cfg(test)]
-pub(crate) fn test_encapsulate(
-    key: &COSEEC2Key,
-    alg: COSEAlgorithm,
-    my_pub_key: &[u8],
-    my_priv_key: &[u8],
-) -> Result<ECDHSecret> {
-    let curve = to_nss_curve(key.curve)?;
-    let ec_key = EcKey::new(curve, my_priv_key, my_pub_key);
-    let private_key = PrivateKey::import(&ec_key)?;
-    encapsulate_helper(
-        key,
-        alg,
-        my_pub_key,
-        private_key._tests_only_dangerously_convert_to_ephemeral(),
-    )
-}
-*/
-
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub enum Operation {
-    Encrypt,
-    Decrypt,
+    let ecdh_x_coord_bytes = ecdh_x_coord.as_bytes()?;
+    let mut shared_secret = [0u8; 32]; // SHA256_LENGTH
+    unsafe {
+        PK11_HashBuf(
+            SECOidTag::SEC_OID_SHA256,
+            shared_secret.as_mut_ptr(),
+            ecdh_x_coord_bytes.as_ptr(),
+            ecdh_x_coord_bytes.len() as i32,
+        )
+    };
+    Ok(shared_secret.to_vec())
 }
 
 /// Encrypts a plaintext to produce a ciphertext, which may be longer than the plaintext.
 /// The plaintext is restricted to being a multiple of the AES block size (16 bytes) in length.
-pub(crate) fn encrypt(
-    key: &[u8],
-    plain_text: &[u8], /*PlainText*/
-) -> Result<Vec<u8> /*CypherText*/> {
-    crypt_helper(key, plain_text, Operation::Encrypt)
+pub(crate) fn encrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
+    nss_gk_api::init();
+
+    if key.len() != 32 {
+        return Err(BackendError::NSSError(
+            "Invalid AES-256 key length".to_string(),
+        ));
+    }
+
+    // The input must be a multiple of the AES block size, 16
+    if data.len() % 16 != 0 {
+        return Err(BackendError::NSSError(
+            "Input to encrypt is too long".to_string(),
+        ));
+    }
+    let in_len = c_uint::try_from(data.len())?;
+
+    let slot = Slot::internal()?;
+
+    let sym_key = unsafe {
+        PK11_ImportSymKey(
+            *slot,
+            CKM_AES_CBC,
+            PK11Origin::PK11_OriginUnwrap,
+            CKA_ENCRYPT,
+            SECItemBorrowed::wrap(key).as_mut(),
+            ptr::null_mut(),
+        )
+        .into_result()?
+    };
+
+    let iv = [0u8; 16];
+    let mut params = SECItemBorrowed::wrap(&iv);
+    let params_ptr: *mut SECItem = params.as_mut();
+    let mut out_len: c_uint = 0;
+    let mut out = vec![0; in_len as usize];
+    unsafe {
+        PK11_Encrypt(
+            *sym_key,
+            CKM_AES_CBC,
+            params_ptr,
+            out.as_mut_ptr(),
+            &mut out_len,
+            in_len,
+            data.as_ptr(),
+            in_len,
+        )
+        .into_result()?
+    }
+    // CKM_AES_CBC should have output length equal to input length.
+    debug_assert_eq!(out_len, in_len);
+
+    Ok(out)
 }
 
 /// Decrypts a ciphertext and returns the plaintext.
-pub(crate) fn decrypt(
-    key: &[u8],
-    cypher_text: &[u8], /*CypherText*/
-) -> Result<Vec<u8> /*PlainText*/> {
-    crypt_helper(key, cypher_text, Operation::Decrypt)
+pub(crate) fn decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
+    nss_gk_api::init();
+    let slot = Slot::internal()?;
+
+    if key.len() != 32 {
+        return Err(BackendError::NSSError(
+            "Invalid AES-256 key length".to_string(),
+        ));
+    }
+
+    // The input must be a multiple of the AES block size, 16
+    if data.len() % 16 != 0 {
+        return Err(BackendError::NSSError(
+            "Invalid input to decrypt".to_string(),
+        ));
+    }
+    let in_len = c_uint::try_from(data.len())?;
+
+    let sym_key = unsafe {
+        PK11_ImportSymKey(
+            *slot,
+            CKM_AES_CBC,
+            PK11Origin::PK11_OriginUnwrap,
+            CKA_ENCRYPT,
+            SECItemBorrowed::wrap(key).as_mut(),
+            ptr::null_mut(),
+        )
+        .into_result()?
+    };
+
+    let iv = [0u8; 16];
+    let mut params = SECItemBorrowed::wrap(&iv);
+    let params_ptr: *mut SECItem = params.as_mut();
+    let mut out_len: c_uint = 0;
+    let mut out = vec![0; in_len as usize];
+    unsafe {
+        PK11_Decrypt(
+            *sym_key,
+            CKM_AES_CBC,
+            params_ptr,
+            out.as_mut_ptr(),
+            &mut out_len,
+            in_len,
+            data.as_ptr(),
+            in_len,
+        )
+        .into_result()?
+    }
+    // CKM_AES_CBC should have output length equal to input length.
+    debug_assert_eq!(out_len, in_len);
+
+    Ok(out)
 }
 
 /// Computes a MAC of the given message.
 pub(crate) fn authenticate(token: &[u8], input: &[u8]) -> Result<Vec<u8>> {
-    // TODO: ensure_nss_initialized();
-    let slot = unsafe { PK11_GetInternalSlot().into_result() }?;
+    nss_gk_api::init();
+    let slot = Slot::internal()?;
     let sym_key = unsafe {
-        PK11_ImportDataKey(
+        PK11_ImportSymKey(
             *slot,
-            CKM_SHA256_HMAC.into(),
-            PK11Origin::PK11_OriginUnwrap as u32,
-            CKA_SIGN.into(),
+            CKM_SHA256_HMAC,
+            PK11Origin::PK11_OriginUnwrap,
+            CKA_SIGN,
             SECItemBorrowed::wrap(token).as_mut(),
             ptr::null_mut(),
         )
@@ -307,13 +410,8 @@ pub(crate) fn authenticate(token: &[u8], input: &[u8]) -> Result<Vec<u8>> {
     };
     let param = SECItemBorrowed::make_empty();
     let context = unsafe {
-        PK11_CreateContextBySymKey(
-            CKM_SHA256_HMAC.into(),
-            CKA_SIGN.into(),
-            *sym_key,
-            param.as_ref(),
-        )
-        .into_result()?
+        PK11_CreateContextBySymKey(CKM_SHA256_HMAC, CKA_SIGN, *sym_key, param.as_ref())
+            .into_result()?
     };
     unsafe { PK11_DigestOp(*context, input.as_ptr(), input.len().try_into()?).into_result()? };
     let mut digest = vec![0u8; 32];
@@ -331,56 +429,102 @@ pub(crate) fn authenticate(token: &[u8], input: &[u8]) -> Result<Vec<u8>> {
     Ok(digest)
 }
 
-pub fn crypt_helper(key: &[u8], data: &[u8], operation: Operation) -> Result<Vec<u8>> {
-    // TODO: ensure_nss_initialized();
+#[cfg(test)]
+pub(crate) fn test_encapsulate(
+    peer_coseec2_key: &COSEEC2Key,
+    alg: COSEAlgorithm,
+    my_pub_key: &[u8],
+    my_priv_key: &[u8],
+) -> Result<ECDHSecret> {
+    nss_gk_api::init();
 
-    let slot = unsafe { PK11_GetInternalSlot().into_result() }?;
-    let mech = CKM_AES_CBC.into();
+    let peer_cose_key = COSEKey {
+        alg: alg,
+        key: COSEKeyType::EC2(peer_coseec2_key.clone()),
+    };
+    let spki = der_spki_from_cose(&peer_cose_key)?;
+    let peer_public = nss_public_key_from_der_spki(&spki)?;
 
-    let iv = [0u8; 16];
+    /* NSS has no mechanism to import a raw elliptic curve coordinate as a private key.
+     * We need to encode it in a key storage format such as PKCS#8. To avoid a dependency
+     * on an ASN.1 encoder for this test, we'll do it manually. */
+    let pkcs8_private_key_info_version = &[0x02, 0x01, 0x00];
+    let rfc5915_ec_private_key_version = &[0x02, 0x01, 0x01];
 
-    let mut params = SECItemBorrowed::wrap(&iv);
+    let (curve_oid, seq_len, alg_len, attr_len, ecpriv_len, param_len, spk_len) =
+        match peer_coseec2_key.curve {
+            ECDSACurve::SECP256R1 => (
+                DER_OID_P256_BYTES,
+                [0x81, 0x87].as_slice(),
+                [0x13].as_slice(),
+                [0x6d].as_slice(),
+                [0x6b].as_slice(),
+                [0x44].as_slice(),
+                [0x42].as_slice(),
+            ),
+            x => return Err(BackendError::UnsupportedCurve(x)),
+        };
 
-    // Most of the following code is inspired by the Firefox WebCrypto implementation:
-    // https://searchfox.org/mozilla-central/rev/f46e2bf881d522a440b30cbf5cf8d76fc212eaf4/dom/crypto/WebCryptoTask.cpp#566
-    // CKA_ENCRYPT always is fine.
-    let sym_key = unsafe {
-        PK11_ImportDataKey(
+    let priv_len = my_priv_key.len() as u8; // < 127
+
+    let mut pkcs8_priv: Vec<u8> = vec![];
+    // RFC 5208 PrivateKeyInfo
+    pkcs8_priv.push(0x30);
+    pkcs8_priv.extend_from_slice(seq_len);
+    //      Integer (0)
+    pkcs8_priv.extend_from_slice(pkcs8_private_key_info_version);
+    //      AlgorithmIdentifier
+    pkcs8_priv.push(0x30);
+    pkcs8_priv.extend_from_slice(alg_len);
+    //          ObjectIdentifier
+    pkcs8_priv.extend_from_slice(DER_OID_EC_PUBLIC_KEY_BYTES);
+    //          RFC 5480 ECParameters
+    pkcs8_priv.extend_from_slice(DER_OID_P256_BYTES);
+    //      Attributes
+    pkcs8_priv.push(0x04);
+    pkcs8_priv.extend_from_slice(attr_len);
+    //      RFC 5915 ECPrivateKey
+    pkcs8_priv.push(0x30);
+    pkcs8_priv.extend_from_slice(ecpriv_len);
+    pkcs8_priv.extend_from_slice(rfc5915_ec_private_key_version);
+    pkcs8_priv.push(0x04);
+    pkcs8_priv.push(priv_len);
+    pkcs8_priv.extend_from_slice(my_priv_key);
+    pkcs8_priv.push(0xa1);
+    pkcs8_priv.extend_from_slice(param_len);
+    pkcs8_priv.push(0x03);
+    pkcs8_priv.extend_from_slice(spk_len);
+    pkcs8_priv.push(0x0);
+    pkcs8_priv.extend_from_slice(&my_pub_key);
+
+    // Now we can import the private key.
+    let slot = Slot::internal()?;
+    let mut pkcs8_priv_item = SECItemBorrowed::wrap(&pkcs8_priv);
+    let pkcs8_priv_item_ptr: *mut SECItem = pkcs8_priv_item.as_mut();
+    let mut client_private_ptr = ptr::null_mut();
+    unsafe {
+        PK11_ImportDERPrivateKeyInfoAndReturnKey(
             *slot,
-            mech,
-            PK11Origin::PK11_OriginUnwrap as u32,
-            CKA_ENCRYPT.into(),
-            SECItemBorrowed::wrap(key).as_mut(),
+            pkcs8_priv_item_ptr,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            PR_FALSE,
+            PR_FALSE,
+            255, /* todo: expose KU_ flags in nss-gk-api */
+            &mut client_private_ptr,
             ptr::null_mut(),
         )
-        .into_result()?
     };
 
-    let result_max_len = data
-        .len()
-        .checked_add(AES_BLOCK_SIZE as usize)
-        .ok_or(BackendError::TryFromError)?;
-    let mut out_len: c_uint = 0;
-    let mut out = vec![0u8; result_max_len];
-    let result_max_len_uint = c_uint::try_from(result_max_len)?;
-    let data_len = c_uint::try_from(data.len())?;
-    let f = match operation {
-        Operation::Decrypt => PK11_Decrypt,
-        Operation::Encrypt => PK11_Encrypt,
-    };
-    unsafe {
-        f(
-            *sym_key,
-            mech,
-            params.as_mut() as *mut _,
-            out.as_mut_ptr(),
-            &mut out_len,
-            result_max_len_uint,
-            data.as_ptr(),
-            data_len,
-        )
-        .into_result()?
-    }
-    out.truncate(usize::try_from(out_len)?);
-    Ok(out)
+    let client_private = unsafe { PrivateKey::from_ptr(client_private_ptr) }?;
+    let client_public = unsafe { PublicKey::from_ptr(SECKEY_ConvertToPublicKey(*client_private))? };
+    let client_cose_key = cose_key_from_nss_public(alg, peer_coseec2_key.curve, client_public)?;
+
+    let shared_secret = encapsulate_helper(peer_public, client_private)?;
+
+    Ok(ECDHSecret {
+        remote: peer_cose_key,
+        my: client_cose_key,
+        shared_secret,
+    })
 }
