@@ -5,7 +5,7 @@ use nss_gk_api::p11::{
     PK11_PubDeriveWithKDF, PrivateKey, PublicKey, SECKEY_DecodeDERSubjectPublicKeyInfo,
     SECKEY_ExtractPublicKey, SECOidTag, Slot, SubjectPublicKeyInfo, CKA_DERIVE, CKA_ENCRYPT,
     CKA_SIGN, CKD_NULL, CKF_DERIVE, CKM_AES_CBC, CKM_ECDH1_DERIVE, CKM_EC_KEY_PAIR_GEN,
-    CKM_SHA256_HMAC, CKM_SHA512_HMAC, PK11_ATTR_INSENSITIVE, PK11_ATTR_PUBLIC, PK11_ATTR_SESSION,
+    CKM_SHA256_HMAC, CKM_SHA512_HMAC, PK11_ATTR_SESSION,
 };
 use nss_gk_api::{Error as NSSError, IntoResult, SECItem, SECItemBorrowed, PR_FALSE};
 use serde::Serialize;
@@ -196,7 +196,7 @@ pub(crate) fn encapsulate(peer_cose_key: &COSEKey) -> Result<ECDHSecret> {
             CKM_EC_KEY_PAIR_GEN,
             oid_ptr.cast(),
             &mut client_public_ptr,
-            PK11_ATTR_SESSION | PK11_ATTR_INSENSITIVE | PK11_ATTR_PUBLIC,
+            PK11_ATTR_SESSION,
             CKF_DERIVE,
             CKF_DERIVE,
             ptr::null_mut(),
