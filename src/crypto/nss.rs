@@ -3,9 +3,9 @@ use nss_gk_api::p11::{
     PK11Origin, PK11_CreateContextBySymKey, PK11_Decrypt, PK11_DigestFinal, PK11_DigestOp,
     PK11_Encrypt, PK11_GenerateKeyPairWithOpFlags, PK11_HashBuf, PK11_ImportSymKey,
     PK11_PubDeriveWithKDF, PrivateKey, PublicKey, SECKEY_DecodeDERSubjectPublicKeyInfo,
-    SECKEY_ExtractPublicKey, SECOidTag, Slot, SubjectPublicKeyInfo, CKA_DERIVE, CKA_ENCRYPT,
-    CKA_SIGN, CKD_NULL, CKF_DERIVE, CKM_AES_CBC, CKM_ECDH1_DERIVE, CKM_EC_KEY_PAIR_GEN,
-    CKM_SHA256_HMAC, CKM_SHA512_HMAC, PK11_ATTR_SESSION,
+    SECKEY_ExtractPublicKey, SECOidTag, Slot, SubjectPublicKeyInfo, AES_BLOCK_SIZE, CKA_DERIVE,
+    CKA_ENCRYPT, CKA_SIGN, CKD_NULL, CKF_DERIVE, CKM_AES_CBC, CKM_ECDH1_DERIVE,
+    CKM_EC_KEY_PAIR_GEN, CKM_SHA256_HMAC, CKM_SHA512_HMAC, PK11_ATTR_SESSION, SHA256_LENGTH,
 };
 use nss_gk_api::{Error as NSSError, IntoResult, SECItem, SECItemBorrowed, PR_FALSE};
 use serde::Serialize;
@@ -165,10 +165,10 @@ fn der_spki_from_cose(cose_key: &COSEKey) -> Result<Vec<u8>> {
 /// This is run by the platform when starting a series of transactions with a specific authenticator.
 //pub(crate) fn initialize() { }
 
-/// Generates an encapsulation for the authenticator’s public key and returns the message
+/// Generates an encapsulation for the authenticator's public key and returns the message
 /// to transmit and the shared secret.
 ///
-/// `key` is the authenticator's (peer's) public key.
+/// `peer_cose_key` is the authenticator's (peer's) public key.
 pub(crate) fn encapsulate(peer_cose_key: &COSEKey) -> Result<ECDHSecret> {
     nss_gk_api::init();
     // Generate an ephmeral keypair to do ECDH with the authenticator.
@@ -258,8 +258,8 @@ fn cose_key_from_nss_public(
     })
 }
 
-// `key`: The authenticator's public key.
-// `private_key`: Our ephemeral private key.
+/// `peer_public`: The authenticator's public key.
+/// `client_private`: Our ephemeral private key.
 fn encapsulate_helper(peer_public: PublicKey, client_private: PrivateKey) -> Result<Vec<u8>> {
     let ecdh_x_coord = unsafe {
         PK11_PubDeriveWithKDF(
@@ -279,7 +279,7 @@ fn encapsulate_helper(peer_public: PublicKey, client_private: PrivateKey) -> Res
         .into_result()?
     };
     let ecdh_x_coord_bytes = ecdh_x_coord.as_bytes()?;
-    let mut shared_secret = [0u8; 32]; // SHA256_LENGTH
+    let mut shared_secret = [0u8; SHA256_LENGTH as usize];
     unsafe {
         PK11_HashBuf(
             SECOidTag::SEC_OID_SHA256,
@@ -303,7 +303,7 @@ pub(crate) fn encrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
     }
 
     // The input must be a multiple of the AES block size, 16
-    if data.len() % 16 != 0 {
+    if data.len() % (AES_BLOCK_SIZE as usize) != 0 {
         return Err(BackendError::NSSError(
             "Input to encrypt is too long".to_string(),
         ));
@@ -324,7 +324,7 @@ pub(crate) fn encrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
         .into_result()?
     };
 
-    let iv = [0u8; 16];
+    let iv = [0u8; AES_BLOCK_SIZE as usize];
     let mut params = SECItemBorrowed::wrap(&iv);
     let params_ptr: *mut SECItem = params.as_mut();
     let mut out_len: c_uint = 0;
@@ -360,7 +360,7 @@ pub(crate) fn decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
     }
 
     // The input must be a multiple of the AES block size, 16
-    if data.len() % 16 != 0 {
+    if data.len() % (AES_BLOCK_SIZE as usize) != 0 {
         return Err(BackendError::NSSError(
             "Invalid input to decrypt".to_string(),
         ));
@@ -379,7 +379,7 @@ pub(crate) fn decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
         .into_result()?
     };
 
-    let iv = [0u8; 16];
+    let iv = [0u8; AES_BLOCK_SIZE as usize];
     let mut params = SECItemBorrowed::wrap(&iv);
     let params_ptr: *mut SECItem = params.as_mut();
     let mut out_len: c_uint = 0;
