@@ -189,27 +189,36 @@ pub(crate) fn encapsulate(peer_cose_key: &COSEKey) -> Result<ECDHSecret> {
     let slot = Slot::internal()?;
 
     let mut client_public_ptr = ptr::null_mut();
-    let client_private = unsafe {
-        // Type of `param` argument depends on mechanism. For EC keygen it is
-        // `SECKEYECParams *` which is a typedef for `SECItem *`.
-        PK11_GenerateKeyPairWithOpFlags(
-            *slot,
-            CKM_EC_KEY_PAIR_GEN,
-            oid_ptr.cast(),
-            &mut client_public_ptr,
-            PK11_ATTR_SESSION,
-            CKF_DERIVE,
-            CKF_DERIVE,
-            ptr::null_mut(),
-        )
-        .into_result()?
+
+    // We have to be careful with error handling between the `PK11_GenerateKeyPairWithOpFlags` and
+    // `PublicKey::from_ptr` calls here, so I've wrapped them in the same unsafe block as a
+    // warning. TODO(jms) Replace this once there is a safer alternative.
+    // https://github.com/mozilla/nss-gk-api/issues/1
+    let (client_private, client_public) = unsafe {
+        let client_private =
+            // Type of `param` argument depends on mechanism. For EC keygen it is
+            // `SECKEYECParams *` which is a typedef for `SECItem *`.
+            PK11_GenerateKeyPairWithOpFlags(
+                *slot,
+                CKM_EC_KEY_PAIR_GEN,
+                oid_ptr.cast(),
+                &mut client_public_ptr,
+                PK11_ATTR_SESSION,
+                CKF_DERIVE,
+                CKF_DERIVE,
+                ptr::null_mut(),
+            )
+            .into_result()?;
+
+        let client_public = PublicKey::from_ptr(client_public_ptr)?;
+
+        (client_private, client_public)
     };
 
     let peer_spki = der_spki_from_cose(peer_cose_key)?;
     let peer_public = nss_public_key_from_der_spki(&peer_spki)?;
     let shared_secret = encapsulate_helper(peer_public, client_private)?;
 
-    let client_public = unsafe { PublicKey::from_ptr(client_public_ptr)? };
     let client_cose_key = cose_key_from_nss_public(peer_cose_key.alg, ec2key.curve, client_public)?;
 
     Ok(ECDHSecret {
