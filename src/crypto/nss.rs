@@ -170,6 +170,7 @@ fn der_spki_from_cose(cose_key: &COSEKey) -> Result<Vec<u8>> {
 ///
 /// `key` is the authenticator's (peer's) public key.
 pub(crate) fn encapsulate(peer_cose_key: &COSEKey) -> Result<ECDHSecret> {
+    nss_gk_api::init();
     // Generate an ephmeral keypair to do ECDH with the authenticator.
     // This is "platformKeyAgreementKey".
     let ec2key = match peer_cose_key.key {
