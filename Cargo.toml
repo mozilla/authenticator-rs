@@ -1,6 +1,6 @@
 [package]
 name = "authenticator"
-version = "0.3.2"
+version = "0.4.0-alpha.1"
 authors = ["J.C. Jones <jc@mozilla.com>", "Tim Taubert <ttaubert@mozilla.com>", "Kyle Machulis <kyle@nonpolynomial.com>"]
 keywords = ["ctap2", "u2f", "fido", "webauthn"]
 categories = ["cryptography", "hardware-support", "os"]
