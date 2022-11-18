@@ -87,6 +87,9 @@ uint64_t rust_u2f_mgr_sign(rust_ctap_manager* mgr, uint64_t flags,
 
 void rust_u2f_mgr_cancel(rust_ctap_manager* mgr);
 
+void rust_u2f_mgr_add_webdriver_virtual_bus(rust_u2f_manager* mgr,
+                                            uint16_t port);
+
 /// U2FAppIds functions.
 
 rust_u2f_app_ids* rust_u2f_app_ids_new();

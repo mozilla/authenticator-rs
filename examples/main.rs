@@ -43,7 +43,7 @@ fn main() {
     let mut opts = Options::new();
     opts.optflag("x", "no-u2f-usb-hid", "do not enable u2f-usb-hid platforms");
     #[cfg(feature = "webdriver")]
-    opts.optflag("w", "webdriver", "enable WebDriver virtual bus");
+    opts.optflagopt("w", "webdriver", "enable WebDriver virtual bus, optionally specifying port", "[PORT]");
 
     opts.optflag("h", "help", "print this help menu").optopt(
         "t",
@@ -72,7 +72,16 @@ fn main() {
     #[cfg(feature = "webdriver")]
     {
         if matches.opt_present("webdriver") {
-            manager.add_webdriver_virtual_bus();
+            match matches.opt_get_default::<u16>("webdriver", 8080) {
+                Ok(port) => {
+                    manager.add_webdriver_virtual_bus(port);
+                }
+                Err(e) => {
+                    println!("{}", e);
+                    print_usage(&program, opts);
+                    return;
+                }
+            };
         }
     }
 

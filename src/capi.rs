@@ -391,12 +391,28 @@ pub unsafe extern "C" fn rust_u2f_mgr_sign(
 
 /// # Safety
 ///
-/// This method should not be called AuthenticatorService handles after they've
-/// been freed
+/// This method should not be called on AuthenticatorService handles after
+/// they've been freed
 #[no_mangle]
 pub unsafe extern "C" fn rust_u2f_mgr_cancel(mgr: *mut AuthenticatorService) {
     if !mgr.is_null() {
         // Ignore return value.
         let _ = (*mgr).cancel();
+    }
+}
+
+/// # Safety
+///
+/// This method should not be called on AuthenticatorService handles after
+/// they've been freed
+#[cfg(feature = "webdriver")]
+#[no_mangle]
+pub unsafe extern "C" fn rust_u2f_mgr_add_webdriver_virtual_bus(
+    mgr: *mut AuthenticatorService,
+    port: u16
+) {
+    if !mgr.is_null() {
+        // Ignore return value.
+        let _ = (*mgr).add_webdriver_virtual_bus(port);
     }
 }

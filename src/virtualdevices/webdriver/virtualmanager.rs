@@ -36,8 +36,8 @@ pub struct VirtualManager {
 }
 
 impl VirtualManager {
-    pub fn new() -> io::Result<Self> {
-        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8080);
+    pub fn new(port: u16) -> io::Result<Self> {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
         let state = VirtualManagerState::new();
         let stateclone = state.clone();
 

@@ -200,8 +200,8 @@ impl AuthenticatorService {
     }
 
     #[cfg(feature = "webdriver")]
-    pub fn add_webdriver_virtual_bus(&mut self) {
-        match crate::virtualdevices::webdriver::VirtualManager::new() {
+    pub fn add_webdriver_virtual_bus(&mut self, port: u16) {
+        match crate::virtualdevices::webdriver::VirtualManager::new(port) {
             Ok(token) => {
                 println!("WebDriver ready, listening at {}", &token.url());
                 self.add_transport(Box::new(token));
