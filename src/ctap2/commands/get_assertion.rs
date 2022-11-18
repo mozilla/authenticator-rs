@@ -230,7 +230,7 @@ impl PinAuthCommand for GetAssertion {
         &self.pin_auth
     }
 
-    fn set_pin_auth(&mut self, pin_auth: Option<PinAuth>) {
+    fn set_pin_auth(&mut self, pin_auth: Option<PinAuth>, _pint_auth_protocol: Option<u64>) {
         self.pin_auth = pin_auth;
     }
 

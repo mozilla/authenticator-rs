@@ -89,12 +89,12 @@ pub(crate) trait PinAuthCommand {
     fn pin(&self) -> &Option<Pin>;
     fn set_pin(&mut self, pin: Option<Pin>);
     fn pin_auth(&self) -> &Option<PinAuth>;
-    fn set_pin_auth(&mut self, pin_auth: Option<PinAuth>);
+    fn set_pin_auth(&mut self, pin_auth: Option<PinAuth>, pin_auth_protocol: Option<u64>);
     fn client_data_hash(&self) -> ClientDataHash;
     fn unset_uv_option(&mut self);
     fn determine_pin_auth<D: FidoDevice>(&mut self, dev: &mut D) -> Result<(), AuthenticatorError> {
         if !dev.supports_ctap2() {
-            self.set_pin_auth(None);
+            self.set_pin_auth(None, None);
             return Ok(());
         }
 
@@ -105,7 +105,7 @@ pub(crate) trait PinAuthCommand {
                 return Err(repackage_pin_errors(dev, e));
             }
         };
-        self.set_pin_auth(pin_auth);
+        self.set_pin_auth(pin_auth, Some(1)); // TODO(MS): Currently, we only support version 1
         Ok(())
     }
 }

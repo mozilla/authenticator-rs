@@ -5,7 +5,7 @@ use crate::crypto::{
 use crate::transport::errors::HIDError;
 use crate::u2ftypes::U2FDevice;
 use serde::{
-    de::{Error as SerdeError, MapAccess, Visitor},
+    de::{Error as SerdeError, IgnoredAny, MapAccess, Visitor},
     ser::SerializeMap,
     Deserialize, Deserializer, Serialize, Serializer,
 };
@@ -117,7 +117,6 @@ impl Serialize for ClientPIN {
             map.serialize_entry(&6, pin_hash_enc)?;
         }
         if let Some(ref permissions) = self.permissions {
-            // TODO(MS): Should test that permissions are not 0
             map.serialize_entry(&9, permissions)?;
         }
         if let Some(ref rp_id) = self.rp_id {
@@ -168,37 +167,41 @@ impl<'de> Deserialize<'de> for ClientPinResponse {
                 let mut uv_retries = None;
                 while let Some(key) = map.next_key()? {
                     match key {
-                        1 => {
+                        0x01 => {
                             if key_agreement.is_some() {
                                 return Err(SerdeError::duplicate_field("key_agreement"));
                             }
                             key_agreement = map.next_value()?;
                         }
-                        2 => {
+                        0x02 => {
                             if pin_token.is_some() {
                                 return Err(SerdeError::duplicate_field("pin_token"));
                             }
                             pin_token = map.next_value()?;
                         }
-                        3 => {
+                        0x03 => {
                             if pin_retries.is_some() {
                                 return Err(SerdeError::duplicate_field("pin_retries"));
                             }
                             pin_retries = Some(map.next_value()?);
                         }
-                        4 => {
+                        0x04 => {
                             if power_cycle_state.is_some() {
                                 return Err(SerdeError::duplicate_field("power_cycle_state"));
                             }
                             power_cycle_state = Some(map.next_value()?);
                         }
-                        5 => {
+                        0x05 => {
                             if uv_retries.is_some() {
                                 return Err(SerdeError::duplicate_field("uv_retries"));
                             }
                             uv_retries = Some(map.next_value()?);
                         }
-                        k => return Err(M::Error::custom(format!("unexpected key: {:?}", k))),
+                        k => {
+                            warn!("ClientPinResponse: unexpected key: {:?}", k);
+                            let _ = map.next_value::<IgnoredAny>()?;
+                            continue;
+                        }
                     }
                 }
                 Ok(ClientPinResponse {
@@ -338,7 +341,7 @@ impl<'sc, 'pin> GetPinUvAuthTokenUsingPinWithPermissions<'sc, 'pin> {
         permissions: PinUvAuthTokenPermission,
         rp_id: Option<String>,
     ) -> Result<Self, CommandError> {
-        // TODO(MS)!
+        // TODO(MS): Actually handle protocol 2!
         if info.pin_protocols.contains(&1) {
             Ok(GetPinUvAuthTokenUsingPinWithPermissions {
                 pin_protocol: 1,
