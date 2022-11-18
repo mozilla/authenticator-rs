@@ -120,8 +120,8 @@ pub struct MakeCredentials {
     pub(crate) options: MakeCredentialsOptions,
     pub(crate) pin: Option<Pin>,
     pub(crate) pin_auth: Option<PinAuth>,
-    pub(crate) pin_auth_protocol: Option<u8>,
-    pub(crate) enterprise_attestation: Option<u32>,
+    pub(crate) pin_auth_protocol: Option<u64>,
+    pub(crate) enterprise_attestation: Option<u64>,
 }
 
 impl MakeCredentials {
@@ -165,8 +165,9 @@ impl PinAuthCommand for MakeCredentials {
         &self.pin_auth
     }
 
-    fn set_pin_auth(&mut self, pin_auth: Option<PinAuth>) {
+    fn set_pin_auth(&mut self, pin_auth: Option<PinAuth>, pin_auth_protocol: Option<u64>) {
         self.pin_auth = pin_auth;
+        self.pin_auth_protocol = pin_auth_protocol;
     }
 
     fn client_data_hash(&self) -> ClientDataHash {
@@ -197,7 +198,10 @@ impl Serialize for MakeCredentials {
             map_len += 1;
         }
         if self.pin_auth.is_some() {
-            map_len += 2; // pin_auth_protocol is part of this
+            map_len += 1;
+        }
+        if self.pin_auth_protocol.is_some() {
+            map_len += 1;
         }
         if self.enterprise_attestation.is_some() {
             map_len += 1;
@@ -229,7 +233,9 @@ impl Serialize for MakeCredentials {
         }
         if let Some(pin_auth) = &self.pin_auth {
             map.serialize_entry(&0x08, &pin_auth)?;
-            map.serialize_entry(&0x09, &self.pin_auth_protocol.unwrap_or(1))?; // version
+        }
+        if let Some(pin_auth_protocol) = &self.pin_auth_protocol {
+            map.serialize_entry(&0x09, &pin_auth_protocol)?;
         }
         if let Some(enterprise_attestation) = self.enterprise_attestation {
             map.serialize_entry(&0x0a, &enterprise_attestation)?;

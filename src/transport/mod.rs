@@ -194,7 +194,7 @@ pub trait FidoDevice: HIDDevice {
             // Using a zero-length pinAuth will trigger the device to blink
             // For CTAP1, this gets ignored anyways and we do a 'normal' register
             // command, which also just blinks.
-            msg.set_pin_auth(Some(PinAuth::empty_pin_auth()));
+            msg.set_pin_auth(Some(PinAuth::empty_pin_auth()), None);
             info!("Trying to blink: {:?}", &msg);
             // We don't care about the Ok-value, just if it is Ok or not
             resp = self.send_msg(&msg).map(|_| ());
