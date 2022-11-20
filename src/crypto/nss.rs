@@ -3,11 +3,14 @@ use nss_gk_api::p11::{
     PK11Origin, PK11_CreateContextBySymKey, PK11_Decrypt, PK11_DigestFinal, PK11_DigestOp,
     PK11_Encrypt, PK11_GenerateKeyPairWithOpFlags, PK11_HashBuf, PK11_ImportSymKey,
     PK11_PubDeriveWithKDF, PrivateKey, PublicKey, SECKEY_DecodeDERSubjectPublicKeyInfo,
-    SECKEY_ExtractPublicKey, SECOidTag, Slot, SubjectPublicKeyInfo, AES_BLOCK_SIZE, CKA_DERIVE,
-    CKA_ENCRYPT, CKA_SIGN, CKD_NULL, CKF_DERIVE, CKM_AES_CBC, CKM_ECDH1_DERIVE,
-    CKM_EC_KEY_PAIR_GEN, CKM_SHA256_HMAC, CKM_SHA512_HMAC, PK11_ATTR_SESSION, SHA256_LENGTH,
+    SECKEY_ExtractPublicKey, SECOidTag, Slot, SubjectPublicKeyInfo, AES_BLOCK_SIZE,
+    PK11_ATTR_SESSION, SHA256_LENGTH,
 };
 use nss_gk_api::{Error as NSSError, IntoResult, SECItem, SECItemBorrowed, PR_FALSE};
+use pkcs11_bindings::{
+    CKA_DERIVE, CKA_ENCRYPT, CKA_SIGN, CKD_NULL, CKF_DERIVE, CKM_AES_CBC, CKM_ECDH1_DERIVE,
+    CKM_EC_KEY_PAIR_GEN, CKM_SHA256_HMAC, CKM_SHA512_HMAC,
+};
 use serde::Serialize;
 use serde_bytes::ByteBuf;
 use std::convert::{TryFrom, TryInto};
@@ -279,7 +282,7 @@ fn encapsulate_helper(peer_public: PublicKey, client_private: PrivateKey) -> Res
         .into_result()?
     };
     let ecdh_x_coord_bytes = ecdh_x_coord.as_bytes()?;
-    let mut shared_secret = [0u8; SHA256_LENGTH as usize];
+    let mut shared_secret = [0u8; SHA256_LENGTH];
     unsafe {
         PK11_HashBuf(
             SECOidTag::SEC_OID_SHA256,
@@ -303,7 +306,7 @@ pub(crate) fn encrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
     }
 
     // The input must be a multiple of the AES block size, 16
-    if data.len() % (AES_BLOCK_SIZE as usize) != 0 {
+    if data.len() % AES_BLOCK_SIZE != 0 {
         return Err(BackendError::NSSError(
             "Input to encrypt is too long".to_string(),
         ));
@@ -324,7 +327,7 @@ pub(crate) fn encrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
         .into_result()?
     };
 
-    let iv = [0u8; AES_BLOCK_SIZE as usize];
+    let iv = [0u8; AES_BLOCK_SIZE];
     let mut params = SECItemBorrowed::wrap(&iv);
     let params_ptr: *mut SECItem = params.as_mut();
     let mut out_len: c_uint = 0;
@@ -360,7 +363,7 @@ pub(crate) fn decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
     }
 
     // The input must be a multiple of the AES block size, 16
-    if data.len() % (AES_BLOCK_SIZE as usize) != 0 {
+    if data.len() % AES_BLOCK_SIZE != 0 {
         return Err(BackendError::NSSError(
             "Invalid input to decrypt".to_string(),
         ));
@@ -379,7 +382,7 @@ pub(crate) fn decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
         .into_result()?
     };
 
-    let iv = [0u8; AES_BLOCK_SIZE as usize];
+    let iv = [0u8; AES_BLOCK_SIZE];
     let mut params = SECItemBorrowed::wrap(&iv);
     let params_ptr: *mut SECItem = params.as_mut();
     let mut out_len: c_uint = 0;
