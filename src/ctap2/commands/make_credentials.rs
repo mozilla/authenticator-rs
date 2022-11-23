@@ -4,8 +4,7 @@ use super::{
 };
 use crate::consts::{PARAMETER_SIZE, U2F_REGISTER, U2F_REQUEST_USER_PRESENCE};
 use crate::crypto::{
-    parse_u2f_der_certificate, serialize_key, COSEAlgorithm, COSEEC2Key, COSEKey, COSEKeyType,
-    ECDSACurve,
+    parse_u2f_der_certificate, COSEAlgorithm, COSEEC2Key, COSEKey, COSEKeyType, Curve,
 };
 use crate::ctap2::attestation::{
     AAGuid, AttestationObject, AttestationStatement, AttestationStatementFidoU2F,
@@ -343,16 +342,13 @@ impl RequestCtap1 for MakeCredentials {
                 .map_err(|e| HIDError::Command(CommandError::Crypto(e)))
                 .map_err(Retryable::Error)?;
 
-            let (x, y) = serialize_key(ECDSACurve::SECP256R1, public_key)
-                .map_err(|e| HIDError::Command(CommandError::Crypto(e.into())))
-                .map_err(Retryable::Error)?;
+            let credential_ec2_key =
+                COSEEC2Key::from_sec1_uncompressed(Curve::SECP256R1, public_key)
+                    .map_err(|e| HIDError::Command(CommandError::from(e)))
+                    .map_err(Retryable::Error)?;
             let credential_public_key = COSEKey {
                 alg: COSEAlgorithm::ES256,
-                key: COSEKeyType::EC2(COSEEC2Key {
-                    curve: ECDSACurve::SECP256R1,
-                    x: x.to_vec(),
-                    y: y.to_vec(),
-                }),
+                key: COSEKeyType::EC2(credential_ec2_key),
             };
             let auth_data = AuthenticatorData {
                 rp_id_hash: self.rp.hash(),
@@ -469,7 +465,7 @@ pub(crate) fn dummy_make_credentials_cmd() -> Result<MakeCredentials, HIDError> 
 #[cfg(test)]
 pub mod test {
     use super::{MakeCredentials, MakeCredentialsOptions, MakeCredentialsResult};
-    use crate::crypto::{COSEAlgorithm, COSEEC2Key, COSEKey, COSEKeyType, ECDSACurve};
+    use crate::crypto::{COSEAlgorithm, COSEEC2Key, COSEKey, COSEKeyType, Curve};
     use crate::ctap2::attestation::{
         AAGuid, AttestationCertificate, AttestationObject, AttestationStatement,
         AttestationStatementFidoU2F, AttestationStatementPacked, AttestedCredentialData,
@@ -509,7 +505,7 @@ pub mod test {
                     credential_public_key: COSEKey {
                         alg: COSEAlgorithm::ES256,
                         key: COSEKeyType::EC2(COSEEC2Key {
-                            curve: ECDSACurve::SECP256R1,
+                            curve: Curve::SECP256R1,
                             x: vec![
                                 0xA5, 0xFD, 0x5C, 0xE1, 0xB1, 0xC4, 0x58, 0xC5, 0x30, 0xA5, 0x4F,
                                 0xA6, 0x1B, 0x31, 0xBF, 0x6B, 0x04, 0xBE, 0x8B, 0x97, 0xAF, 0xDE,
@@ -720,7 +716,7 @@ pub mod test {
                     credential_public_key: COSEKey {
                         alg: COSEAlgorithm::ES256,
                         key: COSEKeyType::EC2(COSEEC2Key {
-                            curve: ECDSACurve::SECP256R1,
+                            curve: Curve::SECP256R1,
                             x: vec![
                                 0xE8, 0x76, 0x25, 0x89, 0x6E, 0xE4, 0xE4, 0x6D, 0xC0, 0x32, 0x76,
                                 0x6E, 0x80, 0x87, 0x96, 0x2F, 0x36, 0xDF, 0x9D, 0xFE, 0x8B, 0x56,

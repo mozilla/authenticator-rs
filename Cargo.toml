@@ -22,7 +22,6 @@ webdriver = ["bytes", "warp", "tokio"]
 #       Selecting more than one will result in a compilation error!
 # Default: NSS
 crypto_dummy = []
-crypto_ring = ["ring"]
 crypto_openssl = ["openssl", "openssl-sys"]
 crypto_nss = ["nss-gk-api", "pkcs11-bindings"]
 gecko = ["nss-gk-api/gecko"]
@@ -70,7 +69,6 @@ nom = { version = "^7.1.1", features = ["std"], default-features = false}
 sha2 = "^0.10.0"
 cfg-if = "1.0"
 # Crypto backends
-ring = { version = "0.16", optional = true }
 openssl-sys = { version = "0.9", optional = true}
 openssl = { version = "0.10", optional = true}
 nss-gk-api = { version = "0.2.1", optional = true }

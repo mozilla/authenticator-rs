@@ -14,28 +14,135 @@ use serde_cbor::Value;
 use std::convert::TryFrom;
 use std::fmt;
 
-cfg_if::cfg_if! {
-    if #[cfg(feature = "crypto_ring")] {
-        #[path = "ring.rs"]
-        pub mod imp;
-    } else if #[cfg(feature = "crypto_openssl")] {
-        #[path = "openssl.rs"]
-        pub mod imp;
-    } else if #[cfg(feature = "crypto_dummy")] {
-        #[path = "dummy.rs"]
-        pub mod imp;
-    } else {
-        #[path = "nss.rs"]
-        pub mod imp;
+#[cfg(feature = "crypto_nss")]
+mod nss;
+#[cfg(feature = "crypto_nss")]
+use nss as backend;
+
+#[cfg(feature = "crypto_openssl")]
+mod openssl;
+#[cfg(feature = "crypto_openssl")]
+use self::openssl as backend;
+
+#[cfg(feature = "crypto_dummy")]
+mod dummy;
+#[cfg(feature = "crypto_dummy")]
+use dummy as backend;
+
+// Object identifiers in DER tag-length-value form
+const DER_OID_EC_PUBLIC_KEY_BYTES: &[u8] = &[
+    0x06, 0x07,
+    /* {iso(1) member-body(2) us(840) ansi-x962(10045) keyType(2) ecPublicKey(1)} */
+    0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01,
+];
+const DER_OID_P256_BYTES: &[u8] = &[
+    0x06, 0x08,
+    /* {iso(1) member-body(2) us(840) ansi-x962(10045) curves(3) prime(1) prime256v1(7)} */
+    0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07,
+];
+
+/// CTAP 2.1, Section 6.5.4. PIN/UV Auth Protocol Abstract Definition
+pub trait PinUvAuthProtocol {
+    const PROTOCOL_ID: u64;
+    fn initialize();
+    fn encapsulate(peer_cose_key: &COSEKey) -> Result<ECDHSecret, CryptoError>;
+    fn encrypt(key: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, CryptoError>;
+    fn decrypt(key: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError>;
+    fn authenticate(key: &[u8], message: &[u8]) -> Result<Vec<u8>, CryptoError>;
+}
+
+/// CTAP 2.1, Section 6.5.6.
+pub struct PinUvAuth1;
+
+impl PinUvAuthProtocol for PinUvAuth1 {
+    const PROTOCOL_ID: u64 = 1;
+
+    fn initialize() {}
+
+    fn encapsulate(peer_cose_key: &COSEKey) -> Result<ECDHSecret, CryptoError> {
+        // [CTAP 2.1]
+        // encapsulate(peerCoseKey) → (coseKey, sharedSecret) | error
+        //      1) Let sharedSecret be the result of calling ecdh(peerCoseKey). Return any
+        //         resulting error.
+        //      2) Return (getPublicKey(), sharedSecret)
+        //
+        // ecdh(peerCoseKey) → sharedSecret | error
+        //         Parse peerCoseKey as specified for getPublicKey, below, and produce a P-256
+        //         point, Y. If unsuccessful, or if the resulting point is not on the curve, return
+        //         error.  Calculate xY, the shared point. (I.e. the scalar-multiplication of the
+        //         peer's point, Y, with the local private key agreement key.) Let Z be the
+        //         32-byte, big-endian encoding of the x-coordinate of the shared point.  Return
+        //         kdf(Z).
+        //
+        // kdf(Z) → sharedSecret
+        //         Return SHA-256(Z)
+
+        match peer_cose_key.alg {
+            // There is no COSEAlgorithm for ECDHE with the KDF used here. Section 6.5.6. of CTAP
+            // 2.1 says to use value -25 (= ECDH_ES_HKDF256) even though "this is not the algorithm
+            // actually used".
+            COSEAlgorithm::ECDH_ES_HKDF256 => (),
+            other => return Err(CryptoError::UnsupportedAlgorithm(other)),
+        }
+
+        let peer_cose_ec2_key = match peer_cose_key.key {
+            COSEKeyType::EC2(ref key) => key,
+            _ => return Err(CryptoError::UnsupportedKeyType),
+        };
+
+        let peer_spki = peer_cose_ec2_key.der_spki()?;
+
+        let (shared_point, client_public_sec1) = backend::ecdhe_p256_raw(&peer_spki)?;
+
+        let shared_secret = backend::sha256(&shared_point)?;
+
+        let client_cose_ec2_key =
+            COSEEC2Key::from_sec1_uncompressed(Curve::SECP256R1, &client_public_sec1)?;
+
+        let client_cose_key = COSEKey {
+            alg: COSEAlgorithm::ECDH_ES_HKDF256,
+            key: COSEKeyType::EC2(client_cose_ec2_key),
+        };
+
+        Ok(ECDHSecret {
+            remote: peer_cose_key.clone(),
+            my: client_cose_key,
+            shared_secret,
+        })
+    }
+
+    fn encrypt(key: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        // [CTAP 2.1]
+        // encrypt(key, demPlaintext) → ciphertext
+        //      Return the AES-256-CBC encryption of plaintext using an all-zero IV. (No padding is
+        //      performed as the size of plaintext is required to be a multiple of the AES block
+        //      length.)
+        backend::encrypt_aes_256_cbc_no_pad(key, None, plaintext)
+    }
+
+    fn decrypt(key: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        // [CTAP 2.1]
+        // decrypt(key, demCiphertext) → plaintext | error 
+        //      If the size of ciphertext is not a multiple of the AES block length, return error.
+        //      Otherwise return the AES-256-CBC decryption of ciphertext using an all-zero IV.
+        backend::decrypt_aes_256_cbc_no_pad(key, None, ciphertext)
+    }
+
+    fn authenticate(key: &[u8], message: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        // [CTAP 2.1]
+        // authenticate(key, message) → signature
+        //      Return the first 16 bytes of the result of computing HMAC-SHA-256 with the given
+        //      key and message.
+        let mut hmac = backend::hmac_sha256(key, message)?;
+        hmac.truncate(16);
+        Ok(hmac)
     }
 }
 
-pub(crate) use imp::{authenticate, decrypt, encapsulate, encrypt, serialize_key, BackendError};
-
-/// An ECDSACurve identifier. You probably will never need to alter
+/// A Curve identifier. You probably will never need to alter
 /// or use this value, as it is set inside the Credential for you.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ECDSACurve {
+pub enum Curve {
     // +---------+-------+----------+------------------------------------+
     // | Name    | Value | Key Type | Description                        |
     // +---------+-------+----------+------------------------------------+
@@ -63,17 +170,17 @@ pub enum ECDSACurve {
     Ed448 = 7,
 }
 
-impl TryFrom<u64> for ECDSACurve {
+impl TryFrom<u64> for Curve {
     type Error = CryptoError;
     fn try_from(i: u64) -> Result<Self, Self::Error> {
         match i {
-            1 => Ok(ECDSACurve::SECP256R1),
-            2 => Ok(ECDSACurve::SECP384R1),
-            3 => Ok(ECDSACurve::SECP521R1),
-            4 => Ok(ECDSACurve::X25519),
-            5 => Ok(ECDSACurve::X448),
-            6 => Ok(ECDSACurve::Ed25519),
-            7 => Ok(ECDSACurve::Ed448),
+            1 => Ok(Curve::SECP256R1),
+            2 => Ok(Curve::SECP384R1),
+            3 => Ok(Curve::SECP521R1),
+            4 => Ok(Curve::X25519),
+            5 => Ok(Curve::X448),
+            6 => Ok(Curve::Ed25519),
+            7 => Ok(Curve::Ed448),
             _ => Err(CryptoError::UnknownKeyType),
         }
     }
@@ -347,16 +454,71 @@ impl TryFrom<i64> for COSEAlgorithm {
         }
     }
 }
+
 /// A COSE Elliptic Curve Public Key. This is generally the provided credential
 /// that an authenticator registers, and is used to authenticate the user.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct COSEEC2Key {
     /// The curve that this key references.
-    pub curve: ECDSACurve,
+    pub curve: Curve,
     /// The key's public X coordinate.
     pub x: Vec<u8>,
     /// The key's public Y coordinate.
     pub y: Vec<u8>,
+}
+
+impl COSEEC2Key {
+    // The SEC 1 uncompressed point format is "0x04 || x coordinate || y coordinate".
+    // See Section 2.3.3 of "SEC 1: Elliptic Curve Cryptography" https://www.secg.org/sec1-v2.pdf.
+    pub fn from_sec1_uncompressed(curve: Curve, key: &[u8]) -> Result<Self, CryptoError> {
+        if !(curve == Curve::SECP256R1 && key.len() == 65) {
+            return Err(CryptoError::UnsupportedCurve(curve));
+        }
+        if key[0] != 0x04 {
+            return Err(CryptoError::MalformedInput);
+        }
+        let key = &key[1..];
+        let (x, y) = key.split_at(key.len() / 2);
+        Ok(COSEEC2Key {
+            curve,
+            x: x.to_vec(),
+            y: y.to_vec(),
+        })
+    }
+
+    fn der_spki(&self) -> Result<Vec<u8>, CryptoError> {
+        let (curve_oid, seq_len, alg_len, spk_len) = match self.curve {
+            Curve::SECP256R1 => (
+                DER_OID_P256_BYTES,
+                [0x59].as_slice(),
+                [0x13].as_slice(),
+                [0x42].as_slice(),
+            ),
+            x => return Err(CryptoError::UnsupportedCurve(x)),
+        };
+
+        // [RFC 5280]
+        let mut spki: Vec<u8> = vec![];
+        // SubjectPublicKeyInfo
+        spki.push(0x30);
+        spki.extend_from_slice(seq_len);
+        //      AlgorithmIdentifier
+        spki.push(0x30);
+        spki.extend_from_slice(alg_len);
+        //          ObjectIdentifier
+        spki.extend_from_slice(DER_OID_EC_PUBLIC_KEY_BYTES);
+        //          RFC 5480 ECParameters
+        spki.extend_from_slice(curve_oid);
+        //      BIT STRING encoding uncompressed SEC1 public point
+        spki.push(0x03);
+        spki.extend_from_slice(spk_len);
+        spki.push(0x0); // no trailing zeros
+        spki.push(0x04); // SEC 1 encoded uncompressed point
+        spki.extend_from_slice(&self.x);
+        spki.extend_from_slice(&self.y);
+
+        Ok(spki)
+    }
 }
 
 /// A Octet Key Pair (OKP).
@@ -365,7 +527,7 @@ pub struct COSEEC2Key {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct COSEOKPKey {
     /// The curve that this key references.
-    pub curve: ECDSACurve,
+    pub curve: Curve,
     /// The key's public X coordinate.
     pub x: Vec<u8>,
 }
@@ -475,7 +637,7 @@ impl<'de> Deserialize<'de> for COSEKey {
             where
                 M: MapAccess<'de>,
             {
-                let mut curve: Option<ECDSACurve> = None;
+                let mut curve: Option<Curve> = None;
                 let mut key_type: Option<COSEKeyTypeId> = None;
                 let mut alg: Option<COSEAlgorithm> = None;
                 let mut x: Option<Vec<u8>> = None;
@@ -509,8 +671,8 @@ impl<'de> Deserialize<'de> for COSEKey {
                                     return Err(SerdeError::duplicate_field("curve"));
                                 }
                                 let value: u64 = map.next_value()?;
-                                let val = ECDSACurve::try_from(value).map_err(|_| {
-                                    SerdeError::custom(format!("unsupported curve {value}"))
+                                let val = Curve::try_from(value).map_err(|_| {
+                                    SerdeError::custom(format!("unsupported curve {}", value))
                                 })?;
                                 curve = Some(val);
                                 // curve = Some(map.next_value()?);
@@ -624,10 +786,10 @@ impl Serialize for COSEKey {
 }
 
 /// Errors that can be returned from COSE functions.
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize)]
 pub enum CryptoError {
     // DecodingFailure,
-    // LibraryFailure,
+    LibraryFailure,
     MalformedInput,
     // MissingHeader,
     // UnexpectedHeaderValue,
@@ -641,13 +803,10 @@ pub enum CryptoError {
     UnknownSignatureScheme,
     UnknownAlgorithm,
     WrongSaltLength,
-    Backend(BackendError),
-}
-
-impl From<BackendError> for CryptoError {
-    fn from(e: BackendError) -> Self {
-        CryptoError::Backend(e)
-    }
+    UnsupportedAlgorithm(COSEAlgorithm),
+    UnsupportedCurve(Curve),
+    UnsupportedKeyType,
+    Backend(String),
 }
 
 impl From<CryptoError> for CommandError {
@@ -749,8 +908,8 @@ pub fn parse_u2f_der_certificate(data: &[u8]) -> Result<U2FRegisterAnswer, Crypt
 #[cfg(all(test, not(feature = "crypto_dummy")))]
 mod test {
     use super::{
-        authenticate, decrypt, encrypt, imp::parse_key, imp::test_encapsulate, serialize_key,
-        COSEAlgorithm, COSEKey, ECDSACurve,
+        backend::hmac_sha256, backend::test_ecdh_p256_raw, backend::sha256, COSEAlgorithm, COSEKey, Curve,
+        PinUvAuth1, PinUvAuthProtocol,
     };
     use crate::crypto::{COSEEC2Key, COSEKeyType};
     use crate::ctap2::commands::client_pin::Pin;
@@ -777,14 +936,10 @@ mod test {
             0xd4, 0xd3, 0x2c, 0x9a, 0xad, 0x6d, 0xfa, 0x8b, 0x27,
         ];
 
-        let (res_x, res_y) =
-            serialize_key(ECDSACurve::SECP256R1, &serialized_key).expect("Failed to serialize key");
-        assert_eq!(res_x, x);
-        assert_eq!(res_y, y);
-
-        let res_key = parse_key(ECDSACurve::SECP256R1, &x, &y).expect("Failed to parse key");
-
-        assert_eq!(res_key, serialized_key)
+        let ec2_key = COSEEC2Key::from_sec1_uncompressed(Curve::SECP256R1, &serialized_key)
+            .expect("Failed to decode SEC 1 key");
+        assert_eq!(ec2_key.x, x);
+        assert_eq!(ec2_key.y, y);
     }
 
     #[test]
@@ -794,7 +949,7 @@ mod test {
         let key: COSEKey = from_slice(&key_data).unwrap();
         assert_eq!(key.alg, COSEAlgorithm::ES256);
         if let COSEKeyType::EC2(ec2key) = &key.key {
-            assert_eq!(ec2key.curve, ECDSACurve::SECP256R1);
+            assert_eq!(ec2key.curve, Curve::SECP256R1);
             assert_eq!(
                 ec2key.x,
                 decode_hex("A5FD5CE1B1C458C530A54FA61B31BF6B04BE8B97AFDE54DD8CBB69275A8A1BE1")
@@ -830,50 +985,39 @@ mod test {
         let TOKEN = decode_hex("aff12c6dcfbf9df52f7a09211e8865cd");
         let PIN_HASH_ENC = decode_hex("afe8327ce416da8ee3d057589c2ce1a9");
 
-        // let peer_key = parse_key(ECDSACurve::SECP256R1, &DEV_PUB_X, &DEV_PUB_Y).unwrap();
-        let my_pub_key_data = parse_key(ECDSACurve::SECP256R1, &EC_PUB_X, &EC_PUB_Y).unwrap();
-
-        let peer_key = COSEEC2Key {
-            curve: ECDSACurve::SECP256R1,
+        let peer_ec2_key = COSEEC2Key {
+            curve: Curve::SECP256R1,
             x: DEV_PUB_X,
             y: DEV_PUB_Y,
         };
 
-        // let my_pub_key = COSEKey {
-        //     alg: COSEAlgorithm::ES256,
-        //     key: COSEKeyType::EC2(COSEEC2Key {
-        //         curve: ECDSACurve::SECP256R1,
-        //         x: EC_PUB_X,
-        //         y: EC_PUB_Y,
-        //     }),
-        // };
-        // We are using `test_encapsulate()` here, because we need a way to hand in the private key
+        // We are using `test_cose_ec2_p256_ecdh_sha256()` here, because we need a way to hand in the private key
         // which would be generated on the fly otherwise (ephemeral keys), to predict the outputs
-        let shared_secret =
-            test_encapsulate(&peer_key, COSEAlgorithm::ES256, &my_pub_key_data, &EC_PRIV).unwrap();
-        assert_eq!(shared_secret.shared_secret, SHARED);
+        let peer_spki = peer_ec2_key.der_spki().unwrap();
+        let shared_point = test_ecdh_p256_raw(&peer_spki, &EC_PUB_X, &EC_PUB_Y, &EC_PRIV).unwrap();
+        let shared_secret = sha256(&shared_point).unwrap();
+        assert_eq!(shared_secret, SHARED);
 
         let token_enc = encrypt(shared_secret.shared_secret(), &TOKEN).unwrap();
         assert_eq!(token_enc, TOKEN_ENC);
 
-        let token = decrypt(shared_secret.shared_secret(), &TOKEN_ENC).unwrap();
+        let token = PinUvAuth1::decrypt(&shared_secret, &TOKEN_ENC).unwrap();
         assert_eq!(token, TOKEN);
 
         let pin = Pin::new("1234");
         let pin_hash_enc =
-            encrypt(shared_secret.shared_secret(), pin.for_pin_token().as_ref()).unwrap();
+            PinUvAuth1::encrypt(&shared_secret, pin.for_pin_token().as_ref()).unwrap();
         assert_eq!(pin_hash_enc, PIN_HASH_ENC);
     }
 
     #[test]
-    fn test_authenticate() {
+    fn test_hmac_sha256() {
         let key = "key";
         let message = "The quick brown fox jumps over the lazy dog";
         let expected =
             decode_hex("f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8");
 
-        let result =
-            authenticate(key.as_bytes(), message.as_bytes()).expect("Failed to authenticate");
+        let result = hmac_sha256(key.as_bytes(), message.as_bytes()).expect("HMAC-SHA256 failed");
         assert_eq!(result, expected);
 
         let key = "The quick brown fox jumps over the lazy dogThe quick brown fox jumps over the lazy dog";
@@ -881,8 +1025,7 @@ mod test {
         let expected =
             decode_hex("5597b93a2843078cbb0c920ae41dfe20f1685e10c67e423c11ab91adfc319d12");
 
-        let result =
-            authenticate(key.as_bytes(), message.as_bytes()).expect("Failed to authenticate");
+        let result = hmac_sha256(key.as_bytes(), message.as_bytes()).expect("HMAC-SHA256 failed");
         assert_eq!(result, expected);
     }
 
@@ -916,10 +1059,12 @@ mod test {
             .cloned()
             .collect();
 
-        let new_pin_enc = encrypt(&shared_secret, &input).expect("Failed to encrypt pin");
+        let new_pin_enc =
+            PinUvAuth1::encrypt(&shared_secret, &input).expect("Failed to encrypt pin");
         assert_eq!(new_pin_enc, expected_new_pin_enc);
 
-        let pin_auth = authenticate(&shared_secret, &new_pin_enc).expect("Failed to authenticate");
+        let pin_auth =
+            PinUvAuth1::authenticate(&shared_secret, &new_pin_enc).expect("HMAC-SHA256 failed");
         assert_eq!(pin_auth[0..16], expected_pin_auth);
     }
 }

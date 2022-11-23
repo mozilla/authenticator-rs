@@ -1,7 +1,5 @@
 use super::{get_info::AuthenticatorInfo, Command, CommandError, RequestCtap2, StatusCode};
-use crate::crypto::{
-    authenticate, decrypt, encapsulate, encrypt, BackendError, COSEKey, CryptoError, ECDHSecret,
-};
+use crate::crypto::{COSEKey, CryptoError, ECDHSecret, PinUvAuth1, PinUvAuthProtocol};
 use crate::transport::errors::HIDError;
 use crate::u2ftypes::U2FDevice;
 use serde::{
@@ -290,8 +288,7 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinToken<'sc, 'pin> {
     fn as_client_pin(&self) -> Result<ClientPIN, CommandError> {
         let input = self.pin.for_pin_token();
         trace!("pin_hash = {:#04X?}", &input.as_ref());
-        let pin_hash_enc = encrypt(self.shared_secret.shared_secret(), input.as_ref())
-            .map_err(CryptoError::Backend)?;
+        let pin_hash_enc = PinUvAuth1::encrypt(self.shared_secret.shared_secret(), input.as_ref())?;
         trace!("pin_hash_enc = {:#04X?}", &pin_hash_enc);
 
         Ok(ClientPIN {
@@ -311,11 +308,10 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinToken<'sc, 'pin> {
             from_slice(input).map_err(CommandError::Deserializing)?;
         match get_pin_response.pin_token {
             Some(encrypted_pin_token) => {
-                let pin_token = decrypt(
+                let pin_token = PinUvAuth1::decrypt(
                     self.shared_secret.shared_secret(),
                     encrypted_pin_token.as_ref(),
-                )
-                .map_err(CryptoError::Backend)?;
+                )?;
                 let pin_token = PinToken(pin_token);
                 Ok(pin_token)
             }
@@ -361,8 +357,7 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinUvAuthTokenUsingPinWithPermissions
 
     fn as_client_pin(&self) -> Result<ClientPIN, CommandError> {
         let input = self.pin.for_pin_token();
-        let pin_hash_enc = encrypt(self.shared_secret.shared_secret(), input.as_ref())
-            .map_err(CryptoError::Backend)?;
+        let pin_hash_enc = PinUvAuth1::encrypt(self.shared_secret.shared_secret(), input.as_ref())?;
 
         Ok(ClientPIN {
             pin_protocol: Some(self.pin_protocol),
@@ -383,11 +378,10 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinUvAuthTokenUsingPinWithPermissions
             from_slice(input).map_err(CommandError::Deserializing)?;
         match get_pin_response.pin_token {
             Some(encrypted_pin_token) => {
-                let pin_token = decrypt(
+                let pin_token = PinUvAuth1::decrypt(
                     self.shared_secret.shared_secret(),
                     encrypted_pin_token.as_ref(),
-                )
-                .map_err(CryptoError::Backend)?;
+                )?;
                 let pin_token = PinToken(pin_token);
                 Ok(pin_token)
             }
@@ -475,7 +469,7 @@ impl<'sc, 'pin> ClientPINSubCommand for SetNewPin<'sc, 'pin> {
 
         let shared_secret = self.shared_secret.shared_secret();
         // AES256-CBC(sharedSecret, IV=0, newPin)
-        let new_pin_enc = encrypt(shared_secret, input.as_ref()).map_err(CryptoError::Backend)?;
+        let new_pin_enc = PinUvAuth1::encrypt(shared_secret, input.as_ref())?;
 
         // LEFT(HMAC-SHA-265(sharedSecret, newPinEnc), 16)
         let pin_auth = PinToken(shared_secret.to_vec())
@@ -553,12 +547,11 @@ impl<'sc, 'pin> ClientPINSubCommand for ChangeExistingPin<'sc, 'pin> {
 
         let shared_secret = self.shared_secret.shared_secret();
         // AES256-CBC(sharedSecret, IV=0, newPin)
-        let new_pin_enc = encrypt(shared_secret, input.as_ref()).map_err(CryptoError::Backend)?;
+        let new_pin_enc = PinUvAuth1::encrypt(shared_secret, input.as_ref())?;
 
         // AES256-CBC(sharedSecret, IV=0, LEFT(SHA-256(oldPin), 16))
         let input = self.current_pin.for_pin_token();
-        let pin_hash_enc = encrypt(self.shared_secret.shared_secret(), input.as_ref())
-            .map_err(CryptoError::Backend)?;
+        let pin_hash_enc = PinUvAuth1::encrypt(self.shared_secret.shared_secret(), input.as_ref())?;
 
         // LEFT(HMAC-SHA-265(sharedSecret, newPinEnc), 16)
         let pin_auth = PinToken(shared_secret.to_vec())
@@ -645,7 +638,7 @@ pub struct KeyAgreement(COSEKey);
 
 impl KeyAgreement {
     pub fn shared_secret(&self) -> Result<ECDHSecret, CommandError> {
-        encapsulate(&self.0).map_err(|e| CommandError::Crypto(CryptoError::Backend(e)))
+        Ok(PinUvAuth1::encapsulate(&self.0)?)
     }
 }
 
@@ -663,12 +656,7 @@ pub struct PinToken(Vec<u8>);
 
 impl PinToken {
     pub fn auth(&self, payload: &[u8]) -> Result<PinAuth, CryptoError> {
-        let hmac = authenticate(self.as_ref(), payload)?;
-
-        let mut out = [0u8; 16];
-        out.copy_from_slice(&hmac[0..16]);
-
-        Ok(PinAuth(out.to_vec()))
+        Ok(PinAuth(PinUvAuth1::authenticate(self.as_ref(), payload)?))
     }
 }
 
@@ -743,7 +731,7 @@ pub enum PinError {
     PinAuthBlocked,
     PinBlocked,
     PinNotSet,
-    Backend(BackendError),
+    Crypto(CryptoError),
 }
 
 impl fmt::Display for PinError {
@@ -769,15 +757,15 @@ impl fmt::Display for PinError {
                 "PinError: No retries left. Pin blocked. Device needs reset."
             ),
             PinError::PinNotSet => write!(f, "PinError: Pin needed but not set on device."),
-            PinError::Backend(ref e) => write!(f, "PinError: Crypto backend error: {e:?}"),
+            PinError::Crypto(ref e) => write!(f, "PinError: Crypto backend error: {:?}", e),
         }
     }
 }
 
 impl StdErrorT for PinError {}
 
-impl From<BackendError> for PinError {
-    fn from(e: BackendError) -> Self {
-        PinError::Backend(e)
+impl From<CryptoError> for PinError {
+    fn from(e: CryptoError) -> Self {
+        PinError::Crypto(e)
     }
 }

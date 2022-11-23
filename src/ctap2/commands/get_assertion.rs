@@ -5,7 +5,7 @@ use super::{
 use crate::consts::{
     PARAMETER_SIZE, U2F_AUTHENTICATE, U2F_CHECK_IS_REGISTERED, U2F_REQUEST_USER_PRESENCE,
 };
-use crate::crypto::{authenticate, encrypt, COSEKey, CryptoError, ECDHSecret};
+use crate::crypto::{COSEKey, CryptoError, ECDHSecret, PinUvAuth1, PinUvAuthProtocol};
 use crate::ctap2::attestation::{AuthenticatorData, AuthenticatorDataFlags};
 use crate::ctap2::client_data::{ClientDataHash, CollectedClientData, CollectedClientDataWrapper};
 use crate::ctap2::commands::client_pin::{Pin, PinAuth};
@@ -28,7 +28,6 @@ use serde::{
 };
 use serde_bytes::ByteBuf;
 use serde_cbor::{de::from_slice, ser, Value};
-use std::convert::TryInto;
 use std::fmt;
 use std::io;
 
@@ -76,7 +75,7 @@ impl UserVerification for GetAssertionOptions {
 pub struct CalculatedHmacSecretExtension {
     pub public_key: COSEKey,
     pub salt_enc: Vec<u8>,
-    pub salt_auth: [u8; 16],
+    pub salt_auth: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -105,23 +104,11 @@ impl HmacSecretExtension {
                     return Err(CryptoError::WrongSaltLength.into());
                 }
                 let salts = [&self.salt1[..32], &salt2[..32]].concat(); // salt1 || salt2
-                encrypt(secret.shared_secret(), &salts)
+                PinUvAuth1::encrypt(secret.shared_secret(), &salts)
             }
-            None => encrypt(secret.shared_secret(), &self.salt1[..32]),
-        }
-        .map_err(CryptoError::Backend)?;
-        let salt_auth_full =
-            authenticate(secret.shared_secret(), &salt_enc).map_err(CryptoError::Backend)?;
-        let salt_auth = salt_auth_full
-            .windows(16)
-            .next()
-            .ok_or_else(|| AuthenticatorError::InternalError(String::from("salt_auth too short")))?
-            .try_into()
-            .map_err(|_| {
-                AuthenticatorError::InternalError(String::from(
-                    "salt_auth conversion failed. Should never happen.",
-                ))
-            })?;
+            None => PinUvAuth1::encrypt(secret.shared_secret(), &self.salt1[..32]),
+        }?;
+        let salt_auth = PinUvAuth1::authenticate(secret.shared_secret(), &salt_enc)?;
         let public_key = secret.my_public_key().clone();
         self.calculated_hmac = Some(CalculatedHmacSecretExtension {
             public_key,
