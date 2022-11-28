@@ -33,3 +33,7 @@ pub fn hmac_sha256(_key: &[u8], _data: &[u8]) -> Result<Vec<u8>> {
 pub fn sha256(_data: &[u8]) -> Result<Vec<u8>> {
     unimplemented!()
 }
+
+pub fn random_bytes(count: usize) -> Result<Vec<u8>> {
+    unimplemented!()
+}

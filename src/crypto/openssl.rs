@@ -6,8 +6,10 @@ use openssl::error::ErrorStack;
 use openssl::hash::{hash, MessageDigest};
 use openssl::nid::Nid;
 use openssl::pkey::{PKey, Private, Public};
+use openssl::rand::rand_bytes;
 use openssl::sign::Signer;
 use openssl::symm::{Cipher, Crypter, Mode};
+use std::os::raw::c_int;
 
 #[cfg(test)]
 use openssl::ec::EcPoint;
@@ -119,6 +121,15 @@ pub fn hmac_sha256(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
 pub fn sha256(data: &[u8]) -> Result<Vec<u8>> {
     let digest = hash(MessageDigest::sha256(), data)?;
     Ok(digest.as_ref().to_vec())
+}
+
+pub fn random_bytes(count: usize) -> Result<Vec<u8>> {
+    if count > c_int::MAX as usize {
+        return Err(CryptoError::LibraryFailure);
+    }
+    let mut out = vec![0u8; count];
+    rand_bytes(&mut out)?;
+    Ok(out)
 }
 
 #[cfg(test)]

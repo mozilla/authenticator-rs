@@ -1,10 +1,10 @@
 use super::{CryptoError, DER_OID_P256_BYTES};
 use nss_gk_api::p11::{
     PK11Origin, PK11_CreateContextBySymKey, PK11_Decrypt, PK11_DigestFinal, PK11_DigestOp,
-    PK11_Encrypt, PK11_GenerateKeyPairWithOpFlags, PK11_HashBuf, PK11_ImportSymKey,
-    PK11_PubDeriveWithKDF, PrivateKey, PublicKey, SECKEY_DecodeDERSubjectPublicKeyInfo,
-    SECKEY_ExtractPublicKey, SECOidTag, Slot, SubjectPublicKeyInfo, AES_BLOCK_SIZE,
-    PK11_ATTR_SESSION, SHA256_LENGTH,
+    PK11_Encrypt, PK11_GenerateKeyPairWithOpFlags, PK11_GenerateRandom, PK11_HashBuf,
+    PK11_ImportSymKey, PK11_PubDeriveWithKDF, PrivateKey, PublicKey,
+    SECKEY_DecodeDERSubjectPublicKeyInfo, SECKEY_ExtractPublicKey, SECOidTag, Slot,
+    SubjectPublicKeyInfo, AES_BLOCK_SIZE, PK11_ATTR_SESSION, SHA256_LENGTH,
 };
 use nss_gk_api::{IntoResult, SECItem, SECItemBorrowed, PR_FALSE};
 use pkcs11_bindings::{
@@ -12,7 +12,7 @@ use pkcs11_bindings::{
     CKM_EC_KEY_PAIR_GEN, CKM_SHA256_HMAC, CKM_SHA512_HMAC,
 };
 use std::convert::TryFrom;
-use std::os::raw::c_uint;
+use std::os::raw::{c_int, c_uint};
 use std::ptr;
 
 #[cfg(test)]
@@ -296,6 +296,17 @@ pub fn sha256(data: &[u8]) -> Result<Vec<u8>> {
         .into_result()?
     };
     Ok(digest)
+}
+
+pub fn random_bytes(count: usize) -> Result<Vec<u8>> {
+    let count_cint: c_int = match c_int::try_from(count) {
+        Ok(c) => c,
+        _ => return Err(CryptoError::LibraryFailure),
+    };
+
+    let mut out = vec![0u8; count];
+    unsafe { PK11_GenerateRandom(out.as_mut_ptr(), count_cint).into_result()? };
+    Ok(out)
 }
 
 #[cfg(test)]

@@ -29,6 +29,11 @@ mod dummy;
 #[cfg(feature = "crypto_dummy")]
 use dummy as backend;
 
+use backend::{
+    decrypt_aes_256_cbc_no_pad, ecdhe_p256_raw, encrypt_aes_256_cbc_no_pad, hmac_sha256,
+    random_bytes, sha256,
+};
+
 // Object identifiers in DER tag-length-value form
 const DER_OID_EC_PUBLIC_KEY_BYTES: &[u8] = &[
     0x06, 0x07,
@@ -54,6 +59,14 @@ pub trait PinUvAuthProtocol {
 /// CTAP 2.1, Section 6.5.6.
 pub struct PinUvAuth1;
 
+impl PinUvAuth1 {
+    fn kdf(z: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        // kdf(Z) → sharedSecret
+        //         Return SHA-256(Z)
+        sha256(z)
+    }
+}
+
 impl PinUvAuthProtocol for PinUvAuth1 {
     const PROTOCOL_ID: u64 = 1;
 
@@ -73,9 +86,6 @@ impl PinUvAuthProtocol for PinUvAuth1 {
         //         peer's point, Y, with the local private key agreement key.) Let Z be the
         //         32-byte, big-endian encoding of the x-coordinate of the shared point.  Return
         //         kdf(Z).
-        //
-        // kdf(Z) → sharedSecret
-        //         Return SHA-256(Z)
 
         match peer_cose_key.alg {
             // There is no COSEAlgorithm for ECDHE with the KDF used here. Section 6.5.6. of CTAP
@@ -92,9 +102,8 @@ impl PinUvAuthProtocol for PinUvAuth1 {
 
         let peer_spki = peer_cose_ec2_key.der_spki()?;
 
-        let (shared_point, client_public_sec1) = backend::ecdhe_p256_raw(&peer_spki)?;
-
-        let shared_secret = backend::sha256(&shared_point)?;
+        let (shared_point, client_public_sec1) = ecdhe_p256_raw(&peer_spki)?;
+        let shared_secret = PinUvAuth1::kdf(&shared_point)?;
 
         let client_cose_ec2_key =
             COSEEC2Key::from_sec1_uncompressed(Curve::SECP256R1, &client_public_sec1)?;
@@ -117,15 +126,15 @@ impl PinUvAuthProtocol for PinUvAuth1 {
         //      Return the AES-256-CBC encryption of plaintext using an all-zero IV. (No padding is
         //      performed as the size of plaintext is required to be a multiple of the AES block
         //      length.)
-        backend::encrypt_aes_256_cbc_no_pad(key, None, plaintext)
+        encrypt_aes_256_cbc_no_pad(key, None, plaintext)
     }
 
     fn decrypt(key: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError> {
         // [CTAP 2.1]
-        // decrypt(key, demCiphertext) → plaintext | error 
+        // decrypt(key, demCiphertext) → plaintext | error
         //      If the size of ciphertext is not a multiple of the AES block length, return error.
         //      Otherwise return the AES-256-CBC decryption of ciphertext using an all-zero IV.
-        backend::decrypt_aes_256_cbc_no_pad(key, None, ciphertext)
+        decrypt_aes_256_cbc_no_pad(key, None, ciphertext)
     }
 
     fn authenticate(key: &[u8], message: &[u8]) -> Result<Vec<u8>, CryptoError> {
@@ -133,9 +142,123 @@ impl PinUvAuthProtocol for PinUvAuth1 {
         // authenticate(key, message) → signature
         //      Return the first 16 bytes of the result of computing HMAC-SHA-256 with the given
         //      key and message.
-        let mut hmac = backend::hmac_sha256(key, message)?;
+        let mut hmac = hmac_sha256(key, message)?;
         hmac.truncate(16);
         Ok(hmac)
+    }
+}
+
+/// CTAP 2.1, Section 6.5.7.
+pub struct PinUvAuth2;
+
+impl PinUvAuth2 {
+    fn kdf(z: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        // kdf(Z) → sharedSecret
+        //      return HKDF-SHA-256(salt, Z, L = 32, info = "CTAP2 HMAC key") ||
+        //             HKDF-SHA-256(salt, Z, L = 32, info = "CTAP2 AES key")
+        // where salt = [0u8; 32].
+        //
+        // From Section 2 of RFC 5869, we have
+        //   HKDF(salt, Z, 32, info) =
+        //      HKDF-Expand(HKDF-Extract(salt, Z), info || 0x01)
+        //
+        // And for HKDF-SHA256 both Extract and Expand are instantiated with HMAC-SHA256.
+
+        let prk = hmac_sha256(&[0u8; 32], &z)?;
+        let mut shared_secret = hmac_sha256(&prk, "CTAP2 HMAC key\x01".as_bytes())?;
+        shared_secret.append(&mut hmac_sha256(&prk, "CTAP2 AES key\x01".as_bytes())?);
+        Ok(shared_secret)
+    }
+}
+
+impl PinUvAuthProtocol for PinUvAuth2 {
+    const PROTOCOL_ID: u64 = 2;
+
+    fn initialize() {}
+
+    fn encapsulate(peer_cose_key: &COSEKey) -> Result<ECDHSecret, CryptoError> {
+        // Identical to PinUvAuth1::encapsulate except for the change in KDF
+
+        match peer_cose_key.alg {
+            // Again there is not actually a COSEAlgorithm using this KDF...
+            COSEAlgorithm::ECDH_ES_HKDF256 => (),
+            other => return Err(CryptoError::UnsupportedAlgorithm(other)),
+        }
+
+        let peer_cose_ec2_key = match peer_cose_key.key {
+            COSEKeyType::EC2(ref key) => key,
+            _ => return Err(CryptoError::UnsupportedKeyType),
+        };
+
+        let peer_spki = peer_cose_ec2_key.der_spki()?;
+
+        let (shared_point, client_public_sec1) = ecdhe_p256_raw(&peer_spki)?;
+        let shared_secret = PinUvAuth2::kdf(&shared_point)?;
+
+        let client_cose_ec2_key =
+            COSEEC2Key::from_sec1_uncompressed(Curve::SECP256R1, &client_public_sec1)?;
+
+        let client_cose_key = COSEKey {
+            alg: COSEAlgorithm::ECDH_ES_HKDF256,
+            key: COSEKeyType::EC2(client_cose_ec2_key),
+        };
+
+        Ok(ECDHSecret {
+            remote: peer_cose_key.clone(),
+            my: client_cose_key,
+            shared_secret,
+        })
+    }
+
+    fn encrypt(key: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        // [CTAP 2.1]
+        // encrypt(key, demPlaintext) → ciphertext
+        //      1. Discard the first 32 bytes of key. (This selects the AES-key portion of the
+        //         shared secret.)
+        //      2. Let iv be a 16-byte, random bytestring.
+        //      3. Let ct be the AES-256-CBC encryption of demPlaintext using key and iv. (No
+        //         padding is performed as the size of demPlaintext is required to be a multiple of
+        //         the AES block length.)
+        //      4. Return iv || ct.
+        if key.len() != 64 {
+            return Err(CryptoError::LibraryFailure);
+        }
+        let key = &key[32..64];
+
+        let iv = random_bytes(16)?;
+        let mut ct = encrypt_aes_256_cbc_no_pad(key, Some(&iv), plaintext)?;
+
+        let mut out = iv;
+        out.append(&mut ct);
+        Ok(out)
+    }
+
+    fn decrypt(key: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        // decrypt(key, demCiphertext) → plaintext | error
+        //      1. Discard the first 32 bytes of key. (This selects the AES-key portion of the
+        //         shared secret.)
+        //      2. If demPlaintext is less than 16 bytes in length, return an error
+        //      3. Split demPlaintext after the 16th byte to produce two subspans, iv and ct.
+        //      4. Return the AES-256-CBC decryption of ct using key and iv.
+        if key.len() < 64 || ciphertext.len() < 16 {
+            return Err(CryptoError::LibraryFailure);
+        }
+        let key = &key[32..64];
+        let (iv, ct) = ciphertext.split_at(16);
+        decrypt_aes_256_cbc_no_pad(key, Some(iv), ct)
+    }
+
+    fn authenticate(key: &[u8], message: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        // authenticate(key, message) → signature
+        //      1. If key is longer than 32 bytes, discard the excess. (This selects the HMAC-key
+        //         portion of the shared secret. When key is the pinUvAuthToken, it is exactly 32
+        //         bytes long and thus this step has no effect.)
+        //      2. Return the result of computing HMAC-SHA-256 on key and message.
+        if key.len() < 32 {
+            return Err(CryptoError::LibraryFailure);
+        }
+        let key = &key[0..32];
+        hmac_sha256(key, message)
     }
 }
 
@@ -908,8 +1031,8 @@ pub fn parse_u2f_der_certificate(data: &[u8]) -> Result<U2FRegisterAnswer, Crypt
 #[cfg(all(test, not(feature = "crypto_dummy")))]
 mod test {
     use super::{
-        backend::hmac_sha256, backend::test_ecdh_p256_raw, backend::sha256, COSEAlgorithm, COSEKey, Curve,
-        PinUvAuth1, PinUvAuthProtocol,
+        backend::hmac_sha256, backend::sha256, backend::test_ecdh_p256_raw, COSEAlgorithm, COSEKey,
+        Curve, PinUvAuth1, PinUvAuth2, PinUvAuthProtocol,
     };
     use crate::crypto::{COSEEC2Key, COSEKeyType};
     use crate::ctap2::commands::client_pin::Pin;
@@ -969,7 +1092,7 @@ mod test {
     #[test]
     #[allow(non_snake_case)]
     fn test_shared_secret() {
-        // Test values taken from https://github.com/Yubico/python-fido2/blob/master/test/test_ctap2.py
+        // Test values taken from https://github.com/Yubico/python-fido2/blob/main/tests/test_ctap2.py
         let EC_PRIV =
             decode_hex("7452E599FEE739D8A653F6A507343D12D382249108A651402520B72F24FE7684");
         let EC_PUB_X =
@@ -1008,6 +1131,40 @@ mod test {
         let pin_hash_enc =
             PinUvAuth1::encrypt(&shared_secret, pin.for_pin_token().as_ref()).unwrap();
         assert_eq!(pin_hash_enc, PIN_HASH_ENC);
+    }
+
+    #[test]
+    fn test_pin_uv_auth2_kdf() {
+        // We don't pull a complete HKDF implementation from the crypto backend, so we need to
+        // check that PinUvAuth2::kdf makes the right sequence of HMAC-SHA256 calls.
+        //
+        // ```python
+        // from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+        // from cryptography.hazmat.primitives import hashes
+        // from cryptography.hazmat.backends import default_backend
+        //
+        // Z = b"\xFF" * 32
+        //
+        // hmac_key = HKDF(
+        //     algorithm=hashes.SHA256(),
+        //     length=32,
+        //     salt=b"\x00" * 32,
+        //     info=b"CTAP2 HMAC key",
+        // ).derive(Z)
+        //
+        // aes_key = HKDF(
+        //     algorithm=hashes.SHA256(),
+        //     length=32,
+        //     salt=b"\x00" * 32,
+        //     info=b"CTAP2 AES key",
+        // ).derive(Z)
+        //
+        // print((hmac_key+aes_key).hex())
+        // ```
+        let input = decode_hex("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
+        let expected = decode_hex("570B4ED82AA5DFB49DB79DBEAF4B315D8ABB1A9867B245F3367026987C0D47A17D9A93C39BAEC741D141C6238D8E1846DE323D8EED022CB397D19A73B98945E2");
+        let output = PinUvAuth2::kdf(&input).unwrap();
+        assert_eq!(&expected, &output);
     }
 
     #[test]
