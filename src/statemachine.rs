@@ -526,7 +526,6 @@ impl StateMachineCtap2 {
                         callback.call(Ok(RegisterResult::CTAP1(data, dev.get_device_info())))
                     }
 
-                    Err(HIDError::DeviceNotSupported) | Err(HIDError::UnsupportedCommand) => {}
                     Err(HIDError::Command(CommandError::StatusCode(
                         StatusCode::ChannelBusy,
                         _,
@@ -636,11 +635,6 @@ impl StateMachineCtap2 {
                     Ok(GetAssertionResult::CTAP2(assertion, client_data)) => {
                         callback.call(Ok(SignResult::CTAP2(assertion, client_data)))
                     }
-                    // TODO(baloo): if key_handle is invalid for this device, it
-                    //              should reply something like:
-                    //              CTAP2_ERR_INVALID_CREDENTIAL
-                    //              have to check
-                    Err(HIDError::DeviceNotSupported) | Err(HIDError::UnsupportedCommand) => {}
                     Err(HIDError::Command(CommandError::StatusCode(
                         StatusCode::ChannelBusy,
                         _,

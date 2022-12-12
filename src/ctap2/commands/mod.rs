@@ -55,11 +55,13 @@ impl<T> From<T> for Retryable<T> {
 
 pub trait RequestCtap1: fmt::Debug {
     type Output;
+    // E.g.: For GetAssertion, which key-handle is currently being tested
+    type AdditionalInfo;
 
     /// Serializes a request into FIDO v1.x / CTAP1 / U2F format.
     ///
     /// See [`crate::u2ftypes::CTAP1RequestAPDU::serialize()`]
-    fn ctap1_format<Dev>(&self, dev: &mut Dev) -> Result<Vec<u8>, HIDError>
+    fn ctap1_format<Dev>(&self, dev: &mut Dev) -> Result<(Vec<u8>, Self::AdditionalInfo), HIDError>
     where
         Dev: FidoDevice + Read + Write + fmt::Debug;
 
@@ -68,6 +70,7 @@ pub trait RequestCtap1: fmt::Debug {
         &self,
         status: Result<(), ApduErrorStatus>,
         input: &[u8],
+        add_info: &Self::AdditionalInfo,
     ) -> Result<Self::Output, Retryable<HIDError>>;
 }
 

@@ -16,11 +16,13 @@ pub struct GetVersion {}
 
 impl RequestCtap1 for GetVersion {
     type Output = U2FInfo;
+    type AdditionalInfo = ();
 
     fn handle_response_ctap1(
         &self,
         _status: Result<(), ApduErrorStatus>,
         input: &[u8],
+        _add_info: &(),
     ) -> Result<Self::Output, Retryable<HIDError>> {
         if input.is_empty() {
             return Err(Retryable::Error(HIDError::Command(
@@ -36,7 +38,7 @@ impl RequestCtap1 for GetVersion {
         }
     }
 
-    fn ctap1_format<Dev>(&self, _dev: &mut Dev) -> Result<Vec<u8>, HIDError>
+    fn ctap1_format<Dev>(&self, _dev: &mut Dev) -> Result<(Vec<u8>, ()), HIDError>
     where
         Dev: U2FDevice,
     {
@@ -44,7 +46,7 @@ impl RequestCtap1 for GetVersion {
 
         let cmd = U2F_VERSION;
         let data = CTAP1RequestAPDU::serialize(cmd, flags, &[])?;
-        Ok(data)
+        Ok((data, ()))
     }
 }
 
