@@ -243,8 +243,9 @@ impl Request<MakeCredentialsResult> for MakeCredentials {
 
 impl RequestCtap1 for MakeCredentials {
     type Output = MakeCredentialsResult;
+    type AdditionalInfo = ();
 
-    fn ctap1_format<Dev>(&self, dev: &mut Dev) -> Result<Vec<u8>, HIDError>
+    fn ctap1_format<Dev>(&self, dev: &mut Dev) -> Result<(Vec<u8>, ()), HIDError>
     where
         Dev: io::Read + io::Write + fmt::Debug + FidoDevice,
     {
@@ -306,13 +307,14 @@ impl RequestCtap1 for MakeCredentials {
         let cmd = U2F_REGISTER;
         let apdu = CTAP1RequestAPDU::serialize(cmd, flags, &register_data)?;
 
-        Ok(apdu)
+        Ok((apdu, ()))
     }
 
     fn handle_response_ctap1(
         &self,
         status: Result<(), ApduErrorStatus>,
         input: &[u8],
+        _add_info: &(),
     ) -> Result<Self::Output, Retryable<HIDError>> {
         if Err(ApduErrorStatus::ConditionsNotSatisfied) == status {
             return Err(Retryable::Retry);
@@ -674,7 +676,7 @@ pub mod test {
         .expect("Failed to create MakeCredentials");
 
         let mut device = Device::new("commands/make_credentials").unwrap(); // not really used (all functions ignore it)
-        let req_serialized = req
+        let (req_serialized, _) = req
             .ctap1_format(&mut device)
             .expect("Failed to serialize MakeCredentials request");
         assert_eq!(
@@ -683,7 +685,7 @@ pub mod test {
             req_serialized, MAKE_CREDENTIALS_SAMPLE_REQUEST_CTAP1
         );
         let (attestation_object, _collected_client_data) = match req
-            .handle_response_ctap1(Ok(()), &MAKE_CREDENTIALS_SAMPLE_RESPONSE_CTAP1)
+            .handle_response_ctap1(Ok(()), &MAKE_CREDENTIALS_SAMPLE_RESPONSE_CTAP1, &())
             .expect("Failed to handle CTAP1 response")
         {
             MakeCredentialsResult::CTAP2(attestation_object, _collected_client_data) => {

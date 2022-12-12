@@ -88,11 +88,13 @@ pub struct KeyHandle {
 
 pub type AppId = Vec<u8>;
 
+#[derive(Debug)]
 pub enum RegisterResult {
     CTAP1(Vec<u8>, u2ftypes::U2FDeviceInfo),
     CTAP2(AttestationObject, CollectedClientDataWrapper),
 }
 
+#[derive(Debug)]
 pub enum SignResult {
     CTAP1(AppId, Vec<u8>, Vec<u8>, u2ftypes::U2FDeviceInfo),
     CTAP2(AssertionObject, CollectedClientDataWrapper),
