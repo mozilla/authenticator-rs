@@ -75,8 +75,6 @@ impl Eq for Device {}
 
 impl Hash for Device {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        // The path should be the only identifying member for a device
-        // If the path is the same, its the same device
         self.fd.hash(state);
     }
 }
