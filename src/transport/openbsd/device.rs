@@ -49,7 +49,6 @@ impl Device {
             }
 
             // Read response
-            // Same limitation as above regarding self being mut.
             self.read(&mut data[..])?;
 
             return Ok(());
