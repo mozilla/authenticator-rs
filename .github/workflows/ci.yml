@@ -10,6 +10,7 @@ jobs:
           # Linux dummy crypto
           - OS: ubuntu-latest
             TARGET: x86_64-unknown-linux-gnu
+            NATIVE_BUILD: true
             ADD_INSTALL: |
                 sudo apt-get update
                 sudo apt-get install -y libudev-dev
@@ -18,6 +19,7 @@ jobs:
           # Linux NSS crypto
           - OS: ubuntu-latest
             TARGET: x86_64-unknown-linux-gnu
+            NATIVE_BUILD: true
             ADD_INSTALL: |
                 sudo apt-get update
                 sudo apt-get install -y libudev-dev mercurial node-gyp ninja-build
@@ -26,6 +28,7 @@ jobs:
           # Linux openSSL crypto
           - OS: ubuntu-latest
             TARGET: x86_64-unknown-linux-gnu
+            NATIVE_BUILD: true
             ADD_INSTALL: |
                 sudo apt-get update
                 sudo apt-get install -y libudev-dev openssl
@@ -34,12 +37,32 @@ jobs:
           # Mac dummy crypto
           - OS: macos-latest
             TARGET: x86_64-apple-darwin
+            NATIVE_BUILD: true
             BUILD_OPTIONS: --features crypto_dummy --no-default-features --target=x86_64-apple-darwin
 
           # Windows dummy crypto
           - OS: windows-latest
             TARGET: x86_64-pc-windows-gnu
+            NATIVE_BUILD: true
             BUILD_OPTIONS: --features crypto_dummy --no-default-features --target=x86_64-pc-windows-gnu
+
+          # FreeBSD - cross compile
+          - OS: ubuntu-latest
+            TARGET: x86_64-unknown-freebsd
+            NATIVE_BUILD: false
+            ADD_INSTALL: |
+                sudo apt-get update
+                sudo apt-get install -y libudev-dev
+            BUILD_OPTIONS: --features crypto_dummy --no-default-features
+
+          # netBSD - cross compile
+          - OS: ubuntu-latest
+            TARGET: x86_64-unknown-netbsd
+            NATIVE_BUILD: false
+            ADD_INSTALL: |
+                sudo apt-get update
+                sudo apt-get install -y libudev-dev
+            BUILD_OPTIONS: --features crypto_dummy --no-default-features
 
     runs-on: ${{ matrix.OS }}
     steps:
@@ -54,7 +77,9 @@ jobs:
         run: ${{ matrix.ADD_INSTALL }}
 
       - name: Build
-        run: cargo build --all --release ${{ matrix.BUILD_OPTIONS }}
+        run: cargo build --target ${{ matrix.TARGET }} --all --release ${{ matrix.BUILD_OPTIONS }}
 
       - name: Test
-        run: cargo test ${{ matrix.BUILD_OPTIONS }} -- --show-output
+        # Run tests only if it is a native build
+        if: ${{ matrix.NATIVE_BUILD }}
+        run: cargo test --target ${{ matrix.TARGET }} ${{ matrix.BUILD_OPTIONS }} -- --show-output
