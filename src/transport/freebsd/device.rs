@@ -150,9 +150,10 @@ impl HIDDevice for Device {
     type Id = OsString;
 
     fn new(path: OsString) -> Result<Self, (HIDError, Self::Id)> {
-        let cstr = CString::new(path.as_bytes()).map_err(|_| (HIDError::DeviceError, path))?;
+        let cstr =
+            CString::new(path.as_bytes()).map_err(|_| (HIDError::DeviceError, path.clone()))?;
         let fd = unsafe { libc::open(cstr.as_ptr(), libc::O_RDWR) };
-        let fd = from_unix_result(fd).map_err(|e| (e.into(), path))?;
+        let fd = from_unix_result(fd).map_err(|e| (e.into(), path.clone()))?;
         let mut res = Self {
             path,
             fd,

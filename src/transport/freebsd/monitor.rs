@@ -98,7 +98,7 @@ where
             // Wait for new events, break on failure.
             match ctx.wait_for_event(POLL_TIMEOUT) {
                 Err(devd_rs::Error::Timeout) => (),
-                Err(e) => return Err(e.into()),
+                Err(e) => return Err(convert_error(e).into()),
                 Ok(event) => {
                     if let Some(event) = Event::from_devd(event) {
                         self.process_event(event);
