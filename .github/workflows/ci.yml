@@ -64,6 +64,15 @@ jobs:
                 sudo apt-get install -y libudev-dev
             BUILD_OPTIONS: --features crypto_dummy --no-default-features
 
+          # Android - cross compile
+          - OS: ubuntu-latest
+            TARGET: x86_64-linux-android
+            NATIVE_BUILD: false
+            ADD_INSTALL: |
+                sudo apt-get update
+                sudo apt-get install -y libudev-dev
+            BUILD_OPTIONS: --features crypto_dummy --no-default-features
+
     runs-on: ${{ matrix.OS }}
     steps:
       - name: Checkout
