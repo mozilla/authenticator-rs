@@ -406,9 +406,10 @@ pub struct AttestationStatementPacked {
     pub alg: COSEAlgorithm,
     pub sig: Signature,
 
-    #[serde(rename = "x5c")]
+    #[serde(rename = "x5c", default)]
     /// Certificate chain in x509 format
-    pub attestation_cert: Vec<AttestationCertificate>,
+    /// Not used for self attestation
+    pub attestation_cert: Option<Vec<AttestationCertificate>>,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
