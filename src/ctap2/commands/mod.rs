@@ -97,7 +97,19 @@ pub(crate) trait PinAuthCommand {
     fn client_data_hash(&self) -> ClientDataHash;
     fn unset_uv_option(&mut self);
     fn determine_pin_auth<D: FidoDevice>(&mut self, dev: &mut D) -> Result<(), AuthenticatorError> {
-        if !dev.supports_ctap2() {
+        // Authenticator info should have been set if the device supports ctap2
+        if !dev.supports_ctap2()
+            || dev
+                .get_authenticator_info()
+                .ok_or_else(|| {
+                    AuthenticatorError::InternalError(
+                        "Authenticator info not loaded even though device uses CTAP2".to_string(),
+                    )
+                })?
+                .options
+                .client_pin
+                .is_none()
+        {
             self.set_pin_auth(None, None);
             return Ok(());
         }
@@ -443,6 +455,7 @@ where
 
     // TODO(MS): What to do if token supports client_pin, but none has been set: Some(false)
     //           AND a Pin is not None?
+    // The actual check for pin support happes earlier, in PinAuthCommand::determine_pin_auth
     let pin_auth = if info.options.client_pin == Some(true) {
         let pin = pin
             .as_ref()
