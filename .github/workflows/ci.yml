@@ -2,6 +2,10 @@ name: Build and test
 
 on: [push, pull_request]
 
+# Make sure CI fails on all warnings, including Clippy lints
+env:
+  RUSTFLAGS: "-Dwarnings"
+
 jobs:
   build:
     strategy:
@@ -92,3 +96,6 @@ jobs:
         # Run tests only if it is a native build
         if: ${{ matrix.NATIVE_BUILD }}
         run: cargo test --target ${{ matrix.TARGET }} ${{ matrix.BUILD_OPTIONS }} -- --show-output
+
+      - name: Clippy
+        run: cargo clippy --all --target ${{ matrix.TARGET }} ${{ matrix.BUILD_OPTIONS }}

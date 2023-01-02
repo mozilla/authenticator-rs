@@ -9,16 +9,10 @@ pub enum U2FInfo {
     U2F_V2,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 // TODO(baloo): if one does not issue U2F_VERSION before makecredentials or getassertion, token
 //              will return error (ConditionsNotSatified), test this in unit tests
 pub struct GetVersion {}
-
-impl Default for GetVersion {
-    fn default() -> GetVersion {
-        GetVersion {}
-    }
-}
 
 impl RequestCtap1 for GetVersion {
     type Output = U2FInfo;
@@ -73,7 +67,7 @@ pub mod tests {
 
         // init packet
         let mut msg = CID_BROADCAST.to_vec();
-        msg.extend(&[HIDCmd::Init.into(), 0x00, 0x08]); // cmd + bcnt
+        msg.extend([HIDCmd::Init.into(), 0x00, 0x08]); // cmd + bcnt
         msg.extend_from_slice(&nonce);
         device.add_write(&msg, 0);
 
@@ -87,20 +81,20 @@ pub mod tests {
         msg.extend_from_slice(&cid); // new channel id
 
         // We are not setting CBOR, to signal that the device does not support CTAP1
-        msg.extend(&[0x02, 0x04, 0x01, 0x08, 0x01]); // versions + flags (wink)
+        msg.extend([0x02, 0x04, 0x01, 0x08, 0x01]); // versions + flags (wink)
         device.add_read(&msg, 0);
 
         // ctap1 U2F_VERSION request
         let mut msg = cid.to_vec();
-        msg.extend(&[HIDCmd::Msg.into(), 0x0, 0x7]); // cmd + bcnt
-        msg.extend(&[0x0, 0x3, 0x0, 0x0, 0x0, 0x0, 0x0]);
+        msg.extend([HIDCmd::Msg.into(), 0x0, 0x7]); // cmd + bcnt
+        msg.extend([0x0, 0x3, 0x0, 0x0, 0x0, 0x0, 0x0]);
         device.add_write(&msg, 0);
 
         // fido response
         let mut msg = cid.to_vec();
-        msg.extend(&[HIDCmd::Msg.into(), 0x0, 0x08]); // cmd + bcnt
-        msg.extend(&[0x55, 0x32, 0x46, 0x5f, 0x56, 0x32]); // 'U2F_V2'
-        msg.extend(&SW_NO_ERROR);
+        msg.extend([HIDCmd::Msg.into(), 0x0, 0x08]); // cmd + bcnt
+        msg.extend([0x55, 0x32, 0x46, 0x5f, 0x56, 0x32]); // 'U2F_V2'
+        msg.extend(SW_NO_ERROR);
         device.add_read(&msg, 0);
 
         device

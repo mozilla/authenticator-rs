@@ -349,33 +349,30 @@ impl StateMachineCtap2 {
             .ok()?;
 
         // Blocking recv. DeviceSelector will tell us what to do
-        loop {
-            match rx.recv() {
-                Ok(DeviceCommand::Blink) => match dev.block_and_blink() {
-                    BlinkResult::DeviceSelected => {
-                        // User selected us. Let DeviceSelector know, so it can cancel all other
-                        // outstanding open blink-requests.
-                        selector
-                            .send(DeviceSelectorEvent::SelectedToken(dev.id()))
-                            .ok()?;
-                        break;
-                    }
-                    BlinkResult::Cancelled => {
-                        info!("Device {:?} was not selected", dev.id());
-                        return None;
-                    }
-                },
-                Ok(DeviceCommand::Removed) => {
-                    info!("Device {:?} was removed", dev.id());
+        match rx.recv() {
+            Ok(DeviceCommand::Blink) => match dev.block_and_blink() {
+                BlinkResult::DeviceSelected => {
+                    // User selected us. Let DeviceSelector know, so it can cancel all other
+                    // outstanding open blink-requests.
+                    selector
+                        .send(DeviceSelectorEvent::SelectedToken(dev.id()))
+                        .ok()?;
+                }
+                BlinkResult::Cancelled => {
+                    info!("Device {:?} was not selected", dev.id());
                     return None;
                 }
-                Ok(DeviceCommand::Continue) => {
-                    break;
-                }
-                Err(_) => {
-                    warn!("Error when trying to receive messages from DeviceSelector! Exiting.");
-                    return None;
-                }
+            },
+            Ok(DeviceCommand::Removed) => {
+                info!("Device {:?} was removed", dev.id());
+                return None;
+            }
+            Ok(DeviceCommand::Continue) => {
+                // Just continue
+            }
+            Err(_) => {
+                warn!("Error when trying to receive messages from DeviceSelector! Exiting.");
+                return None;
             }
         }
         Some(dev)
@@ -397,7 +394,7 @@ impl StateMachineCtap2 {
                 // locked token). If it is deemed unrecoverable, we error out the 'normal' way with the same error.
                 error!("Callback dropped the channel, so we forward the error to the results-callback: {:?}", error);
                 callback.call(Err(AuthenticatorError::PinError(error)));
-                return Err(());
+                Err(())
             }
         }
     }
