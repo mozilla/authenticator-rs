@@ -47,7 +47,7 @@ pub enum MakeCredentialsResult {
     CTAP2(AttestationObject, CollectedClientDataWrapper),
 }
 
-#[derive(Copy, Clone, Debug, Serialize)]
+#[derive(Copy, Clone, Debug, Default, Serialize)]
 #[cfg_attr(test, derive(Deserialize))]
 pub struct MakeCredentialsOptions {
     #[serde(rename = "rk", skip_serializing_if = "Option::is_none")]
@@ -56,15 +56,6 @@ pub struct MakeCredentialsOptions {
     pub user_verification: Option<bool>,
     // TODO(MS): ctap2.1 supports user_presence, but ctap2.0 does not and tokens will error out
     //           Commands need a version-flag to know what to de/serialize and what to ignore.
-}
-
-impl Default for MakeCredentialsOptions {
-    fn default() -> Self {
-        Self {
-            resident_key: None,
-            user_verification: None,
-        }
-    }
 }
 
 impl MakeCredentialsOptions {
@@ -280,7 +271,7 @@ impl RequestCtap1 for MakeCredentials {
                 let res = dev.send_ctap1(&check_command);
                 res.is_ok()
             })
-            .any(|x| x == true);
+            .any(|x| x);
 
         if is_already_registered {
             // Now we need to send a dummy registration request, to make the token blink

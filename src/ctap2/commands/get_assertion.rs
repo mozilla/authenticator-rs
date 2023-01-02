@@ -32,7 +32,7 @@ use std::convert::TryInto;
 use std::fmt;
 use std::io;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum GetAssertionResult {
     CTAP1(Vec<u8>),
     CTAP2(AssertionObject, CollectedClientDataWrapper),
@@ -109,15 +109,13 @@ impl HmacSecretExtension {
             }
             None => encrypt(secret.shared_secret(), &self.salt1[..32]),
         }
-        .map_err(|e| CryptoError::Backend(e))?;
+        .map_err(CryptoError::Backend)?;
         let salt_auth_full =
-            authenticate(secret.shared_secret(), &salt_enc).map_err(|e| CryptoError::Backend(e))?;
+            authenticate(secret.shared_secret(), &salt_enc).map_err(CryptoError::Backend)?;
         let salt_auth = salt_auth_full
             .windows(16)
             .next()
-            .ok_or(AuthenticatorError::InternalError(String::from(
-                "salt_auth too short",
-            )))?
+            .ok_or_else(|| AuthenticatorError::InternalError(String::from("salt_auth too short")))?
             .try_into()
             .map_err(|_| {
                 AuthenticatorError::InternalError(String::from(
@@ -532,7 +530,7 @@ impl RequestCtap2 for GetAssertion {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Assertion {
     pub credentials: Option<PublicKeyCredentialDescriptor>, /* Was optional in CTAP2.0, is
                                                              * mandatory in CTAP2.1 */
@@ -553,7 +551,7 @@ impl From<GetAssertionResponse> for Assertion {
 }
 
 // TODO(baloo): Move this to src/ctap2/mod.rs?
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct AssertionObject(pub Vec<Assertion>);
 
 impl AssertionObject {
@@ -561,7 +559,7 @@ impl AssertionObject {
         if let Some(first) = self.0.first() {
             let mut res = Vec::new();
             res.push(first.auth_data.flags.bits());
-            res.extend(&first.auth_data.counter.to_be_bytes());
+            res.extend(first.auth_data.counter.to_be_bytes());
             res.extend(&first.signature);
             res
             // first.signature.clone()
@@ -741,7 +739,7 @@ pub mod test {
         device.add_write(&msg, 0);
 
         msg = cid.to_vec();
-        msg.extend(&[0x0]); //SEQ
+        msg.extend([0x0]); //SEQ
         msg.extend(vec![
             0x65, // e (continuation of type)
             0x6a, // text(10)
@@ -754,7 +752,7 @@ pub mod test {
         device.add_write(&msg, 0);
 
         msg = cid.to_vec();
-        msg.extend(&[0x1]); //SEQ
+        msg.extend([0x1]); //SEQ
         msg.extend(&assertion.allow_list[0].id[42..]);
         msg.extend(vec![
             0x5,  // options
@@ -767,31 +765,31 @@ pub mod test {
 
         // fido response
         let mut msg = cid.to_vec();
-        msg.extend(&[HIDCmd::Cbor.into(), 0x1, 0x5c]); // cmd + bcnt
+        msg.extend([HIDCmd::Cbor.into(), 0x1, 0x5c]); // cmd + bcnt
         msg.extend(&GET_ASSERTION_SAMPLE_RESPONSE_CTAP2[..57]);
         device.add_read(&msg, 0);
 
         let mut msg = cid.to_vec();
-        msg.extend(&[0x0]); // SEQ
+        msg.extend([0x0]); // SEQ
         msg.extend(&GET_ASSERTION_SAMPLE_RESPONSE_CTAP2[57..116]);
         device.add_read(&msg, 0);
 
         let mut msg = cid.to_vec();
-        msg.extend(&[0x1]); // SEQ
+        msg.extend([0x1]); // SEQ
         msg.extend(&GET_ASSERTION_SAMPLE_RESPONSE_CTAP2[116..175]);
         device.add_read(&msg, 0);
 
         let mut msg = cid.to_vec();
-        msg.extend(&[0x2]); // SEQ
+        msg.extend([0x2]); // SEQ
         msg.extend(&GET_ASSERTION_SAMPLE_RESPONSE_CTAP2[175..234]);
         device.add_read(&msg, 0);
 
         let mut msg = cid.to_vec();
-        msg.extend(&[0x3]); // SEQ
+        msg.extend([0x3]); // SEQ
         msg.extend(&GET_ASSERTION_SAMPLE_RESPONSE_CTAP2[234..293]);
         device.add_read(&msg, 0);
         let mut msg = cid.to_vec();
-        msg.extend(&[0x4]); // SEQ
+        msg.extend([0x4]); // SEQ
         msg.extend(&GET_ASSERTION_SAMPLE_RESPONSE_CTAP2[293..]);
         device.add_read(&msg, 0);
 
@@ -853,12 +851,12 @@ pub mod test {
     fn fill_device_ctap1(device: &mut Device, cid: [u8; 4], flags: u8, answer_status: [u8; 2]) {
         // ctap2 request
         let mut msg = cid.to_vec();
-        msg.extend(&[HIDCmd::Msg.into(), 0x00, 0x8A]); // cmd + bcnt
-        msg.extend(&[0x00, 0x2]); // U2F_AUTHENTICATE
-        msg.extend(&[flags]);
-        msg.extend(&[0x00, 0x00, 0x00]);
-        msg.extend(&[0x81]); // Data len - 7
-        msg.extend(&CLIENT_DATA_HASH);
+        msg.extend([HIDCmd::Msg.into(), 0x00, 0x8A]); // cmd + bcnt
+        msg.extend([0x00, 0x2]); // U2F_AUTHENTICATE
+        msg.extend([flags]);
+        msg.extend([0x00, 0x00, 0x00]);
+        msg.extend([0x81]); // Data len - 7
+        msg.extend(CLIENT_DATA_HASH);
         msg.extend(&RELYING_PARTY_HASH[..18]);
         device.add_write(&msg, 0);
 
@@ -866,7 +864,7 @@ pub mod test {
         let mut msg = cid.to_vec();
         msg.extend(vec![0x00]); // SEQ
         msg.extend(&RELYING_PARTY_HASH[18..]);
-        msg.extend(&[KEY_HANDLE.len() as u8]);
+        msg.extend([KEY_HANDLE.len() as u8]);
         msg.extend(&KEY_HANDLE[..44]);
         device.add_write(&msg, 0);
 
@@ -877,14 +875,14 @@ pub mod test {
 
         // fido response
         let mut msg = cid.to_vec();
-        msg.extend(&[HIDCmd::Msg.into(), 0x0, 0x4D]); // cmd + bcnt
+        msg.extend([HIDCmd::Msg.into(), 0x0, 0x4D]); // cmd + bcnt
         msg.extend(&GET_ASSERTION_SAMPLE_RESPONSE_CTAP1[0..57]);
         device.add_read(&msg, 0);
 
         let mut msg = cid.to_vec();
-        msg.extend(&[0x0]); // SEQ
+        msg.extend([0x0]); // SEQ
         msg.extend(&GET_ASSERTION_SAMPLE_RESPONSE_CTAP1[57..]);
-        msg.extend(&answer_status);
+        msg.extend(answer_status);
         device.add_read(&msg, 0);
     }
 
@@ -1048,7 +1046,7 @@ pub mod test {
             too_long_key_handle.clone(),
             too_long_key_handle.clone(),
             ok_key_handle,
-            too_long_key_handle.clone(),
+            too_long_key_handle,
         ];
 
         // ctap1 request

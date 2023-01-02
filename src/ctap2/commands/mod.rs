@@ -104,7 +104,7 @@ pub(crate) trait PinAuthCommand {
 
         let client_data_hash = self.client_data_hash();
         let (pin_auth, pin_auth_protocol) =
-            match calculate_pin_auth(dev, &client_data_hash, &self.pin()) {
+            match calculate_pin_auth(dev, &client_data_hash, self.pin()) {
                 Ok((pin_auth, pin_auth_protocol)) => (pin_auth, pin_auth_protocol),
                 Err(e) => {
                     return Err(repackage_pin_errors(dev, e));
@@ -127,36 +127,26 @@ pub(crate) fn repackage_pin_errors<D: FidoDevice>(
             // If the given PIN was wrong, determine no. of left retries
             let cmd = GetRetries::new();
             let retries = dev.send_cbor(&cmd).ok(); // If we got retries, wrap it in Some, otherwise ignore err
-            return AuthenticatorError::PinError(PinError::InvalidPin(retries));
+            AuthenticatorError::PinError(PinError::InvalidPin(retries))
         }
         AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
             StatusCode::PinAuthBlocked,
             _,
-        ))) => {
-            return AuthenticatorError::PinError(PinError::PinAuthBlocked);
-        }
+        ))) => AuthenticatorError::PinError(PinError::PinAuthBlocked),
         AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
             StatusCode::PinBlocked,
             _,
-        ))) => {
-            return AuthenticatorError::PinError(PinError::PinBlocked);
-        }
+        ))) => AuthenticatorError::PinError(PinError::PinBlocked),
         AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
             StatusCode::PinRequired,
             _,
-        ))) => {
-            return AuthenticatorError::PinError(PinError::PinRequired);
-        }
+        ))) => AuthenticatorError::PinError(PinError::PinRequired),
         AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
             StatusCode::PinNotSet,
             _,
-        ))) => {
-            return AuthenticatorError::PinError(PinError::PinNotSet);
-        }
+        ))) => AuthenticatorError::PinError(PinError::PinNotSet),
         // TODO(MS): Add "PinPolicyViolated"
-        err => {
-            return err;
-        }
+        err => err,
     }
 }
 
@@ -340,9 +330,9 @@ impl From<u8> for StatusCode {
 }
 
 #[cfg(test)]
-impl Into<u8> for StatusCode {
-    fn into(self) -> u8 {
-        match self {
+impl From<StatusCode> for u8 {
+    fn from(v: StatusCode) -> u8 {
+        match v {
             StatusCode::OK => 0x00,
             StatusCode::InvalidCommand => 0x01,
             StatusCode::InvalidParameter => 0x02,
@@ -451,7 +441,7 @@ where
                 None,
             )))?;
 
-        let pin_command = GetPinToken::new(&info, &shared_secret, &pin)?;
+        let pin_command = GetPinToken::new(&info, &shared_secret, pin)?;
         let pin_token = dev.send_cbor(&pin_command)?;
 
         (
