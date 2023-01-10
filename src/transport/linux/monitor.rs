@@ -170,15 +170,35 @@ pub fn get_property_linux(path: &PathBuf, prop_name: &str) -> io::Result<String>
     // Iterate all existing devices, since we don't have a syspath
     // and libudev-rs doesn't implement opening by devnode.
     for dev in enumerator.scan_devices()? {
-        if dev.devnode().is_some() && dev.devnode().unwrap() == path {
+        // Find the one that we currently work on (same `path`)
+        if dev.devnode().map_or(false, |p| p == path) {
+            // Check if the current device has the properties we want, and if not
+            // iterate over all it's parents in search of the first "usb_device"
+            // in the device-tree
+            let can_use_dev = dev.devtype().map_or(false, |p| p != "usb_device");
+            let d = if can_use_dev {
+                dev
+            } else {
+                let mut parent = dev.parent();
+                while let Some(ref next_parent) = parent {
+                    if next_parent.devtype().map_or(false, |p| p == "usb_device") {
+                        break;
+                    }
+                    let next = next_parent.parent();
+                    parent = next;
+                }
+                parent.unwrap_or(dev)
+            };
+
             debug!(
                 "get_property_linux Querying property {} from {}",
                 prop_name,
-                dev.syspath().display()
+                d.syspath()
+                    .map_or(String::from("No syspath set"), |d| d.display().to_string())
             );
 
-            let value = dev
-                .attribute_value(prop_name)
+            let value = d
+                .attribute_value(prop_name.to_lowercase())
                 .ok_or(io::ErrorKind::Other)?
                 .to_string_lossy();
 
