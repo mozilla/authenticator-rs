@@ -591,6 +591,52 @@ pub unsafe extern "C" fn rust_ctap2_register_result_attestation_copy(
 
 /// # Safety
 ///
+/// This function is used to get the length of the credential ID
+#[no_mangle]
+pub unsafe extern "C" fn rust_ctap2_register_result_credential_id_len(
+    res: *const Ctap2RegisterResult,
+    len: *mut size_t,
+) -> bool {
+    if res.is_null() || len.is_null() {
+        return false;
+    }
+
+    if let Ok((att_obj, _)) = &*res {
+        if let Some(credential_data) = &att_obj.auth_data.credential_data {
+            *len = credential_data.credential_id.len();
+            return true;
+        }
+    }
+
+    false
+}
+
+/// # Safety
+///
+/// This method does not ensure anything about dst before copying, so
+/// ensure it is long enough (using rust_ctap2_register_result_credential_id_len)
+#[no_mangle]
+pub unsafe extern "C" fn rust_ctap2_register_result_credential_id_copy(
+    res: *const Ctap2RegisterResult,
+    dst: *mut u8,
+) -> bool {
+    if res.is_null() || dst.is_null() {
+        return false;
+    }
+
+    if let Ok((att_obj, _)) = &*res {
+        if let Some(credential_data) = &att_obj.auth_data.credential_data {
+            let id = &credential_data.credential_id;
+            ptr::copy_nonoverlapping(id.as_ptr(), dst, id.len());
+            return true;
+        }
+    }
+
+    false
+}
+
+/// # Safety
+///
 /// This function must be used on an existing Ctap2SignResult.
 /// This function is used to get how many assertions there are in total
 /// The returned number can be used as index-maximum to access individual
