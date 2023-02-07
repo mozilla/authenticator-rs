@@ -255,6 +255,7 @@ fn main() {
             },
         },
         pin: None,
+        alternate_rp_id: None,
     };
 
     loop {

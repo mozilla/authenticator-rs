@@ -308,6 +308,7 @@ fn main() {
         options: GetAssertionOptions::default(),
         extensions: Default::default(),
         pin: None,
+        alternate_rp_id: None,
     };
 
     loop {
