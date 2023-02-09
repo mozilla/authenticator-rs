@@ -647,7 +647,7 @@ impl<'de> Deserialize<'de> for GetAssertionResponse {
                             }
                             number_of_credentials = Some(map.next_value()?);
                         }
-                        k => return Err(M::Error::custom(format!("unexpected key: {:?}", k))),
+                        k => return Err(M::Error::custom(format!("unexpected key: {k:?}"))),
                     }
                 }
 
