@@ -76,18 +76,30 @@ pub enum Nonce {
 //           but the goal is to remove U2FDevice entirely and copy over the trait-definition here
 pub trait FidoDevice: HIDDevice {
     fn send_msg<Out, Req: Request<Out>>(&mut self, msg: &Req) -> Result<Out, HIDError> {
+        self.send_msg_cancellable(msg, &|| true)
+    }
+
+    fn send_cbor<Req: RequestCtap2>(&mut self, msg: &Req) -> Result<Req::Output, HIDError> {
+        self.send_cbor_cancellable(msg, &|| true)
+    }
+
+    fn send_ctap1<Req: RequestCtap1>(&mut self, msg: &Req) -> Result<Req::Output, HIDError> {
+        self.send_ctap1_cancellable(msg, &|| true)
+    }
+
+    fn send_msg_cancellable<Out, Req: Request<Out>>(&mut self, msg: &Req, keep_alive: &dyn Fn() -> bool) -> Result<Out, HIDError> {
         if !self.initialized() {
             return Err(HIDError::DeviceNotInitialized);
         }
 
         if self.supports_ctap2() && msg.is_ctap2_request() {
-            self.send_cbor(msg)
+            self.send_cbor_cancellable(msg, keep_alive)
         } else {
-            self.send_ctap1(msg)
+            self.send_ctap1_cancellable(msg, keep_alive)
         }
     }
 
-    fn send_cbor<Req: RequestCtap2>(&mut self, msg: &Req) -> Result<Req::Output, HIDError> {
+    fn send_cbor_cancellable<Req: RequestCtap2>(&mut self, msg: &Req, keep_alive: &dyn Fn() -> bool) -> Result<Req::Output, HIDError> {
         debug!("sending {:?} to {:?}", msg, self);
 
         let mut data = msg.wire_format(self)?;
@@ -98,7 +110,7 @@ pub trait FidoDevice: HIDDevice {
         buf.append(&mut data);
         let buf = buf;
 
-        let (cmd, resp) = self.sendrecv(HIDCmd::Cbor, &buf)?;
+        let (cmd, resp) = self.sendrecv(HIDCmd::Cbor, &buf, keep_alive)?;
         debug!(
             "got from Device {:?} status={:?}: {:?}",
             self.id(),
@@ -112,12 +124,12 @@ pub trait FidoDevice: HIDDevice {
         }
     }
 
-    fn send_ctap1<Req: RequestCtap1>(&mut self, msg: &Req) -> Result<Req::Output, HIDError> {
+    fn send_ctap1_cancellable<Req: RequestCtap1>(&mut self, msg: &Req, keep_alive: &dyn Fn() -> bool) -> Result<Req::Output, HIDError> {
         debug!("sending {:?} to {:?}", msg, self);
         let (data, add_info) = msg.ctap1_format(self)?;
 
         loop {
-            let (cmd, mut data) = self.sendrecv(HIDCmd::Msg, &data)?;
+            let (cmd, mut data) = self.sendrecv(HIDCmd::Msg, &data, keep_alive)?;
             debug!(
                 "got from Device {:?} status={:?}: {:?}",
                 self.id(),
@@ -218,15 +230,6 @@ pub trait FidoDevice: HIDDevice {
                 BlinkResult::Cancelled
             }
         }
-    }
-    fn supports_ctap1(&self) -> bool {
-        // CAPABILITY_NMSG:
-        // If set to 1, authenticator DOES NOT implement U2FHID_MSG function
-        !self.get_device_info().cap_flags.contains(Capability::NMSG)
-    }
-
-    fn supports_ctap2(&self) -> bool {
-        self.get_device_info().cap_flags.contains(Capability::CBOR)
     }
 
     fn establish_shared_secret(&mut self) -> Result<(ECDHSecret, AuthenticatorInfo), HIDError> {
