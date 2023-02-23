@@ -4,7 +4,6 @@
 
 use crate::authenticatorservice::AuthenticatorTransport;
 use crate::authenticatorservice::{RegisterArgs, SignArgs};
-
 use crate::errors::*;
 use crate::statecallback::StateCallback;
 use crate::statemachine::StateMachine;
@@ -36,6 +35,11 @@ enum QueueAction {
     SetPin {
         timeout: u64,
         new_pin: Pin,
+        status: Sender<crate::StatusUpdate>,
+        callback: StateCallback<crate::Result<crate::ResetResult>>,
+    },
+    InteractiveManagement {
+        timeout: u64,
         status: Sender<crate::StatusUpdate>,
         callback: StateCallback<crate::Result<crate::ResetResult>>,
     },
@@ -99,6 +103,15 @@ impl Manager {
                     }) => {
                         // This must not block, otherwise we can't cancel.
                         sm.set_pin(timeout, new_pin, status, callback);
+                    }
+
+                    Ok(QueueAction::InteractiveManagement {
+                        timeout,
+                        status,
+                        callback,
+                    }) => {
+                        // Manage token interactively
+                        sm.manage(timeout, status, callback);
                     }
 
                     Err(RecvTimeoutError::Disconnected) => {
@@ -185,6 +198,19 @@ impl AuthenticatorTransport for Manager {
         Ok(self.tx.send(QueueAction::SetPin {
             timeout,
             new_pin,
+            status,
+            callback,
+        })?)
+    }
+
+    fn manage(
+        &mut self,
+        timeout: u64,
+        status: Sender<crate::StatusUpdate>,
+        callback: StateCallback<crate::Result<crate::ResetResult>>,
+    ) -> Result<(), AuthenticatorError> {
+        Ok(self.tx.send(QueueAction::InteractiveManagement {
+            timeout,
             status,
             callback,
         })?)
