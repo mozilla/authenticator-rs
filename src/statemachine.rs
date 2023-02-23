@@ -448,7 +448,7 @@ impl StateMachineCtap2 {
             timeout,
             cbc.clone(),
             status,
-            move |info, selector, status, _alive| {
+            move |info, selector, status, alive| {
                 let mut dev = match Self::init_and_select(info, &selector, false) {
                     None => {
                         return;
@@ -505,7 +505,7 @@ impl StateMachineCtap2 {
                 debug!("------------------------------------------------------------------");
                 debug!("{:?}", makecred);
                 debug!("------------------------------------------------------------------");
-                let resp = dev.send_msg(&makecred);
+                let resp = dev.send_msg_cancellable(&makecred, alive);
                 if resp.is_ok() {
                     send_status(
                         &status,
@@ -557,7 +557,7 @@ impl StateMachineCtap2 {
             timeout,
             callback.clone(),
             status,
-            move |info, selector, status, _alive| {
+            move |info, selector, status, alive| {
                 let mut dev = match Self::init_and_select(info, &selector, false) {
                     None => {
                         return;
@@ -607,14 +607,14 @@ impl StateMachineCtap2 {
                 debug!("{:?}", getassertion);
                 debug!("------------------------------------------------------------------");
 
-                let mut resp = dev.send_msg(&getassertion);
+                let mut resp = dev.send_msg_cancellable(&getassertion, alive);
                 if resp.is_err() {
                     // Retry with a different RP ID if one was supplied. This is intended to be
                     // used with the AppID provided in the WebAuthn FIDO AppID extension.
                     if let Some(alternate_rp_id) = getassertion.alternate_rp_id {
                         getassertion.rp = RelyingPartyWrapper::Data(RelyingParty{id: alternate_rp_id, ..Default::default()});
                         getassertion.alternate_rp_id = None;
-                        resp = dev.send_msg(&getassertion);
+                        resp = dev.send_msg_cancellable(&getassertion, alive);
                     }
                 }
                 if resp.is_ok() {
@@ -682,7 +682,7 @@ impl StateMachineCtap2 {
             timeout,
             callback.clone(),
             status,
-            move |info, selector, status, _alive| {
+            move |info, selector, status, alive| {
                 let reset = Reset {};
                 let mut dev = match Self::init_and_select(info, &selector, true) {
                     None => {
@@ -696,7 +696,7 @@ impl StateMachineCtap2 {
                 debug!("{:?}", reset);
                 debug!("------------------------------------------------------------------");
 
-                let resp = dev.send_cbor(&reset);
+                let resp = dev.send_cbor_cancellable(&reset, alive);
                 if resp.is_ok() {
                     send_status(
                         &status,
@@ -745,7 +745,7 @@ impl StateMachineCtap2 {
             timeout,
             callback.clone(),
             status,
-            move |info, selector, status, _alive| {
+            move |info, selector, status, alive| {
                 let mut dev = match Self::init_and_select(info, &selector, true) {
                     None => {
                         return;
@@ -793,7 +793,7 @@ impl StateMachineCtap2 {
                             &new_pin,
                         )
                         .map_err(HIDError::Command)
-                        .and_then(|msg| dev.send_cbor(&msg))
+                        .and_then(|msg| dev.send_cbor_cancellable(&msg, alive))
                         .map_err(AuthenticatorError::HIDError)
                         .map_err(|e| repackage_pin_errors(&mut dev, e));
 
@@ -819,7 +819,7 @@ impl StateMachineCtap2 {
                 } else {
                     SetNewPin::new(&authinfo, &shared_secret, &new_pin)
                         .map_err(HIDError::Command)
-                        .and_then(|msg| dev.send_cbor(&msg))
+                        .and_then(|msg| dev.send_cbor_cancellable(&msg, alive))
                         .map_err(AuthenticatorError::HIDError)
                 };
                 callback.call(res);
