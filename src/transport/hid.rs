@@ -94,7 +94,12 @@ where
         Ok(())
     }
 
-    fn sendrecv(&mut self, cmd: HIDCmd, send: &[u8], keep_alive: &dyn Fn() -> bool) -> io::Result<(HIDCmd, Vec<u8>)> {
+    fn sendrecv(
+        &mut self,
+        cmd: HIDCmd,
+        send: &[u8],
+        keep_alive: &dyn Fn() -> bool,
+    ) -> io::Result<(HIDCmd, Vec<u8>)> {
         let cmd: u8 = cmd.into();
         self.u2f_write(cmd, send)?;
         loop {
@@ -109,15 +114,16 @@ where
                 break;
             }
         }
+
         // If this is a CTAP2 device we can tell the authenticator to cancel the transaction on its
         // side as well. There's nothing to do for U2F/CTAP1 devices.
         if self.supports_ctap2() {
-            self.u2f_write(u8::from(HIDCmd::Cancel), &[]);
+            self.u2f_write(u8::from(HIDCmd::Cancel), &[])?;
         }
         // For CTAP2 devices we expect to read
         //  (HIDCmd::Cbor, [CTAP2_ERR_KEEPALIVE_CANCEL])
         // for U2F/CTAP1 we expect to read
-        //  (HIDCmd::KeepAlive, [status]).
+        //  (HIDCmd::Keepalive, [status]).
         self.u2f_read()
     }
 
@@ -152,11 +158,5 @@ where
         };
         trace!("u2f_read({:?}) cmd={:?}: {:04X?}", self.id(), cmd, &data);
         Ok((cmd, data))
-    }
-
-    fn cancel(&mut self) -> Result<(), HIDError> {
-        let cancel: u8 = HIDCmd::Cancel.into();
-        self.u2f_write(cancel, &[])?;
-        Ok(())
     }
 }

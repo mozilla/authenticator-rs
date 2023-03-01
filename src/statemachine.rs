@@ -308,6 +308,7 @@ impl StateMachineCtap2 {
         info: DeviceBuildParameters,
         selector: &Sender<DeviceSelectorEvent>,
         ctap2_only: bool,
+        keep_alive: &dyn Fn() -> bool,
     ) -> Option<Device> {
         // Create a new device.
         let mut dev = match Device::new(info) {
@@ -349,9 +350,16 @@ impl StateMachineCtap2 {
             .send(DeviceSelectorEvent::ImAToken((write_only_clone, tx)))
             .ok()?;
 
+        // We can be cancelled from the user (through keep_alive()) or from the device selector
+        // (through a DeviceCommand::Cancel on rx).  We'll combine those signals into a single
+        // predicate to pass to Device::block_and_blink.
+        let keep_blinking = || {
+            keep_alive() && !matches!(rx.try_recv(), Ok(DeviceCommand::Cancel))
+        };
+
         // Blocking recv. DeviceSelector will tell us what to do
         match rx.recv() {
-            Ok(DeviceCommand::Blink) => match dev.block_and_blink() {
+            Ok(DeviceCommand::Blink) => match dev.block_and_blink(&keep_blinking) {
                 BlinkResult::DeviceSelected => {
                     // User selected us. Let DeviceSelector know, so it can cancel all other
                     // outstanding open blink-requests.
@@ -364,6 +372,10 @@ impl StateMachineCtap2 {
                     return None;
                 }
             },
+            Ok(DeviceCommand::Cancel) => {
+                info!("Device {:?} was not selected", dev.id());
+                return None;
+            }
             Ok(DeviceCommand::Removed) => {
                 info!("Device {:?} was removed", dev.id());
                 return None;
@@ -449,7 +461,7 @@ impl StateMachineCtap2 {
             cbc.clone(),
             status,
             move |info, selector, status, alive| {
-                let mut dev = match Self::init_and_select(info, &selector, false) {
+                let mut dev = match Self::init_and_select(info, &selector, false, alive) {
                     None => {
                         return;
                     }
@@ -558,7 +570,7 @@ impl StateMachineCtap2 {
             callback.clone(),
             status,
             move |info, selector, status, alive| {
-                let mut dev = match Self::init_and_select(info, &selector, false) {
+                let mut dev = match Self::init_and_select(info, &selector, false, alive) {
                     None => {
                         return;
                     }
@@ -612,7 +624,10 @@ impl StateMachineCtap2 {
                     // Retry with a different RP ID if one was supplied. This is intended to be
                     // used with the AppID provided in the WebAuthn FIDO AppID extension.
                     if let Some(alternate_rp_id) = getassertion.alternate_rp_id {
-                        getassertion.rp = RelyingPartyWrapper::Data(RelyingParty{id: alternate_rp_id, ..Default::default()});
+                        getassertion.rp = RelyingPartyWrapper::Data(RelyingParty {
+                            id: alternate_rp_id,
+                            ..Default::default()
+                        });
                         getassertion.alternate_rp_id = None;
                         resp = dev.send_msg_cancellable(&getassertion, alive);
                     }
@@ -684,7 +699,7 @@ impl StateMachineCtap2 {
             status,
             move |info, selector, status, alive| {
                 let reset = Reset {};
-                let mut dev = match Self::init_and_select(info, &selector, true) {
+                let mut dev = match Self::init_and_select(info, &selector, true, alive) {
                     None => {
                         return;
                     }
@@ -746,7 +761,7 @@ impl StateMachineCtap2 {
             callback.clone(),
             status,
             move |info, selector, status, alive| {
-                let mut dev = match Self::init_and_select(info, &selector, true) {
+                let mut dev = match Self::init_and_select(info, &selector, true, alive) {
                     None => {
                         return;
                     }
