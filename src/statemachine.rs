@@ -832,7 +832,7 @@ impl StateMachineCtap2 {
                     }
                     res
                 } else {
-                    SetNewPin::new(&authinfo, &shared_secret, &new_pin)
+                    SetNewPin::new(&shared_secret, &new_pin)
                         .map_err(HIDError::Command)
                         .and_then(|msg| dev.send_cbor_cancellable(&msg, alive))
                         .map_err(AuthenticatorError::HIDError)

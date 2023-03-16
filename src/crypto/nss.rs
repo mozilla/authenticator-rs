@@ -23,7 +23,7 @@ use nss_gk_api::p11::PK11_ImportDERPrivateKeyInfoAndReturnKey;
 
 impl From<nss_gk_api::Error> for CryptoError {
     fn from(e: nss_gk_api::Error) -> Self {
-        CryptoError::Backend(format!("{}", e))
+        CryptoError::Backend(format!("{e}"))
     }
 }
 
@@ -71,7 +71,7 @@ fn ecdh_nss_raw(client_private: PrivateKey, peer_public: PublicKey) -> Result<Ve
 pub fn ecdhe_p256_raw(peer_spki: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
     nss_gk_api::init();
 
-    let peer_public = nss_public_key_from_der_spki(&peer_spki)?;
+    let peer_public = nss_public_key_from_der_spki(peer_spki)?;
 
     // Hard-coding the P256 OID here is easier than extracting a group name from peer_public and
     // comparing it with P256. We'll fail in `PK11_GenerateKeyPairWithOpFlags` if peer_public is on

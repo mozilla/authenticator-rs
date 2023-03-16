@@ -5,10 +5,10 @@ use super::{
 use crate::consts::{
     PARAMETER_SIZE, U2F_AUTHENTICATE, U2F_CHECK_IS_REGISTERED, U2F_REQUEST_USER_PRESENCE,
 };
-use crate::crypto::{COSEKey, CryptoError, ECDHSecret, PinUvAuth1, PinUvAuthProtocol};
+use crate::crypto::{COSEKey, CryptoError, ECDHSecret, PinUvAuthParam};
 use crate::ctap2::attestation::{AuthenticatorData, AuthenticatorDataFlags};
 use crate::ctap2::client_data::{ClientDataHash, CollectedClientData, CollectedClientDataWrapper};
-use crate::ctap2::commands::client_pin::{Pin, PinAuth};
+use crate::ctap2::commands::client_pin::Pin;
 use crate::ctap2::commands::get_next_assertion::GetNextAssertion;
 use crate::ctap2::commands::make_credentials::UserVerification;
 use crate::ctap2::server::{PublicKeyCredentialDescriptor, RelyingPartyWrapper, User};
@@ -104,11 +104,11 @@ impl HmacSecretExtension {
                     return Err(CryptoError::WrongSaltLength.into());
                 }
                 let salts = [&self.salt1[..32], &salt2[..32]].concat(); // salt1 || salt2
-                PinUvAuth1::encrypt(secret.shared_secret(), &salts)
+                secret.shared_secret().encrypt(&salts)
             }
-            None => PinUvAuth1::encrypt(secret.shared_secret(), &self.salt1[..32]),
+            None => secret.shared_secret().encrypt(&self.salt1[..32]),
         }?;
-        let salt_auth = PinUvAuth1::authenticate(secret.shared_secret(), &salt_enc)?;
+        let salt_auth = secret.shared_secret().authenticate(&salt_enc)?;
         let public_key = secret.my_public_key().clone();
         self.calculated_hmac = Some(CalculatedHmacSecretExtension {
             public_key,
@@ -176,11 +176,10 @@ pub struct GetAssertion {
     pub(crate) extensions: GetAssertionExtensions,
     pub(crate) options: GetAssertionOptions,
     pub(crate) pin: Option<Pin>,
-    pub(crate) pin_auth: Option<PinAuth>,
+    pub(crate) pin_auth: Option<PinUvAuthParam>,
 
     // This is used to implement the FIDO AppID extension.
     pub(crate) alternate_rp_id: Option<String>,
-    //TODO(MS): pinProtocol
 }
 
 impl GetAssertion {
@@ -216,11 +215,11 @@ impl PinAuthCommand for GetAssertion {
         self.pin = pin;
     }
 
-    fn pin_auth(&self) -> &Option<PinAuth> {
+    fn pin_auth(&self) -> &Option<PinUvAuthParam> {
         &self.pin_auth
     }
 
-    fn set_pin_auth(&mut self, pin_auth: Option<PinAuth>, _pint_auth_protocol: Option<u64>) {
+    fn set_pin_auth(&mut self, pin_auth: Option<PinUvAuthParam>) {
         self.pin_auth = pin_auth;
     }
 
@@ -279,7 +278,7 @@ impl Serialize for GetAssertion {
         }
         if let Some(pin_auth) = &self.pin_auth {
             map.serialize_entry(&6, &pin_auth)?;
-            map.serialize_entry(&7, &1)?;
+            map.serialize_entry(&7, &pin_auth.pin_protocol.id())?;
         }
         map.end()
     }
@@ -338,10 +337,11 @@ impl<'assertion> RequestCtap1 for CheckKeyHandle<'assertion> {
         // if the control byte is set to 0x07 by the FIDO Client, the U2F token is supposed to
         // simply check whether the provided key handle was originally created by this token,
         // and whether it was created for the provided application parameter. If so, the U2F
-        // token MUST respond with an authentication response message:error:test-of-user-presence-required
-        // (note that despite the name this signals a success condition).
-        // If the key handle was not created by this U2F token, or if it was created for a different
-        // application parameter, the token MUST respond with an authentication response message:error:bad-key-handle.
+        // token MUST respond with an authentication response
+        // message:error:test-of-user-presence-required (note that despite the name this
+        // signals a success condition). If the key handle was not created by this U2F
+        // token, or if it was created for a different application parameter, the token MUST
+        // respond with an authentication response message:error:bad-key-handle.
         match status {
             Ok(_) | Err(ApduErrorStatus::ConditionsNotSatisfied) => Ok(()),
             Err(e) => Err(Retryable::Error(HIDError::ApduStatus(e))),
