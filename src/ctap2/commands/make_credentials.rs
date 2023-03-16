@@ -5,6 +5,7 @@ use super::{
 use crate::consts::{PARAMETER_SIZE, U2F_REGISTER, U2F_REQUEST_USER_PRESENCE};
 use crate::crypto::{
     parse_u2f_der_certificate, COSEAlgorithm, COSEEC2Key, COSEKey, COSEKeyType, Curve,
+    PinUvAuthParam,
 };
 use crate::ctap2::attestation::{
     AAGuid, AttestationObject, AttestationStatement, AttestationStatementFidoU2F,
@@ -13,7 +14,7 @@ use crate::ctap2::attestation::{
 use crate::ctap2::client_data::{
     Challenge, ClientDataHash, CollectedClientData, CollectedClientDataWrapper, WebauthnType,
 };
-use crate::ctap2::commands::client_pin::{Pin, PinAuth};
+use crate::ctap2::commands::client_pin::Pin;
 use crate::ctap2::commands::get_assertion::CheckKeyHandle;
 use crate::ctap2::server::{
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty,
@@ -109,8 +110,7 @@ pub struct MakeCredentials {
     pub(crate) extensions: MakeCredentialsExtensions,
     pub(crate) options: MakeCredentialsOptions,
     pub(crate) pin: Option<Pin>,
-    pub(crate) pin_auth: Option<PinAuth>,
-    pub(crate) pin_auth_protocol: Option<u64>,
+    pub(crate) pin_auth: Option<PinUvAuthParam>,
     pub(crate) enterprise_attestation: Option<u64>,
 }
 
@@ -136,7 +136,6 @@ impl MakeCredentials {
             options,
             pin,
             pin_auth: None,
-            pin_auth_protocol: None,
             enterprise_attestation: None,
         })
     }
@@ -151,13 +150,12 @@ impl PinAuthCommand for MakeCredentials {
         self.pin = pin;
     }
 
-    fn pin_auth(&self) -> &Option<PinAuth> {
+    fn pin_auth(&self) -> &Option<PinUvAuthParam> {
         &self.pin_auth
     }
 
-    fn set_pin_auth(&mut self, pin_auth: Option<PinAuth>, pin_auth_protocol: Option<u64>) {
+    fn set_pin_auth(&mut self, pin_auth: Option<PinUvAuthParam>) {
         self.pin_auth = pin_auth;
-        self.pin_auth_protocol = pin_auth_protocol;
     }
 
     fn client_data_hash(&self) -> ClientDataHash {
@@ -188,10 +186,7 @@ impl Serialize for MakeCredentials {
             map_len += 1;
         }
         if self.pin_auth.is_some() {
-            map_len += 1;
-        }
-        if self.pin_auth_protocol.is_some() {
-            map_len += 1;
+            map_len += 2;
         }
         if self.enterprise_attestation.is_some() {
             map_len += 1;
@@ -223,9 +218,7 @@ impl Serialize for MakeCredentials {
         }
         if let Some(pin_auth) = &self.pin_auth {
             map.serialize_entry(&0x08, &pin_auth)?;
-        }
-        if let Some(pin_auth_protocol) = &self.pin_auth_protocol {
-            map.serialize_entry(&0x09, &pin_auth_protocol)?;
+            map.serialize_entry(&0x09, &pin_auth.pin_protocol.id())?;
         }
         if let Some(enterprise_attestation) = self.enterprise_attestation {
             map.serialize_entry(&0x0a, &enterprise_attestation)?;
@@ -250,7 +243,8 @@ impl RequestCtap1 for MakeCredentials {
     {
         // TODO(MS): Mandatory sanity checks are missing:
         // https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html#u2f-authenticatorMakeCredential-interoperability
-        // If any of the below conditions is not true, platform errors out with CTAP2_ERR_UNSUPPORTED_OPTION.
+        // If any of the below conditions is not true, platform errors out with
+        // CTAP2_ERR_UNSUPPORTED_OPTION.
         //  * pubKeyCredParams must use the ES256 algorithm (-7).
         //  * Options must not include "rk" set to true.
         //  * Options must not include "uv" set to true.
@@ -354,7 +348,8 @@ impl RequestCtap1 for MakeCredentials {
                 rp_id_hash: self.rp.hash(),
                 // https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html#u2f-authenticatorMakeCredential-interoperability
                 // "Let flags be a byte whose zeroth bit (bit 0, UP) is set, and whose sixth bit
-                // (bit 6, AT) is set, and all other bits are zero (bit zero is the least significant bit)"
+                // (bit 6, AT) is set, and all other bits are zero (bit zero is the least
+                // significant bit)"
                 flags: AuthenticatorDataFlags::USER_PRESENT | AuthenticatorDataFlags::ATTESTED,
                 counter: 0,
                 credential_data: Some(AttestedCredentialData {

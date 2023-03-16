@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+use crate::ctap2::commands::get_info::AuthenticatorInfo;
 use crate::errors::AuthenticatorError;
 use crate::{ctap2::commands::CommandError, transport::errors::HIDError};
 use serde::{
@@ -46,33 +47,48 @@ const DER_OID_P256_BYTES: &[u8] = &[
     0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07,
 ];
 
-/// CTAP 2.1, Section 6.5.4. PIN/UV Auth Protocol Abstract Definition
-pub trait PinUvAuthProtocol {
-    const PROTOCOL_ID: u64;
-    fn initialize();
-    fn encapsulate(peer_cose_key: &COSEKey) -> Result<ECDHSecret, CryptoError>;
-    fn encrypt(key: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, CryptoError>;
-    fn decrypt(key: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError>;
-    fn authenticate(key: &[u8], message: &[u8]) -> Result<Vec<u8>, CryptoError>;
-}
-
-/// CTAP 2.1, Section 6.5.6.
-pub struct PinUvAuth1;
-
-impl PinUvAuth1 {
-    fn kdf(z: &[u8]) -> Result<Vec<u8>, CryptoError> {
-        // kdf(Z) → sharedSecret
-        //         Return SHA-256(Z)
-        sha256(z)
+pub struct PinUvAuthProtocol(Box<dyn PinProtocolImpl + Send + Sync>);
+impl PinUvAuthProtocol {
+    pub fn id(&self) -> u64 {
+        self.0.protocol_id()
+    }
+    pub fn encapsulate(&self, peer_cose_key: &COSEKey) -> Result<ECDHSecret, CryptoError> {
+        self.0.encapsulate(peer_cose_key)
     }
 }
 
-impl PinUvAuthProtocol for PinUvAuth1 {
-    const PROTOCOL_ID: u64 = 1;
+/// The output of `PinUvAuthProtocol::encapsulate` is supposed to be used with the same
+/// PinProtocolImpl. So we stash a copy of the calling PinUvAuthProtocol in the output ECDHSecret.
+/// We need a trick here to tell the compiler that every PinProtocolImpl we define will implement
+/// Clone.
+trait ClonablePinProtocolImpl {
+    fn clone_box(&self) -> Box<dyn PinProtocolImpl + Send + Sync>;
+}
 
-    fn initialize() {}
+impl<T> ClonablePinProtocolImpl for T
+where
+    T: 'static + PinProtocolImpl + Clone + Send + Sync,
+{
+    fn clone_box(&self) -> Box<dyn PinProtocolImpl + Send + Sync> {
+        Box::new(self.clone())
+    }
+}
 
-    fn encapsulate(peer_cose_key: &COSEKey) -> Result<ECDHSecret, CryptoError> {
+impl Clone for PinUvAuthProtocol {
+    fn clone(&self) -> Self {
+        PinUvAuthProtocol(self.0.as_ref().clone_box())
+    }
+}
+
+/// CTAP 2.1, Section 6.5.4. PIN/UV Auth Protocol Abstract Definition
+trait PinProtocolImpl: ClonablePinProtocolImpl {
+    fn protocol_id(&self) -> u64;
+    fn initialize(&self);
+    fn encrypt(&self, key: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, CryptoError>;
+    fn decrypt(&self, key: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError>;
+    fn authenticate(&self, key: &[u8], message: &[u8]) -> Result<Vec<u8>, CryptoError>;
+    fn kdf(&self, z: &[u8]) -> Result<Vec<u8>, CryptoError>;
+    fn encapsulate(&self, peer_cose_key: &COSEKey) -> Result<ECDHSecret, CryptoError> {
         // [CTAP 2.1]
         // encapsulate(peerCoseKey) → (coseKey, sharedSecret) | error
         //      1) Let sharedSecret be the result of calling ecdh(peerCoseKey). Return any
@@ -103,7 +119,10 @@ impl PinUvAuthProtocol for PinUvAuth1 {
         let peer_spki = peer_cose_ec2_key.der_spki()?;
 
         let (shared_point, client_public_sec1) = ecdhe_p256_raw(&peer_spki)?;
-        let shared_secret = PinUvAuth1::kdf(&shared_point)?;
+        let shared_secret = SharedSecret {
+            key: self.kdf(&shared_point)?,
+            pin_protocol: PinUvAuthProtocol(self.clone_box()),
+        };
 
         let client_cose_ec2_key =
             COSEEC2Key::from_sec1_uncompressed(Curve::SECP256R1, &client_public_sec1)?;
@@ -119,8 +138,47 @@ impl PinUvAuthProtocol for PinUvAuth1 {
             shared_secret,
         })
     }
+}
 
-    fn encrypt(key: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {
+impl TryFrom<&AuthenticatorInfo> for PinUvAuthProtocol {
+    type Error = CommandError;
+
+    fn try_from(info: &AuthenticatorInfo) -> Result<Self, Self::Error> {
+        // CTAP 2.1, Section 6.5.5.4
+        // "If there are multiple mutually supported protocols, and the platform
+        // has no preference, it SHOULD select the one listed first in
+        // pinUvAuthProtocols."
+        for proto_id in info.pin_protocols.iter() {
+            match proto_id {
+                1 => return Ok(PinUvAuthProtocol(Box::new(PinUvAuth1 {}))),
+                2 => return Ok(PinUvAuthProtocol(Box::new(PinUvAuth2 {}))),
+                _ => continue,
+            }
+        }
+        Err(CommandError::UnsupportedPinProtocol)
+    }
+}
+
+impl fmt::Debug for PinUvAuthProtocol {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PinUvAuthProtocol")
+            .field("id", &self.id())
+            .finish()
+    }
+}
+
+/// CTAP 2.1, Section 6.5.6.
+#[derive(Copy, Clone)]
+pub struct PinUvAuth1;
+
+impl PinProtocolImpl for PinUvAuth1 {
+    fn protocol_id(&self) -> u64 {
+        1
+    }
+
+    fn initialize(&self) {}
+
+    fn encrypt(&self, key: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {
         // [CTAP 2.1]
         // encrypt(key, demPlaintext) → ciphertext
         //      Return the AES-256-CBC encryption of plaintext using an all-zero IV. (No padding is
@@ -129,7 +187,7 @@ impl PinUvAuthProtocol for PinUvAuth1 {
         encrypt_aes_256_cbc_no_pad(key, None, plaintext)
     }
 
-    fn decrypt(key: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError> {
+    fn decrypt(&self, key: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError> {
         // [CTAP 2.1]
         // decrypt(key, demCiphertext) → plaintext | error
         //      If the size of ciphertext is not a multiple of the AES block length, return error.
@@ -137,7 +195,7 @@ impl PinUvAuthProtocol for PinUvAuth1 {
         decrypt_aes_256_cbc_no_pad(key, None, ciphertext)
     }
 
-    fn authenticate(key: &[u8], message: &[u8]) -> Result<Vec<u8>, CryptoError> {
+    fn authenticate(&self, key: &[u8], message: &[u8]) -> Result<Vec<u8>, CryptoError> {
         // [CTAP 2.1]
         // authenticate(key, message) → signature
         //      Return the first 16 bytes of the result of computing HMAC-SHA-256 with the given
@@ -146,71 +204,26 @@ impl PinUvAuthProtocol for PinUvAuth1 {
         hmac.truncate(16);
         Ok(hmac)
     }
+
+    fn kdf(&self, z: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        // kdf(Z) → sharedSecret
+        //         Return SHA-256(Z)
+        sha256(z)
+    }
 }
 
 /// CTAP 2.1, Section 6.5.7.
+#[derive(Copy, Clone)]
 pub struct PinUvAuth2;
 
-impl PinUvAuth2 {
-    fn kdf(z: &[u8]) -> Result<Vec<u8>, CryptoError> {
-        // kdf(Z) → sharedSecret
-        //      return HKDF-SHA-256(salt, Z, L = 32, info = "CTAP2 HMAC key") ||
-        //             HKDF-SHA-256(salt, Z, L = 32, info = "CTAP2 AES key")
-        // where salt = [0u8; 32].
-        //
-        // From Section 2 of RFC 5869, we have
-        //   HKDF(salt, Z, 32, info) =
-        //      HKDF-Expand(HKDF-Extract(salt, Z), info || 0x01)
-        //
-        // And for HKDF-SHA256 both Extract and Expand are instantiated with HMAC-SHA256.
-
-        let prk = hmac_sha256(&[0u8; 32], &z)?;
-        let mut shared_secret = hmac_sha256(&prk, "CTAP2 HMAC key\x01".as_bytes())?;
-        shared_secret.append(&mut hmac_sha256(&prk, "CTAP2 AES key\x01".as_bytes())?);
-        Ok(shared_secret)
-    }
-}
-
-impl PinUvAuthProtocol for PinUvAuth2 {
-    const PROTOCOL_ID: u64 = 2;
-
-    fn initialize() {}
-
-    fn encapsulate(peer_cose_key: &COSEKey) -> Result<ECDHSecret, CryptoError> {
-        // Identical to PinUvAuth1::encapsulate except for the change in KDF
-
-        match peer_cose_key.alg {
-            // Again there is not actually a COSEAlgorithm using this KDF...
-            COSEAlgorithm::ECDH_ES_HKDF256 => (),
-            other => return Err(CryptoError::UnsupportedAlgorithm(other)),
-        }
-
-        let peer_cose_ec2_key = match peer_cose_key.key {
-            COSEKeyType::EC2(ref key) => key,
-            _ => return Err(CryptoError::UnsupportedKeyType),
-        };
-
-        let peer_spki = peer_cose_ec2_key.der_spki()?;
-
-        let (shared_point, client_public_sec1) = ecdhe_p256_raw(&peer_spki)?;
-        let shared_secret = PinUvAuth2::kdf(&shared_point)?;
-
-        let client_cose_ec2_key =
-            COSEEC2Key::from_sec1_uncompressed(Curve::SECP256R1, &client_public_sec1)?;
-
-        let client_cose_key = COSEKey {
-            alg: COSEAlgorithm::ECDH_ES_HKDF256,
-            key: COSEKeyType::EC2(client_cose_ec2_key),
-        };
-
-        Ok(ECDHSecret {
-            remote: peer_cose_key.clone(),
-            my: client_cose_key,
-            shared_secret,
-        })
+impl PinProtocolImpl for PinUvAuth2 {
+    fn protocol_id(&self) -> u64 {
+        2
     }
 
-    fn encrypt(key: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {
+    fn initialize(&self) {}
+
+    fn encrypt(&self, key: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {
         // [CTAP 2.1]
         // encrypt(key, demPlaintext) → ciphertext
         //      1. Discard the first 32 bytes of key. (This selects the AES-key portion of the
@@ -233,7 +246,7 @@ impl PinUvAuthProtocol for PinUvAuth2 {
         Ok(out)
     }
 
-    fn decrypt(key: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError> {
+    fn decrypt(&self, key: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError> {
         // decrypt(key, demCiphertext) → plaintext | error
         //      1. Discard the first 32 bytes of key. (This selects the AES-key portion of the
         //         shared secret.)
@@ -248,7 +261,7 @@ impl PinUvAuthProtocol for PinUvAuth2 {
         decrypt_aes_256_cbc_no_pad(key, Some(iv), ct)
     }
 
-    fn authenticate(key: &[u8], message: &[u8]) -> Result<Vec<u8>, CryptoError> {
+    fn authenticate(&self, key: &[u8], message: &[u8]) -> Result<Vec<u8>, CryptoError> {
         // authenticate(key, message) → signature
         //      1. If key is longer than 32 bytes, discard the excess. (This selects the HMAC-key
         //         portion of the shared secret. When key is the pinUvAuthToken, it is exactly 32
@@ -259,6 +272,81 @@ impl PinUvAuthProtocol for PinUvAuth2 {
         }
         let key = &key[0..32];
         hmac_sha256(key, message)
+    }
+
+    fn kdf(&self, z: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        // kdf(Z) → sharedSecret
+        //      return HKDF-SHA-256(salt, Z, L = 32, info = "CTAP2 HMAC key") ||
+        //             HKDF-SHA-256(salt, Z, L = 32, info = "CTAP2 AES key")
+        // where salt = [0u8; 32].
+        //
+        // From Section 2 of RFC 5869, we have
+        //   HKDF(salt, Z, 32, info) =
+        //      HKDF-Expand(HKDF-Extract(salt, Z), info || 0x01)
+        //
+        // And for HKDF-SHA256 both Extract and Expand are instantiated with HMAC-SHA256.
+
+        let prk = hmac_sha256(&[0u8; 32], z)?;
+        let mut shared_secret = hmac_sha256(&prk, "CTAP2 HMAC key\x01".as_bytes())?;
+        shared_secret.append(&mut hmac_sha256(&prk, "CTAP2 AES key\x01".as_bytes())?);
+        Ok(shared_secret)
+    }
+}
+
+#[derive(Clone)]
+pub struct SharedSecret {
+    pub pin_protocol: PinUvAuthProtocol,
+    key: Vec<u8>,
+}
+
+impl SharedSecret {
+    pub fn encrypt(&self, plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        self.pin_protocol.0.encrypt(&self.key, plaintext)
+    }
+    pub fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        self.pin_protocol.0.decrypt(&self.key, ciphertext)
+    }
+    pub fn decrypt_pin_token(&self, encrypted_pin_token: &[u8]) -> Result<PinToken, CryptoError> {
+        let pin_token = self.decrypt(encrypted_pin_token)?;
+        Ok(PinToken {
+            pin_protocol: self.pin_protocol.clone(),
+            pin_token,
+        })
+    }
+    pub fn authenticate(&self, message: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        self.pin_protocol.0.authenticate(&self.key, message)
+    }
+}
+
+#[derive(Clone)]
+pub struct PinToken {
+    pub pin_protocol: PinUvAuthProtocol,
+    pin_token: Vec<u8>,
+    // TODO(jms): add permissions
+}
+
+impl PinToken {
+    pub fn derive(&self, message: &[u8]) -> Result<PinUvAuthParam, CryptoError> {
+        let pin_auth = self.pin_protocol.0.authenticate(&self.pin_token, message)?;
+        Ok(PinUvAuthParam {
+            pin_protocol: self.pin_protocol.clone(),
+            pin_auth,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct PinUvAuthParam {
+    pub pin_protocol: PinUvAuthProtocol,
+    pin_auth: Vec<u8>,
+}
+
+impl Serialize for PinUvAuthParam {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serde_bytes::serialize(&self.pin_auth[..], serializer)
     }
 }
 
@@ -311,6 +399,7 @@ impl TryFrom<u64> for Curve {
 /// A COSE signature algorithm, indicating the type of key and hash type
 /// that should be used.
 /// see: https://www.iana.org/assignments/cose/cose.xhtml#table-algorithms
+#[rustfmt::skip]
 #[allow(non_camel_case_types)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum COSEAlgorithm {
@@ -795,7 +884,7 @@ impl<'de> Deserialize<'de> for COSEKey {
                                 }
                                 let value: u64 = map.next_value()?;
                                 let val = Curve::try_from(value).map_err(|_| {
-                                    SerdeError::custom(format!("unsupported curve {}", value))
+                                    SerdeError::custom(format!("unsupported curve {value}"))
                                 })?;
                                 curve = Some(val);
                                 // curve = Some(map.next_value()?);
@@ -948,7 +1037,7 @@ impl From<CryptoError> for AuthenticatorError {
 pub struct ECDHSecret {
     remote: COSEKey,
     my: COSEKey,
-    shared_secret: Vec<u8>,
+    shared_secret: SharedSecret,
 }
 
 impl ECDHSecret {
@@ -956,7 +1045,7 @@ impl ECDHSecret {
         &self.my
     }
 
-    pub fn shared_secret(&self) -> &[u8] {
+    pub fn shared_secret(&self) -> &SharedSecret {
         &self.shared_secret
     }
 }
@@ -1032,7 +1121,7 @@ pub fn parse_u2f_der_certificate(data: &[u8]) -> Result<U2FRegisterAnswer, Crypt
 mod test {
     use super::{
         backend::hmac_sha256, backend::sha256, backend::test_ecdh_p256_raw, COSEAlgorithm, COSEKey,
-        Curve, PinUvAuth1, PinUvAuth2, PinUvAuthProtocol,
+        Curve, PinProtocolImpl, PinUvAuth1, PinUvAuth2, PinUvAuthProtocol, SharedSecret,
     };
     use crate::crypto::{COSEEC2Key, COSEKeyType};
     use crate::ctap2::commands::client_pin::Pin;
@@ -1114,22 +1203,25 @@ mod test {
             y: DEV_PUB_Y,
         };
 
-        // We are using `test_cose_ec2_p256_ecdh_sha256()` here, because we need a way to hand in the private key
-        // which would be generated on the fly otherwise (ephemeral keys), to predict the outputs
+        // We are using `test_cose_ec2_p256_ecdh_sha256()` here, because we need a way to hand in
+        // the private key which would be generated on the fly otherwise (ephemeral keys),
+        // to predict the outputs
         let peer_spki = peer_ec2_key.der_spki().unwrap();
         let shared_point = test_ecdh_p256_raw(&peer_spki, &EC_PUB_X, &EC_PUB_Y, &EC_PRIV).unwrap();
-        let shared_secret = sha256(&shared_point).unwrap();
-        assert_eq!(shared_secret, SHARED);
+        let shared_secret = SharedSecret {
+            pin_protocol: PinUvAuthProtocol(Box::new(PinUvAuth1 {})),
+            key: sha256(&shared_point).unwrap(),
+        };
+        assert_eq!(shared_secret.key, SHARED);
 
-        let token_enc = encrypt(shared_secret.shared_secret(), &TOKEN).unwrap();
+        let token_enc = shared_secret.encrypt(&TOKEN).unwrap();
         assert_eq!(token_enc, TOKEN_ENC);
 
-        let token = PinUvAuth1::decrypt(&shared_secret, &TOKEN_ENC).unwrap();
+        let token = shared_secret.decrypt(&TOKEN_ENC).unwrap();
         assert_eq!(token, TOKEN);
 
         let pin = Pin::new("1234");
-        let pin_hash_enc =
-            PinUvAuth1::encrypt(&shared_secret, pin.for_pin_token().as_ref()).unwrap();
+        let pin_hash_enc = shared_secret.encrypt(&pin.for_pin_token()).unwrap();
         assert_eq!(pin_hash_enc, PIN_HASH_ENC);
     }
 
@@ -1163,7 +1255,7 @@ mod test {
         // ```
         let input = decode_hex("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
         let expected = decode_hex("570B4ED82AA5DFB49DB79DBEAF4B315D8ABB1A9867B245F3367026987C0D47A17D9A93C39BAEC741D141C6238D8E1846DE323D8EED022CB397D19A73B98945E2");
-        let output = PinUvAuth2::kdf(&input).unwrap();
+        let output = PinUvAuth2 {}.kdf(&input).unwrap();
         assert_eq!(&expected, &output);
     }
 
@@ -1190,11 +1282,14 @@ mod test {
     fn test_pin_encryption_and_hashing() {
         let pin = "1234";
 
-        let shared_secret = vec![
-            0x82, 0xE3, 0xD8, 0x41, 0xE2, 0x5C, 0x5C, 0x13, 0x46, 0x2C, 0x12, 0x3C, 0xC3, 0xD3,
-            0x98, 0x78, 0x65, 0xBA, 0x3D, 0x20, 0x46, 0x74, 0xFB, 0xED, 0xD4, 0x7E, 0xF5, 0xAB,
-            0xAB, 0x8D, 0x13, 0x72,
-        ];
+        let shared_secret = SharedSecret {
+            pin_protocol: PinUvAuthProtocol(Box::new(PinUvAuth1 {})),
+            key: vec![
+                0x82, 0xE3, 0xD8, 0x41, 0xE2, 0x5C, 0x5C, 0x13, 0x46, 0x2C, 0x12, 0x3C, 0xC3, 0xD3,
+                0x98, 0x78, 0x65, 0xBA, 0x3D, 0x20, 0x46, 0x74, 0xFB, 0xED, 0xD4, 0x7E, 0xF5, 0xAB,
+                0xAB, 0x8D, 0x13, 0x72,
+            ],
+        };
         let expected_new_pin_enc = vec![
             0x70, 0x66, 0x4B, 0xB5, 0x81, 0xE2, 0x57, 0x45, 0x1A, 0x3A, 0xB9, 0x1B, 0xF1, 0xAA,
             0xD8, 0xE4, 0x5F, 0x6C, 0xE9, 0xB5, 0xC3, 0xB0, 0xF3, 0x2B, 0x5E, 0xCD, 0x62, 0xD0,
@@ -1216,12 +1311,14 @@ mod test {
             .cloned()
             .collect();
 
-        let new_pin_enc =
-            PinUvAuth1::encrypt(&shared_secret, &input).expect("Failed to encrypt pin");
+        let new_pin_enc = shared_secret
+            .encrypt(&input)
+            .expect("Failed to encrypt pin");
         assert_eq!(new_pin_enc, expected_new_pin_enc);
 
-        let pin_auth =
-            PinUvAuth1::authenticate(&shared_secret, &new_pin_enc).expect("HMAC-SHA256 failed");
+        let pin_auth = shared_secret
+            .authenticate(&new_pin_enc)
+            .expect("HMAC-SHA256 failed");
         assert_eq!(pin_auth[0..16], expected_pin_auth);
     }
 }

@@ -1,5 +1,5 @@
 use super::{get_info::AuthenticatorInfo, Command, CommandError, RequestCtap2, StatusCode};
-use crate::crypto::{COSEKey, CryptoError, ECDHSecret, PinUvAuth1, PinUvAuthProtocol};
+use crate::crypto::{COSEKey, CryptoError, ECDHSecret, PinToken, PinUvAuthProtocol};
 use crate::transport::errors::HIDError;
 use crate::u2ftypes::U2FDevice;
 use serde::{
@@ -12,6 +12,7 @@ use serde_cbor::de::from_slice;
 use serde_cbor::ser::to_vec;
 use serde_cbor::Value;
 use sha2::{Digest, Sha256};
+use std::convert::TryFrom;
 use std::error::Error as StdErrorT;
 use std::fmt;
 
@@ -41,10 +42,10 @@ pub enum PinUvAuthTokenPermission {
 
 #[derive(Debug)]
 pub struct ClientPIN {
-    pin_protocol: Option<u8>,
+    pin_protocol: Option<PinUvAuthProtocol>,
     subcommand: PINSubcommand,
     key_agreement: Option<COSEKey>,
-    pin_auth: Option<PinAuth>,
+    pin_auth: Option<ByteBuf>,
     new_pin_enc: Option<ByteBuf>,
     pin_hash_enc: Option<ByteBuf>,
     permissions: Option<u8>,
@@ -98,7 +99,7 @@ impl Serialize for ClientPIN {
 
         let mut map = serializer.serialize_map(Some(map_len))?;
         if let Some(ref pin_protocol) = self.pin_protocol {
-            map.serialize_entry(&1, pin_protocol)?;
+            map.serialize_entry(&1, &pin_protocol.id())?;
         }
         let command: u8 = self.subcommand as u8;
         map.serialize_entry(&2, &command)?;
@@ -106,7 +107,7 @@ impl Serialize for ClientPIN {
             map.serialize_entry(&3, key_agreement)?;
         }
         if let Some(ref pin_auth) = self.pin_auth {
-            map.serialize_entry(&4, &ByteBuf::from(pin_auth.as_ref()))?;
+            map.serialize_entry(&4, pin_auth)?;
         }
         if let Some(ref new_pin_enc) = self.new_pin_enc {
             map.serialize_entry(&5, new_pin_enc)?;
@@ -217,16 +218,14 @@ impl<'de> Deserialize<'de> for ClientPinResponse {
 
 #[derive(Debug)]
 pub struct GetKeyAgreement {
-    pin_protocol: u8,
+    pin_protocol: PinUvAuthProtocol,
 }
 
 impl GetKeyAgreement {
     pub fn new(info: &AuthenticatorInfo) -> Result<Self, CommandError> {
-        if info.pin_protocols.contains(&1) {
-            Ok(GetKeyAgreement { pin_protocol: 1 })
-        } else {
-            Err(CommandError::UnsupportedPinProtocol)
-        }
+        Ok(GetKeyAgreement {
+            pin_protocol: PinUvAuthProtocol::try_from(info)?,
+        })
     }
 }
 
@@ -235,7 +234,7 @@ impl ClientPINSubCommand for GetKeyAgreement {
 
     fn as_client_pin(&self) -> Result<ClientPIN, CommandError> {
         Ok(ClientPIN {
-            pin_protocol: Some(self.pin_protocol),
+            pin_protocol: Some(self.pin_protocol.clone()),
             subcommand: PINSubcommand::GetKeyAgreement,
             ..ClientPIN::default()
         })
@@ -248,7 +247,10 @@ impl ClientPINSubCommand for GetKeyAgreement {
         let get_pin_response: ClientPinResponse =
             from_slice(input).map_err(CommandError::Deserializing)?;
         if let Some(key_agreement) = get_pin_response.key_agreement {
-            Ok(KeyAgreement(key_agreement))
+            Ok(KeyAgreement {
+                pin_protocol: self.pin_protocol.clone(),
+                peer_key: key_agreement,
+            })
         } else {
             Err(CommandError::MissingRequiredField("key_agreement"))
         }
@@ -256,29 +258,16 @@ impl ClientPINSubCommand for GetKeyAgreement {
 }
 
 #[derive(Debug)]
-/// Superseded by GetPinUvAuthTokenUsingUvWithPermissions or GetPinUvAuthTokenUsingPinWithPermissions,
-/// thus for backwards compatibility only
+/// Superseded by GetPinUvAuthTokenUsingUvWithPermissions or
+/// GetPinUvAuthTokenUsingPinWithPermissions, thus for backwards compatibility only
 pub struct GetPinToken<'sc, 'pin> {
-    pin_protocol: u8,
     shared_secret: &'sc ECDHSecret,
     pin: &'pin Pin,
 }
 
 impl<'sc, 'pin> GetPinToken<'sc, 'pin> {
-    pub fn new(
-        info: &AuthenticatorInfo,
-        shared_secret: &'sc ECDHSecret,
-        pin: &'pin Pin,
-    ) -> Result<Self, CommandError> {
-        if info.pin_protocols.contains(&1) {
-            Ok(GetPinToken {
-                pin_protocol: 1,
-                shared_secret,
-                pin,
-            })
-        } else {
-            Err(CommandError::UnsupportedPinProtocol)
-        }
+    pub fn new(shared_secret: &'sc ECDHSecret, pin: &'pin Pin) -> Result<Self, CommandError> {
+        Ok(GetPinToken { shared_secret, pin })
     }
 }
 
@@ -287,12 +276,12 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinToken<'sc, 'pin> {
 
     fn as_client_pin(&self) -> Result<ClientPIN, CommandError> {
         let input = self.pin.for_pin_token();
-        trace!("pin_hash = {:#04X?}", &input.as_ref());
-        let pin_hash_enc = PinUvAuth1::encrypt(self.shared_secret.shared_secret(), input.as_ref())?;
+        trace!("pin_hash = {:#04X?}", &input);
+        let pin_hash_enc = self.shared_secret.shared_secret().encrypt(&input)?;
         trace!("pin_hash_enc = {:#04X?}", &pin_hash_enc);
 
         Ok(ClientPIN {
-            pin_protocol: Some(self.pin_protocol),
+            pin_protocol: Some(self.shared_secret.shared_secret().pin_protocol.clone()),
             subcommand: PINSubcommand::GetPINToken,
             key_agreement: Some(self.shared_secret.my_public_key().clone()),
             pin_hash_enc: Some(ByteBuf::from(pin_hash_enc)),
@@ -308,11 +297,10 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinToken<'sc, 'pin> {
             from_slice(input).map_err(CommandError::Deserializing)?;
         match get_pin_response.pin_token {
             Some(encrypted_pin_token) => {
-                let pin_token = PinUvAuth1::decrypt(
-                    self.shared_secret.shared_secret(),
-                    encrypted_pin_token.as_ref(),
-                )?;
-                let pin_token = PinToken(pin_token);
+                let pin_token = self
+                    .shared_secret
+                    .shared_secret()
+                    .decrypt_pin_token(encrypted_pin_token.as_ref())?;
                 Ok(pin_token)
             }
             None => Err(CommandError::MissingRequiredField("key_agreement")),
@@ -322,7 +310,6 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinToken<'sc, 'pin> {
 
 #[derive(Debug)]
 pub struct GetPinUvAuthTokenUsingPinWithPermissions<'sc, 'pin> {
-    pin_protocol: u8,
     shared_secret: &'sc ECDHSecret,
     pin: &'pin Pin,
     permissions: PinUvAuthTokenPermission,
@@ -331,24 +318,17 @@ pub struct GetPinUvAuthTokenUsingPinWithPermissions<'sc, 'pin> {
 
 impl<'sc, 'pin> GetPinUvAuthTokenUsingPinWithPermissions<'sc, 'pin> {
     pub fn new(
-        info: &AuthenticatorInfo,
         shared_secret: &'sc ECDHSecret,
         pin: &'pin Pin,
         permissions: PinUvAuthTokenPermission,
         rp_id: Option<String>,
     ) -> Result<Self, CommandError> {
-        // TODO(MS): Actually handle protocol 2!
-        if info.pin_protocols.contains(&1) {
-            Ok(GetPinUvAuthTokenUsingPinWithPermissions {
-                pin_protocol: 1,
-                shared_secret,
-                pin,
-                permissions,
-                rp_id,
-            })
-        } else {
-            Err(CommandError::UnsupportedPinProtocol)
-        }
+        Ok(GetPinUvAuthTokenUsingPinWithPermissions {
+            shared_secret,
+            pin,
+            permissions,
+            rp_id,
+        })
     }
 }
 
@@ -357,15 +337,16 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinUvAuthTokenUsingPinWithPermissions
 
     fn as_client_pin(&self) -> Result<ClientPIN, CommandError> {
         let input = self.pin.for_pin_token();
-        let pin_hash_enc = PinUvAuth1::encrypt(self.shared_secret.shared_secret(), input.as_ref())?;
+        let pin_hash_enc = self.shared_secret.shared_secret().encrypt(&input)?;
 
         Ok(ClientPIN {
-            pin_protocol: Some(self.pin_protocol),
+            pin_protocol: Some(self.shared_secret.shared_secret().pin_protocol.clone()),
             subcommand: PINSubcommand::GetPinUvAuthTokenUsingPinWithPermissions,
             key_agreement: Some(self.shared_secret.my_public_key().clone()),
             pin_hash_enc: Some(ByteBuf::from(pin_hash_enc)),
             permissions: Some(self.permissions as u8),
-            rp_id: self.rp_id.clone(), // TODO: This could probably be done less wasteful with &str all the way
+            rp_id: self.rp_id.clone(), /* TODO: This could probably be done less wasteful with
+                                        * &str all the way */
             ..ClientPIN::default()
         })
     }
@@ -378,11 +359,10 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinUvAuthTokenUsingPinWithPermissions
             from_slice(input).map_err(CommandError::Deserializing)?;
         match get_pin_response.pin_token {
             Some(encrypted_pin_token) => {
-                let pin_token = PinUvAuth1::decrypt(
-                    self.shared_secret.shared_secret(),
-                    encrypted_pin_token.as_ref(),
-                )?;
-                let pin_token = PinToken(pin_token);
+                let pin_token = self
+                    .shared_secret
+                    .shared_secret()
+                    .decrypt_pin_token(encrypted_pin_token.as_ref())?;
                 Ok(pin_token)
             }
             None => Err(CommandError::MissingRequiredField("key_agreement")),
@@ -424,26 +404,16 @@ impl ClientPINSubCommand for GetRetries {
 
 #[derive(Debug)]
 pub struct SetNewPin<'sc, 'pin> {
-    pin_protocol: u8,
     shared_secret: &'sc ECDHSecret,
     new_pin: &'pin Pin,
 }
 
 impl<'sc, 'pin> SetNewPin<'sc, 'pin> {
-    pub fn new(
-        info: &AuthenticatorInfo,
-        shared_secret: &'sc ECDHSecret,
-        new_pin: &'pin Pin,
-    ) -> Result<Self, CommandError> {
-        if info.pin_protocols.contains(&1) {
-            Ok(SetNewPin {
-                pin_protocol: 1,
-                shared_secret,
-                new_pin,
-            })
-        } else {
-            Err(CommandError::UnsupportedPinProtocol)
-        }
+    pub fn new(shared_secret: &'sc ECDHSecret, new_pin: &'pin Pin) -> Result<Self, CommandError> {
+        Ok(SetNewPin {
+            shared_secret,
+            new_pin,
+        })
     }
 }
 
@@ -457,31 +427,28 @@ impl<'sc, 'pin> ClientPINSubCommand for SetNewPin<'sc, 'pin> {
                 None,
             ));
         }
-        // Padding the PIN with trailing zeros, according to spec
-        let input: Vec<u8> = self
-            .new_pin
-            .as_bytes()
-            .iter()
-            .chain(std::iter::repeat(&0x00))
-            .take(64)
-            .cloned()
-            .collect();
 
+        // newPinEnc: the result of calling encrypt(shared secret, paddedPin) where paddedPin is
+        // newPin padded on the right with 0x00 bytes to make it 64 bytes long. (Since the maximum
+        // length of newPin is 63 bytes, there is always at least one byte of padding.)
+        let new_pin_bytes = self.new_pin.as_bytes();
+        let mut new_pin_padded = vec![0x00; 64];
+        {
+            let (head, _) = new_pin_padded.split_at_mut(new_pin_bytes.len());
+            head.copy_from_slice(new_pin_bytes);
+        }
         let shared_secret = self.shared_secret.shared_secret();
-        // AES256-CBC(sharedSecret, IV=0, newPin)
-        let new_pin_enc = PinUvAuth1::encrypt(shared_secret, input.as_ref())?;
+        let new_pin_enc = shared_secret.encrypt(&new_pin_padded)?;
 
-        // LEFT(HMAC-SHA-265(sharedSecret, newPinEnc), 16)
-        let pin_auth = PinToken(shared_secret.to_vec())
-            .auth(&new_pin_enc)
-            .map_err(CommandError::Crypto)?;
+        // pinUvAuthParam: the result of calling authenticate(shared secret, newPinEnc).
+        let pin_auth = shared_secret.authenticate(&new_pin_enc)?;
 
         Ok(ClientPIN {
-            pin_protocol: Some(self.pin_protocol),
+            pin_protocol: Some(self.shared_secret.shared_secret().pin_protocol.clone()),
             subcommand: PINSubcommand::SetPIN,
             key_agreement: Some(self.shared_secret.my_public_key().clone()),
             new_pin_enc: Some(ByteBuf::from(new_pin_enc)),
-            pin_auth: Some(pin_auth),
+            pin_auth: Some(ByteBuf::from(pin_auth)),
             ..ClientPIN::default()
         })
     }
@@ -499,7 +466,7 @@ impl<'sc, 'pin> ClientPINSubCommand for SetNewPin<'sc, 'pin> {
 
 #[derive(Debug)]
 pub struct ChangeExistingPin<'sc, 'pin> {
-    pin_protocol: u8,
+    pin_protocol: PinUvAuthProtocol,
     shared_secret: &'sc ECDHSecret,
     current_pin: &'pin Pin,
     new_pin: &'pin Pin,
@@ -512,16 +479,12 @@ impl<'sc, 'pin> ChangeExistingPin<'sc, 'pin> {
         current_pin: &'pin Pin,
         new_pin: &'pin Pin,
     ) -> Result<Self, CommandError> {
-        if info.pin_protocols.contains(&1) {
-            Ok(ChangeExistingPin {
-                pin_protocol: 1,
-                shared_secret,
-                current_pin,
-                new_pin,
-            })
-        } else {
-            Err(CommandError::UnsupportedPinProtocol)
-        }
+        Ok(ChangeExistingPin {
+            pin_protocol: PinUvAuthProtocol::try_from(info)?,
+            shared_secret,
+            current_pin,
+            new_pin,
+        })
     }
 }
 
@@ -535,36 +498,33 @@ impl<'sc, 'pin> ClientPINSubCommand for ChangeExistingPin<'sc, 'pin> {
                 None,
             ));
         }
-        // Padding the PIN with trailing zeros, according to spec
-        let input: Vec<u8> = self
-            .new_pin
-            .as_bytes()
-            .iter()
-            .chain(std::iter::repeat(&0x00))
-            .take(64)
-            .cloned()
-            .collect();
+
+        // newPinEnc: the result of calling encrypt(shared secret, paddedPin) where paddedPin is
+        // newPin padded on the right with 0x00 bytes to make it 64 bytes long. (Since the maximum
+        // length of newPin is 63 bytes, there is always at least one byte of padding.)
+        let new_pin_bytes = self.new_pin.as_bytes();
+        let mut new_pin_padded = vec![0x00; 64];
+        {
+            let (head, _) = new_pin_padded.split_at_mut(new_pin_bytes.len());
+            head.copy_from_slice(new_pin_bytes);
+        }
 
         let shared_secret = self.shared_secret.shared_secret();
-        // AES256-CBC(sharedSecret, IV=0, newPin)
-        let new_pin_enc = PinUvAuth1::encrypt(shared_secret, input.as_ref())?;
+        let new_pin_enc = shared_secret.encrypt(&new_pin_padded)?;
 
-        // AES256-CBC(sharedSecret, IV=0, LEFT(SHA-256(oldPin), 16))
-        let input = self.current_pin.for_pin_token();
-        let pin_hash_enc = PinUvAuth1::encrypt(self.shared_secret.shared_secret(), input.as_ref())?;
+        let current_pin_hash = self.current_pin.for_pin_token();
+        let pin_hash_enc = shared_secret.encrypt(current_pin_hash.as_ref())?;
 
-        // LEFT(HMAC-SHA-265(sharedSecret, newPinEnc), 16)
-        let pin_auth = PinToken(shared_secret.to_vec())
-            .auth(&[new_pin_enc.as_slice(), pin_hash_enc.as_slice()].concat())
-            .map_err(CommandError::Crypto)?;
+        let pin_auth = shared_secret
+            .authenticate(&[new_pin_enc.as_slice(), pin_hash_enc.as_slice()].concat())?;
 
         Ok(ClientPIN {
-            pin_protocol: Some(self.pin_protocol),
+            pin_protocol: Some(self.shared_secret.shared_secret().pin_protocol.clone()),
             subcommand: PINSubcommand::ChangePIN,
             key_agreement: Some(self.shared_secret.my_public_key().clone()),
             new_pin_enc: Some(ByteBuf::from(new_pin_enc)),
             pin_hash_enc: Some(ByteBuf::from(pin_hash_enc)),
-            pin_auth: Some(pin_auth),
+            pin_auth: Some(ByteBuf::from(pin_auth)),
             permissions: None,
             rp_id: None,
         })
@@ -634,11 +594,14 @@ where
 }
 
 #[derive(Debug)]
-pub struct KeyAgreement(COSEKey);
+pub struct KeyAgreement {
+    pin_protocol: PinUvAuthProtocol,
+    peer_key: COSEKey,
+}
 
 impl KeyAgreement {
     pub fn shared_secret(&self) -> Result<ECDHSecret, CommandError> {
-        Ok(PinUvAuth1::encapsulate(&self.0)?)
+        Ok(self.pin_protocol.encapsulate(&self.peer_key)?)
     }
 }
 
@@ -648,46 +611,6 @@ pub struct EncryptedPinToken(ByteBuf);
 impl AsRef<[u8]> for EncryptedPinToken {
     fn as_ref(&self) -> &[u8] {
         self.0.as_ref()
-    }
-}
-
-#[derive(Debug)]
-pub struct PinToken(Vec<u8>);
-
-impl PinToken {
-    pub fn auth(&self, payload: &[u8]) -> Result<PinAuth, CryptoError> {
-        Ok(PinAuth(PinUvAuth1::authenticate(self.as_ref(), payload)?))
-    }
-}
-
-impl AsRef<[u8]> for PinToken {
-    fn as_ref(&self) -> &[u8] {
-        self.0.as_ref()
-    }
-}
-
-#[derive(Debug, Clone)]
-#[cfg_attr(test, derive(Deserialize))]
-pub struct PinAuth(Vec<u8>);
-
-impl PinAuth {
-    pub(crate) fn empty_pin_auth() -> Self {
-        PinAuth(vec![])
-    }
-}
-
-impl AsRef<[u8]> for PinAuth {
-    fn as_ref(&self) -> &[u8] {
-        &self.0
-    }
-}
-
-impl Serialize for PinAuth {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serde_bytes::serialize(&self.0[..], serializer)
     }
 }
 
@@ -705,7 +628,7 @@ impl Pin {
         Pin(String::from(value))
     }
 
-    pub fn for_pin_token(&self) -> PinAuth {
+    pub fn for_pin_token(&self) -> Vec<u8> {
         let mut hasher = Sha256::new();
         hasher.update(self.0.as_bytes());
 
@@ -713,7 +636,7 @@ impl Pin {
         let len = output.len();
         output.copy_from_slice(&hasher.finalize().as_slice()[..len]);
 
-        PinAuth(output.to_vec())
+        output.to_vec()
     }
 
     pub fn as_bytes(&self) -> &[u8] {
@@ -757,7 +680,7 @@ impl fmt::Display for PinError {
                 "PinError: No retries left. Pin blocked. Device needs reset."
             ),
             PinError::PinNotSet => write!(f, "PinError: Pin needed but not set on device."),
-            PinError::Crypto(ref e) => write!(f, "PinError: Crypto backend error: {:?}", e),
+            PinError::Crypto(ref e) => write!(f, "PinError: Crypto backend error: {e:?}"),
         }
     }
 }
