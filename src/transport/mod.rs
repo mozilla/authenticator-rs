@@ -1,5 +1,5 @@
 use crate::consts::HIDCmd;
-use crate::crypto::ECDHSecret;
+use crate::crypto::SharedSecret;
 
 use crate::ctap2::commands::client_pin::GetKeyAgreement;
 use crate::ctap2::commands::get_info::{AuthenticatorInfo, GetInfo};
@@ -246,7 +246,7 @@ pub trait FidoDevice: HIDDevice {
         }
     }
 
-    fn establish_shared_secret(&mut self) -> Result<(ECDHSecret, AuthenticatorInfo), HIDError> {
+    fn establish_shared_secret(&mut self) -> Result<(SharedSecret, AuthenticatorInfo), HIDError> {
         if !self.supports_ctap2() {
             return Err(HIDError::UnsupportedCommand);
         }

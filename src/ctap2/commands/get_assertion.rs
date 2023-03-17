@@ -5,7 +5,7 @@ use super::{
 use crate::consts::{
     PARAMETER_SIZE, U2F_AUTHENTICATE, U2F_CHECK_IS_REGISTERED, U2F_REQUEST_USER_PRESENCE,
 };
-use crate::crypto::{COSEKey, CryptoError, ECDHSecret, PinUvAuthParam};
+use crate::crypto::{COSEKey, CryptoError, PinUvAuthParam, SharedSecret};
 use crate::ctap2::attestation::{AuthenticatorData, AuthenticatorDataFlags};
 use crate::ctap2::client_data::{ClientDataHash, CollectedClientData, CollectedClientDataWrapper};
 use crate::ctap2::commands::client_pin::Pin;
@@ -94,7 +94,7 @@ impl HmacSecretExtension {
         }
     }
 
-    pub fn calculate(&mut self, secret: &ECDHSecret) -> Result<(), AuthenticatorError> {
+    pub fn calculate(&mut self, secret: &SharedSecret) -> Result<(), AuthenticatorError> {
         if self.salt1.len() < 32 {
             return Err(CryptoError::WrongSaltLength.into());
         }
@@ -104,12 +104,12 @@ impl HmacSecretExtension {
                     return Err(CryptoError::WrongSaltLength.into());
                 }
                 let salts = [&self.salt1[..32], &salt2[..32]].concat(); // salt1 || salt2
-                secret.shared_secret().encrypt(&salts)
+                secret.encrypt(&salts)
             }
-            None => secret.shared_secret().encrypt(&self.salt1[..32]),
+            None => secret.encrypt(&self.salt1[..32]),
         }?;
-        let salt_auth = secret.shared_secret().authenticate(&salt_enc)?;
-        let public_key = secret.my_public_key().clone();
+        let salt_auth = secret.authenticate(&salt_enc)?;
+        let public_key = secret.client_input().clone();
         self.calculated_hmac = Some(CalculatedHmacSecretExtension {
             public_key,
             salt_enc,

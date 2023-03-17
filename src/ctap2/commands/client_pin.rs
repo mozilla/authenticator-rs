@@ -1,5 +1,5 @@
 use super::{get_info::AuthenticatorInfo, Command, CommandError, RequestCtap2, StatusCode};
-use crate::crypto::{COSEKey, CryptoError, ECDHSecret, PinToken, PinUvAuthProtocol};
+use crate::crypto::{COSEKey, CryptoError, PinToken, PinUvAuthProtocol, SharedSecret};
 use crate::transport::errors::HIDError;
 use crate::u2ftypes::U2FDevice;
 use serde::{
@@ -261,12 +261,12 @@ impl ClientPINSubCommand for GetKeyAgreement {
 /// Superseded by GetPinUvAuthTokenUsingUvWithPermissions or
 /// GetPinUvAuthTokenUsingPinWithPermissions, thus for backwards compatibility only
 pub struct GetPinToken<'sc, 'pin> {
-    shared_secret: &'sc ECDHSecret,
+    shared_secret: &'sc SharedSecret,
     pin: &'pin Pin,
 }
 
 impl<'sc, 'pin> GetPinToken<'sc, 'pin> {
-    pub fn new(shared_secret: &'sc ECDHSecret, pin: &'pin Pin) -> Result<Self, CommandError> {
+    pub fn new(shared_secret: &'sc SharedSecret, pin: &'pin Pin) -> Result<Self, CommandError> {
         Ok(GetPinToken { shared_secret, pin })
     }
 }
@@ -277,13 +277,13 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinToken<'sc, 'pin> {
     fn as_client_pin(&self) -> Result<ClientPIN, CommandError> {
         let input = self.pin.for_pin_token();
         trace!("pin_hash = {:#04X?}", &input);
-        let pin_hash_enc = self.shared_secret.shared_secret().encrypt(&input)?;
+        let pin_hash_enc = self.shared_secret.encrypt(&input)?;
         trace!("pin_hash_enc = {:#04X?}", &pin_hash_enc);
 
         Ok(ClientPIN {
-            pin_protocol: Some(self.shared_secret.shared_secret().pin_protocol.clone()),
+            pin_protocol: Some(self.shared_secret.pin_protocol.clone()),
             subcommand: PINSubcommand::GetPINToken,
-            key_agreement: Some(self.shared_secret.my_public_key().clone()),
+            key_agreement: Some(self.shared_secret.client_input().clone()),
             pin_hash_enc: Some(ByteBuf::from(pin_hash_enc)),
             ..ClientPIN::default()
         })
@@ -299,7 +299,6 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinToken<'sc, 'pin> {
             Some(encrypted_pin_token) => {
                 let pin_token = self
                     .shared_secret
-                    .shared_secret()
                     .decrypt_pin_token(encrypted_pin_token.as_ref())?;
                 Ok(pin_token)
             }
@@ -310,7 +309,7 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinToken<'sc, 'pin> {
 
 #[derive(Debug)]
 pub struct GetPinUvAuthTokenUsingPinWithPermissions<'sc, 'pin> {
-    shared_secret: &'sc ECDHSecret,
+    shared_secret: &'sc SharedSecret,
     pin: &'pin Pin,
     permissions: PinUvAuthTokenPermission,
     rp_id: Option<String>,
@@ -318,7 +317,7 @@ pub struct GetPinUvAuthTokenUsingPinWithPermissions<'sc, 'pin> {
 
 impl<'sc, 'pin> GetPinUvAuthTokenUsingPinWithPermissions<'sc, 'pin> {
     pub fn new(
-        shared_secret: &'sc ECDHSecret,
+        shared_secret: &'sc SharedSecret,
         pin: &'pin Pin,
         permissions: PinUvAuthTokenPermission,
         rp_id: Option<String>,
@@ -337,12 +336,12 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinUvAuthTokenUsingPinWithPermissions
 
     fn as_client_pin(&self) -> Result<ClientPIN, CommandError> {
         let input = self.pin.for_pin_token();
-        let pin_hash_enc = self.shared_secret.shared_secret().encrypt(&input)?;
+        let pin_hash_enc = self.shared_secret.encrypt(&input)?;
 
         Ok(ClientPIN {
-            pin_protocol: Some(self.shared_secret.shared_secret().pin_protocol.clone()),
+            pin_protocol: Some(self.shared_secret.pin_protocol.clone()),
             subcommand: PINSubcommand::GetPinUvAuthTokenUsingPinWithPermissions,
-            key_agreement: Some(self.shared_secret.my_public_key().clone()),
+            key_agreement: Some(self.shared_secret.client_input().clone()),
             pin_hash_enc: Some(ByteBuf::from(pin_hash_enc)),
             permissions: Some(self.permissions as u8),
             rp_id: self.rp_id.clone(), /* TODO: This could probably be done less wasteful with
@@ -361,7 +360,6 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinUvAuthTokenUsingPinWithPermissions
             Some(encrypted_pin_token) => {
                 let pin_token = self
                     .shared_secret
-                    .shared_secret()
                     .decrypt_pin_token(encrypted_pin_token.as_ref())?;
                 Ok(pin_token)
             }
@@ -404,12 +402,12 @@ impl ClientPINSubCommand for GetRetries {
 
 #[derive(Debug)]
 pub struct SetNewPin<'sc, 'pin> {
-    shared_secret: &'sc ECDHSecret,
+    shared_secret: &'sc SharedSecret,
     new_pin: &'pin Pin,
 }
 
 impl<'sc, 'pin> SetNewPin<'sc, 'pin> {
-    pub fn new(shared_secret: &'sc ECDHSecret, new_pin: &'pin Pin) -> Result<Self, CommandError> {
+    pub fn new(shared_secret: &'sc SharedSecret, new_pin: &'pin Pin) -> Result<Self, CommandError> {
         Ok(SetNewPin {
             shared_secret,
             new_pin,
@@ -437,16 +435,15 @@ impl<'sc, 'pin> ClientPINSubCommand for SetNewPin<'sc, 'pin> {
             let (head, _) = new_pin_padded.split_at_mut(new_pin_bytes.len());
             head.copy_from_slice(new_pin_bytes);
         }
-        let shared_secret = self.shared_secret.shared_secret();
-        let new_pin_enc = shared_secret.encrypt(&new_pin_padded)?;
+        let new_pin_enc = self.shared_secret.encrypt(&new_pin_padded)?;
 
         // pinUvAuthParam: the result of calling authenticate(shared secret, newPinEnc).
-        let pin_auth = shared_secret.authenticate(&new_pin_enc)?;
+        let pin_auth = self.shared_secret.authenticate(&new_pin_enc)?;
 
         Ok(ClientPIN {
-            pin_protocol: Some(self.shared_secret.shared_secret().pin_protocol.clone()),
+            pin_protocol: Some(self.shared_secret.pin_protocol.clone()),
             subcommand: PINSubcommand::SetPIN,
-            key_agreement: Some(self.shared_secret.my_public_key().clone()),
+            key_agreement: Some(self.shared_secret.client_input().clone()),
             new_pin_enc: Some(ByteBuf::from(new_pin_enc)),
             pin_auth: Some(ByteBuf::from(pin_auth)),
             ..ClientPIN::default()
@@ -467,7 +464,7 @@ impl<'sc, 'pin> ClientPINSubCommand for SetNewPin<'sc, 'pin> {
 #[derive(Debug)]
 pub struct ChangeExistingPin<'sc, 'pin> {
     pin_protocol: PinUvAuthProtocol,
-    shared_secret: &'sc ECDHSecret,
+    shared_secret: &'sc SharedSecret,
     current_pin: &'pin Pin,
     new_pin: &'pin Pin,
 }
@@ -475,7 +472,7 @@ pub struct ChangeExistingPin<'sc, 'pin> {
 impl<'sc, 'pin> ChangeExistingPin<'sc, 'pin> {
     pub fn new(
         info: &AuthenticatorInfo,
-        shared_secret: &'sc ECDHSecret,
+        shared_secret: &'sc SharedSecret,
         current_pin: &'pin Pin,
         new_pin: &'pin Pin,
     ) -> Result<Self, CommandError> {
@@ -509,19 +506,19 @@ impl<'sc, 'pin> ClientPINSubCommand for ChangeExistingPin<'sc, 'pin> {
             head.copy_from_slice(new_pin_bytes);
         }
 
-        let shared_secret = self.shared_secret.shared_secret();
-        let new_pin_enc = shared_secret.encrypt(&new_pin_padded)?;
+        let new_pin_enc = self.shared_secret.encrypt(&new_pin_padded)?;
 
         let current_pin_hash = self.current_pin.for_pin_token();
-        let pin_hash_enc = shared_secret.encrypt(current_pin_hash.as_ref())?;
+        let pin_hash_enc = self.shared_secret.encrypt(current_pin_hash.as_ref())?;
 
-        let pin_auth = shared_secret
+        let pin_auth = self
+            .shared_secret
             .authenticate(&[new_pin_enc.as_slice(), pin_hash_enc.as_slice()].concat())?;
 
         Ok(ClientPIN {
-            pin_protocol: Some(self.shared_secret.shared_secret().pin_protocol.clone()),
+            pin_protocol: Some(self.shared_secret.pin_protocol.clone()),
             subcommand: PINSubcommand::ChangePIN,
-            key_agreement: Some(self.shared_secret.my_public_key().clone()),
+            key_agreement: Some(self.shared_secret.client_input().clone()),
             new_pin_enc: Some(ByteBuf::from(new_pin_enc)),
             pin_hash_enc: Some(ByteBuf::from(pin_hash_enc)),
             pin_auth: Some(ByteBuf::from(pin_auth)),
@@ -600,7 +597,7 @@ pub struct KeyAgreement {
 }
 
 impl KeyAgreement {
-    pub fn shared_secret(&self) -> Result<ECDHSecret, CommandError> {
+    pub fn shared_secret(&self) -> Result<SharedSecret, CommandError> {
         Ok(self.pin_protocol.encapsulate(&self.peer_key)?)
     }
 }
