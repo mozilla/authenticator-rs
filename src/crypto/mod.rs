@@ -52,13 +52,13 @@ impl PinUvAuthProtocol {
     pub fn id(&self) -> u64 {
         self.0.protocol_id()
     }
-    pub fn encapsulate(&self, peer_cose_key: &COSEKey) -> Result<ECDHSecret, CryptoError> {
+    pub fn encapsulate(&self, peer_cose_key: &COSEKey) -> Result<SharedSecret, CryptoError> {
         self.0.encapsulate(peer_cose_key)
     }
 }
 
 /// The output of `PinUvAuthProtocol::encapsulate` is supposed to be used with the same
-/// PinProtocolImpl. So we stash a copy of the calling PinUvAuthProtocol in the output ECDHSecret.
+/// PinProtocolImpl. So we stash a copy of the calling PinUvAuthProtocol in the output SharedSecret.
 /// We need a trick here to tell the compiler that every PinProtocolImpl we define will implement
 /// Clone.
 trait ClonablePinProtocolImpl {
@@ -88,7 +88,7 @@ trait PinProtocolImpl: ClonablePinProtocolImpl {
     fn decrypt(&self, key: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError>;
     fn authenticate(&self, key: &[u8], message: &[u8]) -> Result<Vec<u8>, CryptoError>;
     fn kdf(&self, z: &[u8]) -> Result<Vec<u8>, CryptoError>;
-    fn encapsulate(&self, peer_cose_key: &COSEKey) -> Result<ECDHSecret, CryptoError> {
+    fn encapsulate(&self, peer_cose_key: &COSEKey) -> Result<SharedSecret, CryptoError> {
         // [CTAP 2.1]
         // encapsulate(peerCoseKey) → (coseKey, sharedSecret) | error
         //      1) Let sharedSecret be the result of calling ecdh(peerCoseKey). Return any
@@ -119,10 +119,6 @@ trait PinProtocolImpl: ClonablePinProtocolImpl {
         let peer_spki = peer_cose_ec2_key.der_spki()?;
 
         let (shared_point, client_public_sec1) = ecdhe_p256_raw(&peer_spki)?;
-        let shared_secret = SharedSecret {
-            key: self.kdf(&shared_point)?,
-            pin_protocol: PinUvAuthProtocol(self.clone_box()),
-        };
 
         let client_cose_ec2_key =
             COSEEC2Key::from_sec1_uncompressed(Curve::SECP256R1, &client_public_sec1)?;
@@ -132,11 +128,16 @@ trait PinProtocolImpl: ClonablePinProtocolImpl {
             key: COSEKeyType::EC2(client_cose_ec2_key),
         };
 
-        Ok(ECDHSecret {
-            remote: peer_cose_key.clone(),
-            my: client_cose_key,
-            shared_secret,
-        })
+        let shared_secret = SharedSecret {
+            pin_protocol: PinUvAuthProtocol(self.clone_box()),
+            key: self.kdf(&shared_point)?,
+            inputs: PublicInputs {
+                peer: peer_cose_key.clone(),
+                client: client_cose_key,
+            },
+        };
+
+        Ok(shared_secret)
     }
 }
 
@@ -293,10 +294,17 @@ impl PinProtocolImpl for PinUvAuth2 {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
+struct PublicInputs {
+    client: COSEKey,
+    peer: COSEKey,
+}
+
+#[derive(Clone, Debug)]
 pub struct SharedSecret {
     pub pin_protocol: PinUvAuthProtocol,
     key: Vec<u8>,
+    inputs: PublicInputs,
 }
 
 impl SharedSecret {
@@ -315,6 +323,12 @@ impl SharedSecret {
     }
     pub fn authenticate(&self, message: &[u8]) -> Result<Vec<u8>, CryptoError> {
         self.pin_protocol.0.authenticate(&self.key, message)
+    }
+    pub fn client_input(&self) -> &COSEKey {
+        &self.inputs.client
+    }
+    pub fn peer_input(&self) -> &COSEKey {
+        &self.inputs.peer
     }
 }
 
@@ -1033,34 +1047,6 @@ impl From<CryptoError> for AuthenticatorError {
     }
 }
 
-#[derive(Clone)]
-pub struct ECDHSecret {
-    remote: COSEKey,
-    my: COSEKey,
-    shared_secret: SharedSecret,
-}
-
-impl ECDHSecret {
-    pub fn my_public_key(&self) -> &COSEKey {
-        &self.my
-    }
-
-    pub fn shared_secret(&self) -> &SharedSecret {
-        &self.shared_secret
-    }
-}
-
-impl fmt::Debug for ECDHSecret {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "ECDHSecret(remote: {:?}, my: {:?})",
-            self.remote,
-            self.my_public_key()
-        )
-    }
-}
-
 pub struct U2FRegisterAnswer<'a> {
     pub certificate: &'a [u8],
     pub signature: &'a [u8],
@@ -1121,7 +1107,8 @@ pub fn parse_u2f_der_certificate(data: &[u8]) -> Result<U2FRegisterAnswer, Crypt
 mod test {
     use super::{
         backend::hmac_sha256, backend::sha256, backend::test_ecdh_p256_raw, COSEAlgorithm, COSEKey,
-        Curve, PinProtocolImpl, PinUvAuth1, PinUvAuth2, PinUvAuthProtocol, SharedSecret,
+        Curve, PinProtocolImpl, PinUvAuth1, PinUvAuth2, PinUvAuthProtocol, PublicInputs,
+        SharedSecret,
     };
     use crate::crypto::{COSEEC2Key, COSEKeyType};
     use crate::ctap2::commands::client_pin::Pin;
@@ -1197,6 +1184,12 @@ mod test {
         let TOKEN = decode_hex("aff12c6dcfbf9df52f7a09211e8865cd");
         let PIN_HASH_ENC = decode_hex("afe8327ce416da8ee3d057589c2ce1a9");
 
+        let client_ec2_key = COSEEC2Key {
+            curve: Curve::SECP256R1,
+            x: EC_PUB_X.clone(),
+            y: EC_PUB_Y.clone(),
+        };
+
         let peer_ec2_key = COSEEC2Key {
             curve: Curve::SECP256R1,
             x: DEV_PUB_X,
@@ -1211,6 +1204,16 @@ mod test {
         let shared_secret = SharedSecret {
             pin_protocol: PinUvAuthProtocol(Box::new(PinUvAuth1 {})),
             key: sha256(&shared_point).unwrap(),
+            inputs: PublicInputs {
+                client: COSEKey {
+                    alg: COSEAlgorithm::ES256,
+                    key: COSEKeyType::EC2(client_ec2_key),
+                },
+                peer: COSEKey {
+                    alg: COSEAlgorithm::ES256,
+                    key: COSEKeyType::EC2(peer_ec2_key),
+                },
+            },
         };
         assert_eq!(shared_secret.key, SHARED);
 
@@ -1282,14 +1285,11 @@ mod test {
     fn test_pin_encryption_and_hashing() {
         let pin = "1234";
 
-        let shared_secret = SharedSecret {
-            pin_protocol: PinUvAuthProtocol(Box::new(PinUvAuth1 {})),
-            key: vec![
-                0x82, 0xE3, 0xD8, 0x41, 0xE2, 0x5C, 0x5C, 0x13, 0x46, 0x2C, 0x12, 0x3C, 0xC3, 0xD3,
-                0x98, 0x78, 0x65, 0xBA, 0x3D, 0x20, 0x46, 0x74, 0xFB, 0xED, 0xD4, 0x7E, 0xF5, 0xAB,
-                0xAB, 0x8D, 0x13, 0x72,
-            ],
-        };
+        let shared_secret = vec![
+            0x82, 0xE3, 0xD8, 0x41, 0xE2, 0x5C, 0x5C, 0x13, 0x46, 0x2C, 0x12, 0x3C, 0xC3, 0xD3,
+            0x98, 0x78, 0x65, 0xBA, 0x3D, 0x20, 0x46, 0x74, 0xFB, 0xED, 0xD4, 0x7E, 0xF5, 0xAB,
+            0xAB, 0x8D, 0x13, 0x72,
+        ];
         let expected_new_pin_enc = vec![
             0x70, 0x66, 0x4B, 0xB5, 0x81, 0xE2, 0x57, 0x45, 0x1A, 0x3A, 0xB9, 0x1B, 0xF1, 0xAA,
             0xD8, 0xE4, 0x5F, 0x6C, 0xE9, 0xB5, 0xC3, 0xB0, 0xF3, 0x2B, 0x5E, 0xCD, 0x62, 0xD0,
@@ -1302,22 +1302,20 @@ mod test {
             0xFD, 0xF5,
         ];
 
-        // Padding to 64 bytes
-        let input: Vec<u8> = pin
-            .as_bytes()
-            .iter()
-            .chain(std::iter::repeat(&0x00))
-            .take(64)
-            .cloned()
-            .collect();
+        let mut input = vec![0x00; 64];
+        {
+            let pin_bytes = pin.as_bytes();
+            let (head, _) = input.split_at_mut(pin_bytes.len());
+            head.copy_from_slice(pin_bytes);
+        }
 
-        let new_pin_enc = shared_secret
-            .encrypt(&input)
+        let new_pin_enc = PinUvAuth1 {}
+            .encrypt(&shared_secret, &input)
             .expect("Failed to encrypt pin");
         assert_eq!(new_pin_enc, expected_new_pin_enc);
 
-        let pin_auth = shared_secret
-            .authenticate(&new_pin_enc)
+        let pin_auth = PinUvAuth1 {}
+            .authenticate(&shared_secret, &new_pin_enc)
             .expect("HMAC-SHA256 failed");
         assert_eq!(pin_auth[0..16], expected_pin_auth);
     }
