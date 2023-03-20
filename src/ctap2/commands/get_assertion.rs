@@ -749,28 +749,26 @@ pub mod test {
             0x3,  //allowList
             0x81, // array(1)
             0xa2, // map(2)
-            0x64, // text(4),
-            0x74, 0x79, 0x70, // typ
+            0x62, // text(2)
+            0x69, 0x64, // id
+            0x58, // bytes(
         ]);
         device.add_write(&msg, 0);
 
         msg = cid.to_vec();
         msg.extend([0x0]); //SEQ
-        msg.extend(vec![
-            0x65, // e (continuation of type)
-            0x6a, // text(10)
-            0x70, 0x75, 0x62, 0x6C, 0x69, 0x63, 0x2D, 0x6B, 0x65, 0x79, // public-key
-            0x62, // text(2)
-            0x69, 0x64, // id
-            0x58, 0x40, // bytes(64)
-        ]);
-        msg.extend(&assertion.allow_list[0].id[..42]);
+        msg.extend([0x40]); // 64)
+        msg.extend(&assertion.allow_list[0].id[..58]);
         device.add_write(&msg, 0);
 
         msg = cid.to_vec();
         msg.extend([0x1]); //SEQ
-        msg.extend(&assertion.allow_list[0].id[42..]);
+        msg.extend(&assertion.allow_list[0].id[58..64]);
         msg.extend(vec![
+            0x64, // text(4),
+            0x74, 0x79, 0x70, 0x65, // type
+            0x6a, // text(10)
+            0x70, 0x75, 0x62, 0x6C, 0x69, 0x63, 0x2D, 0x6B, 0x65, 0x79, // public-key
             0x5,  // options
             0xa1, // map(1)
             0x62, // text(2)
