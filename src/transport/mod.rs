@@ -1,8 +1,7 @@
 use crate::consts::HIDCmd;
 use crate::crypto::SharedSecret;
-
 use crate::ctap2::commands::client_pin::GetKeyAgreement;
-use crate::ctap2::commands::get_info::{AuthenticatorInfo, GetInfo};
+use crate::ctap2::commands::get_info::{AuthenticatorInfo, AuthenticatorVersion, GetInfo};
 use crate::ctap2::commands::get_version::GetVersion;
 use crate::ctap2::commands::make_credentials::dummy_make_credentials_cmd;
 use crate::ctap2::commands::selection::Selection;
@@ -199,9 +198,9 @@ pub trait FidoDevice: HIDDevice {
     }
 
     fn block_and_blink(&mut self, keep_alive: &dyn Fn() -> bool) -> BlinkResult {
-        let supports_select_cmd = self
-            .get_authenticator_info()
-            .map_or(false, |i| i.versions.contains(&String::from("FIDO_2_1")));
+        let supports_select_cmd = self.get_authenticator_info().map_or(false, |i| {
+            i.versions.contains(&AuthenticatorVersion::FIDO_2_1)
+        });
         let resp = if supports_select_cmd {
             let msg = Selection {};
             self.send_cbor_cancellable(&msg, keep_alive)

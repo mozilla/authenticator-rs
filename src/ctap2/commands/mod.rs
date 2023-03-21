@@ -92,14 +92,18 @@ pub trait RequestCtap2: fmt::Debug {
         Dev: FidoDevice + Read + Write + fmt::Debug;
 }
 
-pub(crate) trait PinAuthCommand {
+pub(crate) trait PinUvAuthCommand {
     fn pin(&self) -> &Option<Pin>;
     fn set_pin(&mut self, pin: Option<Pin>);
     fn pin_auth(&self) -> &Option<PinUvAuthParam>;
     fn set_pin_auth(&mut self, pin_auth: Option<PinUvAuthParam>);
     fn client_data_hash(&self) -> ClientDataHash;
     fn unset_uv_option(&mut self);
-    fn determine_pin_auth<D: FidoDevice>(&mut self, dev: &mut D) -> Result<(), AuthenticatorError> {
+    fn determine_pin_uv_auth<D: FidoDevice>(
+        &mut self,
+        dev: &mut D,
+    ) -> Result<(), AuthenticatorError> {
+        // CTAP1/U2F-only devices do not support PinUvAuth, so we skip it
         if !dev.supports_ctap2() {
             self.set_pin_auth(None);
             return Ok(());
@@ -262,6 +266,18 @@ pub enum StatusCode {
     ActionTimeout,
     /// User presence is required for the requested operation.
     UpRequired,
+    /// built-in user verification is disabled.
+    UvBlocked,
+    /// A checksum did not match.
+    IntegrityFailure,
+    /// The requested subcommand is either invalid or not implemented.
+    InvalidSubcommand,
+    /// built-in user verification unsuccessful. The platform SHOULD retry.
+    UvInvalid,
+    /// The permissions parameter contains an unauthorized permission.
+    UnauthorizedPermission,
+    /// Other unspecified error.
+    Other,
 
     /// Unknown status.
     Unknown(u8),
@@ -321,7 +337,12 @@ impl From<u8> for StatusCode {
             0x39 => StatusCode::RequestTooLarge,
             0x3A => StatusCode::ActionTimeout,
             0x3B => StatusCode::UpRequired,
-
+            0x3C => StatusCode::UvBlocked,
+            0x3D => StatusCode::IntegrityFailure,
+            0x3E => StatusCode::InvalidSubcommand,
+            0x3F => StatusCode::UvInvalid,
+            0x40 => StatusCode::UnauthorizedPermission,
+            0x7F => StatusCode::Other,
             othr => StatusCode::Unknown(othr),
         }
     }
@@ -372,6 +393,12 @@ impl From<StatusCode> for u8 {
             StatusCode::RequestTooLarge => 0x39,
             StatusCode::ActionTimeout => 0x3A,
             StatusCode::UpRequired => 0x3B,
+            StatusCode::UvBlocked => 0x3C,
+            StatusCode::IntegrityFailure => 0x3D,
+            StatusCode::InvalidSubcommand => 0x3E,
+            StatusCode::UvInvalid => 0x3F,
+            StatusCode::UnauthorizedPermission => 0x40,
+            StatusCode::Other => 0x7F,
 
             StatusCode::Unknown(othr) => othr,
         }

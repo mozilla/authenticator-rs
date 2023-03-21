@@ -8,7 +8,7 @@ use crate::ctap2::commands::get_assertion::{GetAssertion, GetAssertionResult};
 use crate::ctap2::commands::make_credentials::{MakeCredentials, MakeCredentialsResult};
 use crate::ctap2::commands::reset::Reset;
 use crate::ctap2::commands::{
-    repackage_pin_errors, CommandError, PinAuthCommand, Request, StatusCode,
+    repackage_pin_errors, CommandError, PinUvAuthCommand, Request, StatusCode,
 };
 use crate::ctap2::server::{RelyingParty, RelyingPartyWrapper};
 use crate::errors::{self, AuthenticatorError, UnsupportedOption};
@@ -353,9 +353,7 @@ impl StateMachineCtap2 {
         // We can be cancelled from the user (through keep_alive()) or from the device selector
         // (through a DeviceCommand::Cancel on rx).  We'll combine those signals into a single
         // predicate to pass to Device::block_and_blink.
-        let keep_blinking = || {
-            keep_alive() && !matches!(rx.try_recv(), Ok(DeviceCommand::Cancel))
-        };
+        let keep_blinking = || keep_alive() && !matches!(rx.try_recv(), Ok(DeviceCommand::Cancel));
 
         // Blocking recv. DeviceSelector will tell us what to do
         match rx.recv() {
@@ -412,14 +410,14 @@ impl StateMachineCtap2 {
         }
     }
 
-    fn determine_pin_auth<T: PinAuthCommand, U>(
+    fn determine_pin_auth<T: PinUvAuthCommand, U>(
         cmd: &mut T,
         dev: &mut Device,
         status: &Sender<StatusUpdate>,
         callback: &StateCallback<crate::Result<U>>,
     ) -> Result<(), ()> {
         loop {
-            match cmd.determine_pin_auth(dev) {
+            match cmd.determine_pin_uv_auth(dev) {
                 Ok(_) => {
                     break;
                 }
@@ -436,12 +434,19 @@ impl StateMachineCtap2 {
             };
         }
 
-        // CTAP 2.0 spec is a bit vague here, but CTAP 2.1 is very specific, that the request
-        // should either include pinAuth OR uv=true, but not both at the same time.
-        // Do not set user_verification, if pinAuth is provided
-        if cmd.pin_auth().is_some() {
-            cmd.unset_uv_option();
-        }
+        // // CTAP 2.0 spec is a bit vague here, but CTAP 2.1 is very specific, that the request
+        // // should either include pinAuth OR uv=true, but not both at the same time.
+        // // Do not set user_verification, if pinAuth is provided
+        // if cmd.pin_auth().is_some() {
+        //     cmd.set_uv_option(None);
+        // } else if cmd.get_rk_option() != Some(true)
+        // /* TODO: Check for CTAP2_0 */
+        // {
+        //     // If a platform attempts to create a non-discoverable credential on a CTAP2.0
+        //     // authenticator without including the "uv" option key or the pinUvAuthToken
+        //     // parameter that authenticator will return an error.
+        //     cmd.set_uv_option(Some(false));
+        // }
 
         Ok(())
     }
@@ -480,16 +485,6 @@ impl StateMachineCtap2 {
                 //if !flags.is_empty() {
                 //    return;
                 //}
-
-                // TODO(baloo): not sure about this, have to ask
-                // Iterate the exclude list and see if there are any matches.
-                // If so, we'll keep polling the device anyway to test for user
-                // consent, to be consistent with CTAP2 device behavior.
-                //let excluded = key_handles.iter().any(|key_handle| {
-                //    is_valid_transport(key_handle.transports)
-                //        && u2f_is_keyhandle_valid(dev, &challenge, &application, &key_handle.credential)
-                //            .unwrap_or(false) /* no match on failure */
-                //});
 
                 // TODO(MS): This is wasteful, but the current setup with read only-functions doesn't allow me
                 //           to modify "params" directly.
@@ -543,6 +538,11 @@ impl StateMachineCtap2 {
                         StatusCode::ChannelBusy,
                         _,
                     ))) => {}
+                    // Err(AuthenticatorError::PinError(e)) => {
+                    //     let pin = Self::ask_user_for_pin(e, &status, &callback)?;
+                    //     makecred.set_pin(Some(pin));
+                    //     return self.register(timeout, makecred, status, callback);
+                    // }
                     Err(e) => {
                         warn!("error happened: {}", e);
                         callback.call(Err(AuthenticatorError::HIDError(e)));
