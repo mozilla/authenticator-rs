@@ -439,7 +439,7 @@ where
                 None,
             )))?;
 
-        let pin_command = GetPinToken::new(&shared_secret, pin)?;
+        let pin_command = GetPinToken::new(&shared_secret, pin);
         let pin_token = dev.send_cbor(&pin_command)?;
 
         Ok(Some(

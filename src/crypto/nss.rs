@@ -30,7 +30,8 @@ impl From<nss_gk_api::Error> for CryptoError {
 pub type Result<T> = std::result::Result<T, CryptoError>;
 
 fn nss_public_key_from_der_spki(spki: &[u8]) -> Result<PublicKey> {
-    // TODO: This probably belongs in nss_gk_api
+    // TODO: replace this with an nss-gk-api function
+    // https://github.com/mozilla/nss-gk-api/issues/7
     let mut spki_item = SECItemBorrowed::wrap(spki);
     let spki_item_ptr: *mut SECItem = spki_item.as_mut();
     let nss_spki = unsafe {

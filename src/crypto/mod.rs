@@ -251,8 +251,8 @@ impl PinProtocolImpl for PinUvAuth2 {
         // decrypt(key, demCiphertext) → plaintext | error
         //      1. Discard the first 32 bytes of key. (This selects the AES-key portion of the
         //         shared secret.)
-        //      2. If demPlaintext is less than 16 bytes in length, return an error
-        //      3. Split demPlaintext after the 16th byte to produce two subspans, iv and ct.
+        //      2. If demCiphertext is less than 16 bytes in length, return an error
+        //      3. Split demCiphertext after the 16th byte to produce two subspans, iv and ct.
         //      4. Return the AES-256-CBC decryption of ct using key and iv.
         if key.len() < 64 || ciphertext.len() < 16 {
             return Err(CryptoError::LibraryFailure);
