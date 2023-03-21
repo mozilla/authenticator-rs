@@ -1,5 +1,5 @@
 use super::{
-    Command, CommandError, PinAuthCommand, Request, RequestCtap1, RequestCtap2, Retryable,
+    Command, CommandError, PinUvAuthCommand, Request, RequestCtap1, RequestCtap2, Retryable,
     StatusCode,
 };
 use crate::consts::{
@@ -206,7 +206,7 @@ impl GetAssertion {
     }
 }
 
-impl PinAuthCommand for GetAssertion {
+impl PinUvAuthCommand for GetAssertion {
     fn pin(&self) -> &Option<Pin> {
         &self.pin
     }

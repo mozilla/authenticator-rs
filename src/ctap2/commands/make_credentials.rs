@@ -1,5 +1,5 @@
 use super::{
-    Command, CommandError, PinAuthCommand, Request, RequestCtap1, RequestCtap2, Retryable,
+    Command, CommandError, PinUvAuthCommand, Request, RequestCtap1, RequestCtap2, Retryable,
     StatusCode,
 };
 use crate::consts::{PARAMETER_SIZE, U2F_REGISTER, U2F_REQUEST_USER_PRESENCE};
@@ -141,7 +141,7 @@ impl MakeCredentials {
     }
 }
 
-impl PinAuthCommand for MakeCredentials {
+impl PinUvAuthCommand for MakeCredentials {
     fn pin(&self) -> &Option<Pin> {
         &self.pin
     }
