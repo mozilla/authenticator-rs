@@ -21,13 +21,13 @@ const AES_BLOCK_SIZE: usize = 16;
 
 impl From<ErrorStack> for CryptoError {
     fn from(e: ErrorStack) -> Self {
-        CryptoError::Backend(format!("{}", e))
+        CryptoError::Backend(format!("{e}"))
     }
 }
 
 impl From<&ErrorStack> for CryptoError {
     fn from(e: &ErrorStack) -> Self {
-        CryptoError::Backend(format!("{}", e))
+        CryptoError::Backend(format!("{e}"))
     }
 }
 
@@ -77,6 +77,9 @@ pub fn encrypt_aes_256_cbc_no_pad(key: &[u8], iv: Option<&[u8]>, data: &[u8]) ->
     encrypter.pad(false);
 
     let in_len = data.len();
+    if in_len % AES_BLOCK_SIZE != 0 {
+        return Err(CryptoError::LibraryFailure);
+    }
 
     // OpenSSL would panic if we didn't allocate an extra block here.
     let mut out = vec![0; in_len + AES_BLOCK_SIZE];
@@ -98,6 +101,9 @@ pub fn decrypt_aes_256_cbc_no_pad(key: &[u8], iv: Option<&[u8]>, data: &[u8]) ->
     encrypter.pad(false);
 
     let in_len = data.len();
+    if in_len % AES_BLOCK_SIZE != 0 {
+        return Err(CryptoError::LibraryFailure);
+    }
 
     // OpenSSL would panic if we didn't allocate an extra block here.
     let mut out = vec![0; in_len + AES_BLOCK_SIZE];

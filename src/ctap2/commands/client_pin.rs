@@ -266,8 +266,8 @@ pub struct GetPinToken<'sc, 'pin> {
 }
 
 impl<'sc, 'pin> GetPinToken<'sc, 'pin> {
-    pub fn new(shared_secret: &'sc SharedSecret, pin: &'pin Pin) -> Result<Self, CommandError> {
-        Ok(GetPinToken { shared_secret, pin })
+    pub fn new(shared_secret: &'sc SharedSecret, pin: &'pin Pin) -> Self {
+        GetPinToken { shared_secret, pin }
     }
 }
 
@@ -321,13 +321,13 @@ impl<'sc, 'pin> GetPinUvAuthTokenUsingPinWithPermissions<'sc, 'pin> {
         pin: &'pin Pin,
         permissions: PinUvAuthTokenPermission,
         rp_id: Option<String>,
-    ) -> Result<Self, CommandError> {
-        Ok(GetPinUvAuthTokenUsingPinWithPermissions {
+    ) -> Self {
+        GetPinUvAuthTokenUsingPinWithPermissions {
             shared_secret,
             pin,
             permissions,
             rp_id,
-        })
+        }
     }
 }
 
@@ -407,11 +407,11 @@ pub struct SetNewPin<'sc, 'pin> {
 }
 
 impl<'sc, 'pin> SetNewPin<'sc, 'pin> {
-    pub fn new(shared_secret: &'sc SharedSecret, new_pin: &'pin Pin) -> Result<Self, CommandError> {
-        Ok(SetNewPin {
+    pub fn new(shared_secret: &'sc SharedSecret, new_pin: &'pin Pin) -> Self {
+        SetNewPin {
             shared_secret,
             new_pin,
-        })
+        }
     }
 }
 
@@ -429,12 +429,7 @@ impl<'sc, 'pin> ClientPINSubCommand for SetNewPin<'sc, 'pin> {
         // newPinEnc: the result of calling encrypt(shared secret, paddedPin) where paddedPin is
         // newPin padded on the right with 0x00 bytes to make it 64 bytes long. (Since the maximum
         // length of newPin is 63 bytes, there is always at least one byte of padding.)
-        let new_pin_bytes = self.new_pin.as_bytes();
-        let mut new_pin_padded = vec![0x00; 64];
-        {
-            let (head, _) = new_pin_padded.split_at_mut(new_pin_bytes.len());
-            head.copy_from_slice(new_pin_bytes);
-        }
+        let new_pin_padded = self.new_pin.padded();
         let new_pin_enc = self.shared_secret.encrypt(&new_pin_padded)?;
 
         // pinUvAuthParam: the result of calling authenticate(shared secret, newPinEnc).
@@ -499,13 +494,7 @@ impl<'sc, 'pin> ClientPINSubCommand for ChangeExistingPin<'sc, 'pin> {
         // newPinEnc: the result of calling encrypt(shared secret, paddedPin) where paddedPin is
         // newPin padded on the right with 0x00 bytes to make it 64 bytes long. (Since the maximum
         // length of newPin is 63 bytes, there is always at least one byte of padding.)
-        let new_pin_bytes = self.new_pin.as_bytes();
-        let mut new_pin_padded = vec![0x00; 64];
-        {
-            let (head, _) = new_pin_padded.split_at_mut(new_pin_bytes.len());
-            head.copy_from_slice(new_pin_bytes);
-        }
-
+        let new_pin_padded = self.new_pin.padded();
         let new_pin_enc = self.shared_secret.encrypt(&new_pin_padded)?;
 
         let current_pin_hash = self.current_pin.for_pin_token();
@@ -634,6 +623,12 @@ impl Pin {
         output.copy_from_slice(&hasher.finalize().as_slice()[..len]);
 
         output.to_vec()
+    }
+
+    pub fn padded(&self) -> Vec<u8> {
+        let mut out = self.0.as_bytes().to_vec();
+        out.resize(64, 0x00);
+        out
     }
 
     pub fn as_bytes(&self) -> &[u8] {
