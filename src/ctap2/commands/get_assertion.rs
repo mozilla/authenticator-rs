@@ -215,10 +215,6 @@ impl PinUvAuthCommand for GetAssertion {
         self.pin = pin;
     }
 
-    fn pin_auth(&self) -> &Option<PinUvAuthParam> {
-        &self.pin_auth
-    }
-
     fn set_pin_auth(&mut self, pin_auth: Option<PinUvAuthParam>) {
         self.pin_auth = pin_auth;
     }

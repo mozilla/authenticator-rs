@@ -13,6 +13,10 @@ pub enum StatusUpdate {
     /// Sent if a PIN is needed (or was wrong), or some other kind of PIN-related
     /// error occurred. The Sender is for sending back a PIN (if needed).
     PinError(PinError, Sender<Pin>),
+    /// This SHOULD ever only happen for CTAP2.0 devices that
+    /// use internal UV (e.g. fingerprint sensors) and failed (e.g. wrong
+    /// finger used).
+    PinAuthInvalid,
     /// Sent, if multiple devices are found and the user has to select one
     SelectDeviceNotice,
     /// Sent, once a device was selected (either automatically or by user-interaction)
@@ -36,6 +40,7 @@ impl Serialize for StatusUpdate {
             StatusUpdate::Success { dev_info } => map.serialize_field("Success", &dev_info)?,
             StatusUpdate::PinError(e, _) => map.serialize_field("PinError", &e)?,
             StatusUpdate::SelectDeviceNotice => map.serialize_field("SelectDeviceNotice", &())?,
+            StatusUpdate::PinAuthInvalid => map.serialize_field("PinAuthInvalid", &())?,
             StatusUpdate::DeviceSelected(dev_info) => {
                 map.serialize_field("DeviceSelected", &dev_info)?
             }

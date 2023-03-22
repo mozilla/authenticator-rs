@@ -118,7 +118,8 @@ fn main() {
             }
             Ok(StatusUpdate::PinError(..))
             | Ok(StatusUpdate::SelectDeviceNotice)
-            | Ok(StatusUpdate::DeviceSelected(..)) => {
+            | Ok(StatusUpdate::DeviceSelected(..))
+            | Ok(StatusUpdate::PinAuthInvalid) => {
                 panic!("STATUS: This can't happen for CTAP1!");
             }
             Err(RecvError) => {

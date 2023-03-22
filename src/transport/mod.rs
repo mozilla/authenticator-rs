@@ -1,6 +1,7 @@
 use crate::consts::HIDCmd;
-use crate::crypto::SharedSecret;
-use crate::ctap2::commands::client_pin::GetKeyAgreement;
+use crate::crypto::{PinUvAuthParam, SharedSecret};
+use crate::ctap2::client_data::ClientDataHash;
+use crate::ctap2::commands::client_pin::{GetKeyAgreement, GetPinToken};
 use crate::ctap2::commands::get_info::{AuthenticatorInfo, AuthenticatorVersion, GetInfo};
 use crate::ctap2::commands::get_version::GetVersion;
 use crate::ctap2::commands::make_credentials::dummy_make_credentials_cmd;
@@ -8,10 +9,12 @@ use crate::ctap2::commands::selection::Selection;
 use crate::ctap2::commands::{
     CommandError, Request, RequestCtap1, RequestCtap2, Retryable, StatusCode,
 };
+use crate::errors::AuthenticatorError;
 use crate::transport::device_selector::BlinkResult;
 use crate::transport::errors::{ApduErrorStatus, HIDError};
 use crate::transport::hid::HIDDevice;
 use crate::util::io_err;
+use crate::Pin;
 use std::thread;
 use std::time::Duration;
 
@@ -269,5 +272,37 @@ pub trait FidoDevice: HIDDevice {
         let shared_secret = device_key_agreement.shared_secret()?;
         self.set_shared_secret(shared_secret.clone());
         Ok((shared_secret, info))
+    }
+
+    fn get_pin_token(
+        &mut self,
+        client_data_hash: &ClientDataHash,
+        pin: &Option<Pin>,
+    ) -> Result<Option<PinUvAuthParam>, AuthenticatorError> {
+        // Not reusing the shared secret here, if it exists, since we might start again
+        // with a different PIN (e.g. if the last one was wrong)
+        let (shared_secret, info) = self.establish_shared_secret()?;
+
+        // TODO(MS): What to do if token supports client_pin, but none has been set: Some(false)
+        //           AND a Pin is not None?
+        if info.options.client_pin == Some(true) {
+            let pin = pin
+                .as_ref()
+                .ok_or(HIDError::Command(CommandError::StatusCode(
+                    StatusCode::PinRequired,
+                    None,
+                )))?;
+
+            let pin_command = GetPinToken::new(&shared_secret, pin);
+            let pin_token = self.send_cbor(&pin_command)?;
+
+            Ok(Some(
+                pin_token
+                    .derive(client_data_hash.as_ref())
+                    .map_err(CommandError::Crypto)?,
+            ))
+        } else {
+            Ok(None)
+        }
     }
 }

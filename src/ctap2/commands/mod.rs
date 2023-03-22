@@ -92,28 +92,91 @@ pub trait RequestCtap2: fmt::Debug {
         Dev: FidoDevice + Read + Write + fmt::Debug;
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub(crate) enum PinUvAuthResult {
+    /// Request is CTAP1 and does not need PinUvAuth
+    RequestIsCtap1,
+    /// Device is not capable of CTAP2
+    DeviceIsCtap1,
+    /// Device does not support UV or PINs
+    NoAuthTypeSupported,
+    /// Device is CTAP2.0 and has internal UV capability
+    UsingInternalUv,
+    /// Successfully established PinUvAuthToken via GetPinToken (CTAP2.0)
+    SuccessGetPinToken,
+}
+
 pub(crate) trait PinUvAuthCommand {
     fn pin(&self) -> &Option<Pin>;
     fn set_pin(&mut self, pin: Option<Pin>);
-    fn pin_auth(&self) -> &Option<PinUvAuthParam>;
     fn set_pin_auth(&mut self, pin_auth: Option<PinUvAuthParam>);
     fn client_data_hash(&self) -> ClientDataHash;
     fn unset_uv_option(&mut self);
+
+    /// If Ok() is returned, the request can be sent to the device
+    /// If Err() is returned, either cancel the operation or ask the user for a PIN
     fn determine_pin_uv_auth<D: FidoDevice>(
         &mut self,
         dev: &mut D,
-    ) -> Result<(), AuthenticatorError> {
+        skip_uv: bool,
+    ) -> Result<PinUvAuthResult, AuthenticatorError> {
         // CTAP1/U2F-only devices do not support PinUvAuth, so we skip it
         if !dev.supports_ctap2() {
             self.set_pin_auth(None);
-            return Ok(());
+            return Ok(PinUvAuthResult::DeviceIsCtap1);
         }
 
-        let client_data_hash = self.client_data_hash();
-        let pin_auth = calculate_pin_auth(dev, &client_data_hash, self.pin())
+        self.determine_pin_uv_auth_ctap_2_0(dev, skip_uv)
+    }
+
+    /// CTAP 2.0-only version:
+    /// "Getting pinUvAuthToken using getPinToken (superseded)"
+    fn determine_pin_uv_auth_ctap_2_0<D: FidoDevice>(
+        &mut self,
+        dev: &mut D,
+        skip_uv: bool,
+    ) -> Result<PinUvAuthResult, AuthenticatorError> {
+        let info = dev
+            .get_authenticator_info()
+            .ok_or(AuthenticatorError::Platform)?;
+
+        if self.pin().is_none() {
+            // Only use UV, if the device supports it and we don't skip it
+            // which happens as a fallback, if UV-usage failed too many times
+            let supports_uv = !skip_uv && info.options.user_verification == Some(true);
+            let supports_pin = info.options.client_pin.is_some();
+            let pin_configured = info.options.client_pin == Some(true);
+
+            // If the device supports internal user-verification (e.g. fingerprints),
+            // skip PIN-stuff
+            if supports_uv {
+                return Ok(PinUvAuthResult::UsingInternalUv);
+            }
+
+            // Device does not support any auth-method
+            if !supports_pin && !supports_uv {
+                // We'll send it to the device anyways, and let it error out (or magically work)
+                return Ok(PinUvAuthResult::NoAuthTypeSupported);
+            }
+
+            // Device supports PIN: Ask user for it.
+            if !supports_uv && pin_configured {
+                return Err(AuthenticatorError::PinError(PinError::PinRequired));
+            }
+        }
+
+        let pin_auth = dev
+            .get_pin_token(&self.client_data_hash(), self.pin())
             .map_err(|e| repackage_pin_errors(dev, e))?;
+
+        // CTAP 2.0 spec is a bit vague here, but CTAP 2.1 is very specific, that the request
+        // should either include pinAuth OR uv=true, but not both at the same time.
+        // Do not set user_verification, if pinAuth is provided
+        if pin_auth.is_some() {
+            self.unset_uv_option();
+        }
         self.set_pin_auth(pin_auth);
-        Ok(())
+        Ok(PinUvAuthResult::SuccessGetPinToken)
     }
 }
 
@@ -147,6 +210,10 @@ pub(crate) fn repackage_pin_errors<D: FidoDevice>(
             StatusCode::PinNotSet,
             _,
         ))) => AuthenticatorError::PinError(PinError::PinNotSet),
+        AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
+            StatusCode::PinAuthInvalid,
+            _,
+        ))) => AuthenticatorError::PinError(PinError::PinAuthInvalid),
         // TODO(MS): Add "PinPolicyViolated"
         err => err,
     }

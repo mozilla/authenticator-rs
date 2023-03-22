@@ -129,6 +129,10 @@ fn main() {
                     panic!("Unexpected error: {:?}", e)
                 }
             },
+            Ok(StatusUpdate::PinAuthInvalid) => {
+                println!("Internal UV usage failed (e.g. using the wrong finger for your fingerprint sensor).");
+                continue;
+            }
             Err(RecvError) => {
                 println!("STATUS: end");
                 return;
@@ -191,12 +195,8 @@ fn main() {
             register_tx.send(rv).unwrap();
         }));
 
-        if let Err(e) = manager.register(
-            timeout_ms,
-            ctap_args.into(),
-            status_tx.clone(),
-            callback,
-        ) {
+        if let Err(e) = manager.register(timeout_ms, ctap_args.into(), status_tx.clone(), callback)
+        {
             panic!("Couldn't register: {:?}", e);
         };
 
@@ -264,12 +264,7 @@ fn main() {
             sign_tx.send(rv).unwrap();
         }));
 
-        if let Err(e) = manager.sign(
-            timeout_ms,
-            ctap_args.into(),
-            status_tx,
-            callback,
-        ) {
+        if let Err(e) = manager.sign(timeout_ms, ctap_args.into(), status_tx, callback) {
             panic!("Couldn't sign: {:?}", e);
         }
 

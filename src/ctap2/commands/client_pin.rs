@@ -646,33 +646,32 @@ pub enum PinError {
     PinAuthBlocked,
     PinBlocked,
     PinNotSet,
+    /// Used for UV (fingerprints)
+    PinAuthInvalid,
     Crypto(CryptoError),
 }
 
 impl fmt::Display for PinError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            PinError::PinRequired => write!(f, "PinError: Pin required."),
-            PinError::PinIsTooShort => write!(f, "PinError: pin is too short"),
-            PinError::PinIsTooLong(len) => write!(f, "PinError: pin is too long ({len})"),
-            PinError::InvalidKeyLen => write!(f, "PinError: invalid key len"),
+            PinError::PinRequired => write!(f, "Pin required."),
+            PinError::PinIsTooShort => write!(f, "pin is too short"),
+            PinError::PinIsTooLong(len) => write!(f, "pin is too long ({len})"),
+            PinError::InvalidKeyLen => write!(f, "invalid key len"),
             PinError::InvalidPin(ref e) => {
-                let mut res = write!(f, "PinError: Invalid Pin.");
+                let mut res = write!(f, "Invalid Pin.");
                 if let Some(pin_retries) = e {
                     res = write!(f, " Retries left: {pin_retries:?}")
                 }
                 res
             }
-            PinError::PinAuthBlocked => write!(
-                f,
-                "PinError: Pin authentication blocked. Device needs power cycle."
-            ),
-            PinError::PinBlocked => write!(
-                f,
-                "PinError: No retries left. Pin blocked. Device needs reset."
-            ),
-            PinError::PinNotSet => write!(f, "PinError: Pin needed but not set on device."),
-            PinError::Crypto(ref e) => write!(f, "PinError: Crypto backend error: {e:?}"),
+            PinError::PinAuthBlocked => {
+                write!(f, "Pin authentication blocked. Device needs power cycle.")
+            }
+            PinError::PinBlocked => write!(f, "No retries left. Pin blocked. Device needs reset."),
+            PinError::PinNotSet => write!(f, "Pin needed but not set on device."),
+            PinError::PinAuthInvalid => write!(f, "PinAuth invalid."),
+            PinError::Crypto(ref e) => write!(f, "Crypto backend error: {e:?}"),
         }
     }
 }
