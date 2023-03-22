@@ -32,9 +32,7 @@ fn print_usage(program: &str, opts: Options) {
 fn register_user(manager: &mut AuthenticatorService, username: &str, timeout_ms: u64) {
     println!();
     println!("*********************************************************************");
-    println!(
-        "Asking a security key to register now with user: {username}"
-    );
+    println!("Asking a security key to register now with user: {username}");
     println!("*********************************************************************");
 
     println!("Asking a security key to register now...");
@@ -99,6 +97,10 @@ fn register_user(manager: &mut AuthenticatorService, username: &str, timeout_ms:
                     panic!("Unexpected error: {:?}", e)
                 }
             },
+            Ok(StatusUpdate::PinAuthInvalid) => {
+                println!("Internal UV usage failed (e.g. using the wrong finger for your fingerprint sensor).");
+                continue;
+            }
             Err(RecvError) => {
                 println!("STATUS: end");
                 return;
@@ -150,12 +152,7 @@ fn register_user(manager: &mut AuthenticatorService, username: &str, timeout_ms:
             register_tx.send(rv).unwrap();
         }));
 
-        if let Err(e) = manager.register(
-            timeout_ms,
-            ctap_args.into(),
-            status_tx,
-            callback,
-        ) {
+        if let Err(e) = manager.register(timeout_ms, ctap_args.into(), status_tx, callback) {
             panic!("Couldn't register: {:?}", e);
         };
 
@@ -287,6 +284,10 @@ fn main() {
                     panic!("Unexpected error: {:?}", e)
                 }
             },
+            Ok(StatusUpdate::PinAuthInvalid) => {
+                println!("Internal UV usage failed (e.g. using the wrong finger for your fingerprint sensor).");
+                continue;
+            }
             Err(RecvError) => {
                 println!("STATUS: end");
                 return;
@@ -315,12 +316,7 @@ fn main() {
             sign_tx.send(rv).unwrap();
         }));
 
-        if let Err(e) = manager.sign(
-            timeout_ms,
-            ctap_args.into(),
-            status_tx,
-            callback,
-        ) {
+        if let Err(e) = manager.sign(timeout_ms, ctap_args.into(), status_tx, callback) {
             panic!("Couldn't sign: {:?}", e);
         }
 

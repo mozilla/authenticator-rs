@@ -8,7 +8,7 @@ use crate::ctap2::commands::get_assertion::{GetAssertion, GetAssertionResult};
 use crate::ctap2::commands::make_credentials::{MakeCredentials, MakeCredentialsResult};
 use crate::ctap2::commands::reset::Reset;
 use crate::ctap2::commands::{
-    repackage_pin_errors, CommandError, PinUvAuthCommand, Request, StatusCode,
+    repackage_pin_errors, CommandError, PinUvAuthCommand, PinUvAuthResult, Request, StatusCode,
 };
 use crate::ctap2::server::{RelyingParty, RelyingPartyWrapper};
 use crate::errors::{self, AuthenticatorError, UnsupportedOption};
@@ -293,6 +293,11 @@ impl StateMachine {
     }
 }
 
+enum PinUvAuthError {
+    ContinueLoop,
+    Return,
+}
+
 #[derive(Default)]
 // TODO(MS): To be renamed to `StateMachine` once U2FManager and the original StateMachine can be removed.
 pub struct StateMachineCtap2 {
@@ -410,45 +415,37 @@ impl StateMachineCtap2 {
         }
     }
 
-    fn determine_pin_auth<T: PinUvAuthCommand, U>(
+    fn determine_pin_auth<T: PinUvAuthCommand + Request<V>, U, V>(
         cmd: &mut T,
         dev: &mut Device,
+        skip_uv: bool,
         status: &Sender<StatusUpdate>,
         callback: &StateCallback<crate::Result<U>>,
-    ) -> Result<(), ()> {
-        loop {
-            match cmd.determine_pin_uv_auth(dev) {
-                Ok(_) => {
-                    break;
+    ) -> Result<PinUvAuthResult, PinUvAuthError> {
+        let mut pin_uv_auth_result = PinUvAuthResult::RequestIsCtap1;
+        if cmd.is_ctap2_request() {
+            debug!("-----------------------------------------------------------------");
+            debug!("Getting pinUvAuthToken");
+            match cmd.determine_pin_uv_auth(dev, skip_uv) {
+                Ok(r) => {
+                    pin_uv_auth_result = r;
                 }
                 Err(AuthenticatorError::PinError(e)) => {
-                    let pin = Self::ask_user_for_pin(e, status, callback)?;
-                    cmd.set_pin(Some(pin));
-                    continue;
+                    if let Ok(pin) = Self::ask_user_for_pin(e, status, callback) {
+                        cmd.set_pin(Some(pin));
+                        return Err(PinUvAuthError::ContinueLoop);
+                    } else {
+                        return Err(PinUvAuthError::Return);
+                    }
                 }
                 Err(e) => {
                     error!("Error when determining pinAuth: {:?}", e);
                     callback.call(Err(e));
-                    return Err(());
+                    return Err(PinUvAuthError::Return);
                 }
             };
         }
-
-        // // CTAP 2.0 spec is a bit vague here, but CTAP 2.1 is very specific, that the request
-        // // should either include pinAuth OR uv=true, but not both at the same time.
-        // // Do not set user_verification, if pinAuth is provided
-        // if cmd.pin_auth().is_some() {
-        //     cmd.set_uv_option(None);
-        // } else if cmd.get_rk_option() != Some(true)
-        // /* TODO: Check for CTAP2_0 */
-        // {
-        //     // If a platform attempts to create a non-discoverable credential on a CTAP2.0
-        //     // authenticator without including the "uv" option key or the pinUvAuthToken
-        //     // parameter that authenticator will return an error.
-        //     cmd.set_uv_option(Some(false));
-        // }
-
-        Ok(())
+        Ok(pin_uv_auth_result)
     }
 
     pub fn register(
@@ -501,52 +498,81 @@ impl StateMachineCtap2 {
                             }
                         }
                     }
-
-                    // Second, ask for PIN and get the shared secret
-                    if Self::determine_pin_auth(&mut makecred, &mut dev, &status, &callback)
-                        .is_err()
-                    {
-                        return;
-                    }
                 }
-                debug!("------------------------------------------------------------------");
-                debug!("{:?}", makecred);
-                debug!("------------------------------------------------------------------");
-                let resp = dev.send_msg_cancellable(&makecred, alive);
-                if resp.is_ok() {
-                    send_status(
+
+                let mut skip_uv = false;
+                while alive() {
+                    let pin_uv_auth_result = match Self::determine_pin_auth(
+                        &mut makecred,
+                        &mut dev,
+                        skip_uv,
                         &status,
-                        crate::StatusUpdate::Success {
-                            dev_info: dev.get_device_info(),
-                        },
-                    );
-                    // The DeviceSelector could already be dead, but it might also wait
-                    // for us to respond, in order to cancel all other tokens in case
-                    // we skipped the "blinking"-action and went straight for the actual
-                    // request.
-                    let _ = selector.send(DeviceSelectorEvent::SelectedToken(dev.id()));
-                }
-                match resp {
-                    Ok(MakeCredentialsResult::CTAP2(attestation, client_data)) => {
-                        callback.call(Ok(RegisterResult::CTAP2(attestation, client_data)))
-                    }
-                    Ok(MakeCredentialsResult::CTAP1(data)) => {
-                        callback.call(Ok(RegisterResult::CTAP1(data, dev.get_device_info())))
-                    }
+                        &callback,
+                    ) {
+                        Ok(r) => r,
+                        Err(PinUvAuthError::ContinueLoop) => {
+                            continue;
+                        }
+                        Err(PinUvAuthError::Return) => {
+                            return;
+                        }
+                    };
 
-                    Err(HIDError::Command(CommandError::StatusCode(
-                        StatusCode::ChannelBusy,
-                        _,
-                    ))) => {}
-                    // Err(AuthenticatorError::PinError(e)) => {
-                    //     let pin = Self::ask_user_for_pin(e, &status, &callback)?;
-                    //     makecred.set_pin(Some(pin));
-                    //     return self.register(timeout, makecred, status, callback);
-                    // }
-                    Err(e) => {
-                        warn!("error happened: {}", e);
-                        callback.call(Err(AuthenticatorError::HIDError(e)));
+                    debug!("------------------------------------------------------------------");
+                    debug!("{makecred:?} using {pin_uv_auth_result:?}");
+                    debug!("------------------------------------------------------------------");
+                    let resp = dev.send_msg_cancellable(&makecred, alive);
+                    if resp.is_ok() {
+                        send_status(
+                            &status,
+                            crate::StatusUpdate::Success {
+                                dev_info: dev.get_device_info(),
+                            },
+                        );
+                        // The DeviceSelector could already be dead, but it might also wait
+                        // for us to respond, in order to cancel all other tokens in case
+                        // we skipped the "blinking"-action and went straight for the actual
+                        // request.
+                        let _ = selector.send(DeviceSelectorEvent::SelectedToken(dev.id()));
                     }
+                    match resp {
+                        Ok(MakeCredentialsResult::CTAP2(attestation, client_data)) => {
+                            callback.call(Ok(RegisterResult::CTAP2(attestation, client_data)))
+                        }
+                        Ok(MakeCredentialsResult::CTAP1(data)) => {
+                            callback.call(Ok(RegisterResult::CTAP1(data, dev.get_device_info())))
+                        }
+
+                        Err(HIDError::Command(CommandError::StatusCode(
+                            StatusCode::ChannelBusy,
+                            _,
+                        ))) => {}
+                        Err(e) => {
+                            match repackage_pin_errors(&mut dev, e.into()) {
+                                AuthenticatorError::PinError(PinError::PinAuthInvalid)
+                                    if pin_uv_auth_result == PinUvAuthResult::UsingInternalUv =>
+                                {
+                                    // This should only happen for CTAP2.0 tokens that use internal UV and failed
+                                    // (e.g. wrong fingerprint used)
+                                    send_status(&status, crate::StatusUpdate::PinAuthInvalid);
+                                    continue;
+                                }
+                                AuthenticatorError::PinError(PinError::PinRequired)
+                                    if pin_uv_auth_result == PinUvAuthResult::UsingInternalUv =>
+                                {
+                                    // This should only happen for CTAP2.0 tokens that use internal UV and failed
+                                    // repeatedly, so that we have to fall back to PINs
+                                    skip_uv = true;
+                                    continue;
+                                }
+                                e => {
+                                    warn!("error happened: {}", e);
+                                    callback.call(Err(e));
+                                }
+                            }
+                        }
+                    }
+                    break;
                 }
             },
         );
@@ -593,81 +619,115 @@ impl StateMachineCtap2 {
                             }
                         }
                     }
+                }
+                let mut skip_uv = false;
+                while alive() {
+                    let pin_uv_auth_result = match Self::determine_pin_auth(
+                        &mut getassertion,
+                        &mut dev,
+                        skip_uv,
+                        &status,
+                        &callback,
+                    ) {
+                        Ok(r) => r,
+                        Err(PinUvAuthError::ContinueLoop) => {
+                            continue;
+                        }
+                        Err(PinUvAuthError::Return) => {
+                            return;
+                        }
+                    };
 
-                    // Second, ask for PIN and get the shared secret
-                    if Self::determine_pin_auth(&mut getassertion, &mut dev, &status, &callback)
-                        .is_err()
-                    {
-                        return;
-                    }
-
-                    // Third, use the shared secret in the extensions, if requested
-                    if let Some(extension) = getassertion.extensions.hmac_secret.as_mut() {
-                        if let Some(secret) = dev.get_shared_secret() {
-                            match extension.calculate(secret) {
-                                Ok(x) => x,
-                                Err(e) => {
-                                    callback.call(Err(e));
-                                    return;
+                    if params.is_ctap2_request() {
+                        // Third, use the shared secret in the extensions, if requested
+                        if let Some(extension) = getassertion.extensions.hmac_secret.as_mut() {
+                            if let Some(secret) = dev.get_shared_secret() {
+                                match extension.calculate(secret) {
+                                    Ok(x) => x,
+                                    Err(e) => {
+                                        callback.call(Err(e));
+                                        return;
+                                    }
                                 }
                             }
                         }
                     }
-                }
 
-                debug!("------------------------------------------------------------------");
-                debug!("{:?}", getassertion);
-                debug!("------------------------------------------------------------------");
+                    debug!("------------------------------------------------------------------");
+                    debug!("{getassertion:?} using {pin_uv_auth_result:?}");
+                    debug!("------------------------------------------------------------------");
 
-                let mut resp = dev.send_msg_cancellable(&getassertion, alive);
-                if resp.is_err() {
-                    // Retry with a different RP ID if one was supplied. This is intended to be
-                    // used with the AppID provided in the WebAuthn FIDO AppID extension.
-                    if let Some(alternate_rp_id) = getassertion.alternate_rp_id {
-                        getassertion.rp = RelyingPartyWrapper::Data(RelyingParty {
-                            id: alternate_rp_id,
-                            ..Default::default()
-                        });
-                        getassertion.alternate_rp_id = None;
-                        resp = dev.send_msg_cancellable(&getassertion, alive);
+                    let mut resp = dev.send_msg_cancellable(&getassertion, alive);
+                    if resp.is_err() {
+                        // Retry with a different RP ID if one was supplied. This is intended to be
+                        // used with the AppID provided in the WebAuthn FIDO AppID extension.
+                        if let Some(alternate_rp_id) = getassertion.alternate_rp_id {
+                            getassertion.rp = RelyingPartyWrapper::Data(RelyingParty {
+                                id: alternate_rp_id,
+                                ..Default::default()
+                            });
+                            getassertion.alternate_rp_id = None;
+                            resp = dev.send_msg_cancellable(&getassertion, alive);
+                        }
                     }
-                }
-                if resp.is_ok() {
-                    send_status(
-                        &status,
-                        crate::StatusUpdate::Success {
-                            dev_info: dev.get_device_info(),
-                        },
-                    );
-                    // The DeviceSelector could already be dead, but it might also wait
-                    // for us to respond, in order to cancel all other tokens in case
-                    // we skipped the "blinking"-action and went straight for the actual
-                    // request.
-                    let _ = selector.send(DeviceSelectorEvent::SelectedToken(dev.id()));
-                }
-                match resp {
-                    Ok(GetAssertionResult::CTAP1(resp)) => {
-                        let app_id = getassertion.rp.hash().as_ref().to_vec();
-                        let key_handle = getassertion.allow_list[0].id.clone();
+                    if resp.is_ok() {
+                        send_status(
+                            &status,
+                            crate::StatusUpdate::Success {
+                                dev_info: dev.get_device_info(),
+                            },
+                        );
+                        // The DeviceSelector could already be dead, but it might also wait
+                        // for us to respond, in order to cancel all other tokens in case
+                        // we skipped the "blinking"-action and went straight for the actual
+                        // request.
+                        let _ = selector.send(DeviceSelectorEvent::SelectedToken(dev.id()));
+                    }
+                    match resp {
+                        Ok(GetAssertionResult::CTAP1(resp)) => {
+                            let app_id = getassertion.rp.hash().as_ref().to_vec();
+                            let key_handle = getassertion.allow_list[0].id.clone();
 
-                        callback.call(Ok(SignResult::CTAP1(
-                            app_id,
-                            key_handle,
-                            resp,
-                            dev.get_device_info(),
-                        )))
+                            callback.call(Ok(SignResult::CTAP1(
+                                app_id,
+                                key_handle,
+                                resp,
+                                dev.get_device_info(),
+                            )))
+                        }
+                        Ok(GetAssertionResult::CTAP2(assertion, client_data)) => {
+                            callback.call(Ok(SignResult::CTAP2(assertion, client_data)))
+                        }
+                        Err(HIDError::Command(CommandError::StatusCode(
+                            StatusCode::ChannelBusy,
+                            _,
+                        ))) => {}
+
+                        // This should only happen for CTAP2.0 tokens that use internal UV and failed
+                        // (e.g. wrong fingerprint used)
+                        // Yes, this is different than for MakeCredential.
+                        Err(HIDError::Command(CommandError::StatusCode(
+                            StatusCode::OperationDenied,
+                            _,
+                        ))) if pin_uv_auth_result == PinUvAuthResult::UsingInternalUv => {
+                            send_status(&status, crate::StatusUpdate::PinAuthInvalid);
+                            continue;
+                        }
+                        // This should only happen for CTAP2.0 tokens that use internal UV and failed
+                        // repeatedly, so that we have to fall back to PINs
+                        Err(HIDError::Command(CommandError::StatusCode(
+                            StatusCode::PinRequired,
+                            _,
+                        ))) if pin_uv_auth_result == PinUvAuthResult::UsingInternalUv => {
+                            skip_uv = true;
+                            continue;
+                        }
+                        Err(e) => {
+                            warn!("error happened: {}", e);
+                            callback.call(Err(e.into()));
+                        }
                     }
-                    Ok(GetAssertionResult::CTAP2(assertion, client_data)) => {
-                        callback.call(Ok(SignResult::CTAP2(assertion, client_data)))
-                    }
-                    Err(HIDError::Command(CommandError::StatusCode(
-                        StatusCode::ChannelBusy,
-                        _,
-                    ))) => {}
-                    Err(e) => {
-                        warn!("error happened: {}", e);
-                        callback.call(Err(AuthenticatorError::HIDError(e)));
-                    }
+                    break;
                 }
             },
         );

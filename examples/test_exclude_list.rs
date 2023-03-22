@@ -125,6 +125,10 @@ fn main() {
                     panic!("Unexpected error: {:?}", e)
                 }
             },
+            Ok(StatusUpdate::PinAuthInvalid) => {
+                println!("Internal UV usage failed (e.g. using the wrong finger for your fingerprint sensor).");
+                continue;
+            }
             Err(RecvError) => {
                 println!("STATUS: end");
                 return;
