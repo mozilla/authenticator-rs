@@ -41,7 +41,9 @@ impl Device {
             buf[6] = 0;
             buf[7] = 1; // one byte
 
-            self.write_all(&buf)?;
+            if self.write(&buf)? != buf.len() {
+                return Err(io_err("write ping failed"));
+            }
 
             // Wait for response
             let mut pfd: libc::pollfd = unsafe { mem::zeroed() };
@@ -56,8 +58,13 @@ impl Device {
                 continue;
             }
 
-            // Read response
-            self.read_exact(&mut buf)?;
+            // Read response.  When reports come in they are all
+            // exactly the same size, with no report id byte because
+            // there is only one report.
+            let n = self.read(&mut buf[1..])?;
+            if n != buf.len() - 1 {
+                return Err(io_err("read pong failed"));
+            }
 
             return Ok(());
         }
