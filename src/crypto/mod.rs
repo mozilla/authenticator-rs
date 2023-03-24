@@ -314,9 +314,12 @@ impl SharedSecret {
     pub fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError> {
         self.pin_protocol.0.decrypt(&self.key, ciphertext)
     }
-    pub fn decrypt_pin_token(&self, encrypted_pin_token: &[u8]) -> Result<PinToken, CryptoError> {
+    pub fn decrypt_pin_token(
+        &self,
+        encrypted_pin_token: &[u8],
+    ) -> Result<PinUvAuthToken, CryptoError> {
         let pin_token = self.decrypt(encrypted_pin_token)?;
-        Ok(PinToken {
+        Ok(PinUvAuthToken {
             pin_protocol: self.pin_protocol.clone(),
             pin_token,
         })
@@ -333,13 +336,13 @@ impl SharedSecret {
 }
 
 #[derive(Clone)]
-pub struct PinToken {
+pub struct PinUvAuthToken {
     pub pin_protocol: PinUvAuthProtocol,
     pin_token: Vec<u8>,
     // TODO(jms): add permissions
 }
 
-impl PinToken {
+impl PinUvAuthToken {
     pub fn derive(&self, message: &[u8]) -> Result<PinUvAuthParam, CryptoError> {
         let pin_auth = self.pin_protocol.0.authenticate(&self.pin_token, message)?;
         Ok(PinUvAuthParam {

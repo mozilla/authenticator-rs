@@ -3,7 +3,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use crate::consts::PARAMETER_SIZE;
-use crate::ctap2::commands::client_pin::{ChangeExistingPin, Pin, PinError, SetNewPin};
+use crate::ctap2::commands::client_pin::{
+    ChangeExistingPin, Pin, PinError, PinUvAuthTokenPermission, SetNewPin,
+};
 use crate::ctap2::commands::get_assertion::{GetAssertion, GetAssertionResult};
 use crate::ctap2::commands::make_credentials::{MakeCredentials, MakeCredentialsResult};
 use crate::ctap2::commands::reset::Reset;
@@ -20,7 +22,7 @@ use crate::transport::platform::transaction::Transaction;
 use crate::transport::{errors::HIDError, hid::HIDDevice, FidoDevice, Nonce};
 use crate::u2fprotocol::{u2f_init_device, u2f_is_keyhandle_valid, u2f_register, u2f_sign};
 use crate::u2ftypes::U2FDevice;
-use crate::{send_status, RegisterResult, SignResult, StatusUpdate};
+use crate::{send_status, RegisterResult, SignResult, StatusPinUv, StatusUpdate};
 use std::sync::mpsc::{channel, Sender};
 use std::thread;
 use std::time::Duration;
@@ -390,21 +392,30 @@ impl StateMachineCtap2 {
     }
 
     fn ask_user_for_pin<U>(
-        error: PinError,
+        was_invalid: bool,
+        retries: Option<u8>,
         status: &Sender<StatusUpdate>,
         callback: &StateCallback<crate::Result<U>>,
     ) -> Result<Pin, ()> {
         info!("PIN Error that requires user interaction detected. Sending it back and waiting for a reply");
         let (tx, rx) = channel();
-        send_status(status, crate::StatusUpdate::PinError(error.clone(), tx));
+        if was_invalid {
+            send_status(
+                status,
+                crate::StatusUpdate::PinUvError(StatusPinUv::InvalidPin(tx, retries)),
+            );
+        } else {
+            send_status(
+                status,
+                crate::StatusUpdate::PinUvError(StatusPinUv::PinRequired(tx)),
+            );
+        }
         match rx.recv() {
             Ok(pin) => Ok(pin),
             Err(_) => {
-                // recv() can only fail, if the other side is dropping the Sender. We are using this as a trick
-                // to let the callback decide if this PinError is recoverable (e.g. with User input) or not (e.g.
-                // locked token). If it is deemed unrecoverable, we error out the 'normal' way with the same error.
-                error!("Callback dropped the channel, so we forward the error to the results-callback: {:?}", error);
-                callback.call(Err(AuthenticatorError::PinError(error)));
+                // recv() can only fail, if the other side is dropping the Sender.
+                error!("Callback dropped the channel. Aborting.");
+                callback.call(Err(AuthenticatorError::CancelledByUser));
                 Err(())
             }
         }
@@ -413,7 +424,8 @@ impl StateMachineCtap2 {
     fn determine_pin_auth<T: PinUvAuthCommand + Request<V>, U, V>(
         cmd: &mut T,
         dev: &mut Device,
-        skip_uv: bool,
+        mut skip_uv: bool,
+        permission: PinUvAuthTokenPermission,
         status: &Sender<StatusUpdate>,
         callback: &StateCallback<crate::Result<U>>,
         alive: &dyn Fn() -> bool,
@@ -424,17 +436,69 @@ impl StateMachineCtap2 {
         while alive() {
             debug!("-----------------------------------------------------------------");
             debug!("Getting pinUvAuthToken");
-            match cmd.determine_pin_uv_auth(dev, skip_uv) {
+            match cmd.determine_pin_uv_auth(dev, skip_uv, permission) {
                 Ok(r) => {
                     return Ok(r);
                 }
-                Err(AuthenticatorError::PinError(e)) => {
-                    if let Ok(pin) = Self::ask_user_for_pin(e, status, callback) {
+
+                Err(AuthenticatorError::PinError(PinError::PinRequired)) => {
+                    if let Ok(pin) = Self::ask_user_for_pin(false, None, status, callback) {
+                        cmd.set_pin(Some(pin));
+                        skip_uv = true;
+                        continue;
+                    } else {
+                        return Err(());
+                    }
+                }
+                Err(AuthenticatorError::PinError(PinError::InvalidPin(retries))) => {
+                    if let Ok(pin) = Self::ask_user_for_pin(true, retries, status, callback) {
                         cmd.set_pin(Some(pin));
                         continue;
                     } else {
                         return Err(());
                     }
+                }
+                Err(AuthenticatorError::PinError(PinError::InvalidUv(retries))) => {
+                    if retries == Some(0) {
+                        skip_uv = true;
+                    }
+                    send_status(
+                        status,
+                        StatusUpdate::PinUvError(StatusPinUv::InvalidUv(retries)),
+                    )
+                }
+                Err(e @ AuthenticatorError::PinError(PinError::PinAuthBlocked)) => {
+                    send_status(
+                        status,
+                        StatusUpdate::PinUvError(StatusPinUv::PinAuthBlocked),
+                    );
+                    error!("Error when determining pinAuth: {:?}", e);
+                    callback.call(Err(e));
+                    return Err(());
+                }
+                Err(e @ AuthenticatorError::PinError(PinError::PinBlocked)) => {
+                    send_status(status, StatusUpdate::PinUvError(StatusPinUv::PinBlocked));
+                    error!("Error when determining pinAuth: {:?}", e);
+                    callback.call(Err(e));
+                    return Err(());
+                }
+                Err(e @ AuthenticatorError::PinError(PinError::PinNotSet)) => {
+                    send_status(status, StatusUpdate::PinUvError(StatusPinUv::PinNotSet));
+                    error!("Error when determining pinAuth: {:?}", e);
+                    callback.call(Err(e));
+                    return Err(());
+                }
+                Err(AuthenticatorError::PinError(PinError::UvBlocked)) => {
+                    skip_uv = true;
+                    send_status(status, StatusUpdate::PinUvError(StatusPinUv::UvBlocked))
+                }
+                // Used for CTAP2.0 UV (fingerprints)
+                Err(AuthenticatorError::PinError(PinError::PinAuthInvalid)) => {
+                    skip_uv = true;
+                    send_status(
+                        status,
+                        StatusUpdate::PinUvError(StatusPinUv::InvalidUv(None)),
+                    )
                 }
                 Err(e) => {
                     error!("Error when determining pinAuth: {:?}", e);
@@ -504,6 +568,7 @@ impl StateMachineCtap2 {
                         &mut makecred,
                         &mut dev,
                         skip_uv,
+                        PinUvAuthTokenPermission::MakeCredential,
                         &status,
                         &callback,
                         alive,
@@ -540,23 +605,42 @@ impl StateMachineCtap2 {
                             callback.call(Ok(RegisterResult::CTAP1(data, dev.get_device_info())));
                             break;
                         }
-                        Err(HIDError::Command(CommandError::StatusCode(StatusCode::ChannelBusy, _,))) => {
+                        Err(HIDError::Command(CommandError::StatusCode(
+                            StatusCode::ChannelBusy,
+                            _,
+                        ))) => {
                             // Channel busy. Client SHOULD retry the request after a short delay.
                             thread::sleep(Duration::from_millis(100));
                             continue;
                         }
-                        Err(HIDError::Command(CommandError::StatusCode(StatusCode::PinAuthInvalid, _)))
-                            if pin_uv_auth_result == PinUvAuthResult::UsingInternalUv =>
-                        {
+                        Err(HIDError::Command(CommandError::StatusCode(
+                            StatusCode::PinAuthInvalid,
+                            _,
+                        ))) if pin_uv_auth_result == PinUvAuthResult::UsingInternalUv => {
                             // This should only happen for CTAP2.0 tokens that use internal UV and
                             // failed (e.g. wrong fingerprint used), while doing MakeCredentials
-                            send_status(&status, StatusUpdate::PinAuthInvalid);
+                            send_status(
+                                &status,
+                                StatusUpdate::PinUvError(StatusPinUv::InvalidUv(None)),
+                            );
                             continue;
                         }
-                        Err(HIDError::Command(CommandError::StatusCode(StatusCode::PinRequired, _)))
-                            if pin_uv_auth_result == PinUvAuthResult::UsingInternalUv =>
-                        {
+                        Err(HIDError::Command(CommandError::StatusCode(
+                            StatusCode::PinRequired,
+                            _,
+                        ))) if pin_uv_auth_result == PinUvAuthResult::UsingInternalUv => {
                             // This should only happen for CTAP2.0 tokens that use internal UV and failed
+                            // repeatedly, so that we have to fall back to PINs
+                            skip_uv = true;
+                            continue;
+                        }
+                        Err(HIDError::Command(CommandError::StatusCode(
+                            StatusCode::UvBlocked,
+                            _,
+                        ))) if pin_uv_auth_result
+                            == PinUvAuthResult::SuccessGetPinUvAuthTokenUsingUvWithPermissions =>
+                        {
+                            // This should only happen for CTAP2.1 tokens that use internal UV and failed
                             // repeatedly, so that we have to fall back to PINs
                             skip_uv = true;
                             continue;
@@ -620,6 +704,7 @@ impl StateMachineCtap2 {
                         &mut getassertion,
                         &mut dev,
                         skip_uv,
+                        PinUvAuthTokenPermission::GetAssertion,
                         &status,
                         &callback,
                         alive,
@@ -692,24 +777,43 @@ impl StateMachineCtap2 {
                             callback.call(Ok(SignResult::CTAP2(assertion, client_data)));
                             break;
                         }
-                        Err(HIDError::Command(CommandError::StatusCode(StatusCode::ChannelBusy, _,))) => {
+                        Err(HIDError::Command(CommandError::StatusCode(
+                            StatusCode::ChannelBusy,
+                            _,
+                        ))) => {
                             // Channel busy. Client SHOULD retry the request after a short delay.
                             thread::sleep(Duration::from_millis(100));
                             continue;
                         }
-                        Err(HIDError::Command(CommandError::StatusCode(StatusCode::OperationDenied, _,)))
-                            if pin_uv_auth_result == PinUvAuthResult::UsingInternalUv =>
-                        {
+                        Err(HIDError::Command(CommandError::StatusCode(
+                            StatusCode::OperationDenied,
+                            _,
+                        ))) if pin_uv_auth_result == PinUvAuthResult::UsingInternalUv => {
                             // This should only happen for CTAP2.0 tokens that use internal UV and failed
                             // (e.g. wrong fingerprint used), while doing GetAssertion
                             // Yes, this is a different error code than for MakeCredential.
-                            send_status(&status, StatusUpdate::PinAuthInvalid);
+                            send_status(
+                                &status,
+                                StatusUpdate::PinUvError(StatusPinUv::InvalidUv(None)),
+                            );
                             continue;
                         }
-                        Err(HIDError::Command(CommandError::StatusCode(StatusCode::PinRequired, _)))
-                            if pin_uv_auth_result == PinUvAuthResult::UsingInternalUv =>
-                        {
+                        Err(HIDError::Command(CommandError::StatusCode(
+                            StatusCode::PinRequired,
+                            _,
+                        ))) if pin_uv_auth_result == PinUvAuthResult::UsingInternalUv => {
                             // This should only happen for CTAP2.0 tokens that use internal UV and failed
+                            // repeatedly, so that we have to fall back to PINs
+                            skip_uv = true;
+                            continue;
+                        }
+                        Err(HIDError::Command(CommandError::StatusCode(
+                            StatusCode::UvBlocked,
+                            _,
+                        ))) if pin_uv_auth_result
+                            == PinUvAuthResult::SuccessGetPinUvAuthTokenUsingUvWithPermissions =>
+                        {
+                            // This should only happen for CTAP2.1 tokens that use internal UV and failed
                             // repeatedly, so that we have to fall back to PINs
                             skip_uv = true;
                             continue;
@@ -820,10 +924,18 @@ impl StateMachineCtap2 {
                     Some(dev) => dev,
                 };
 
-                let (mut shared_secret, authinfo) = match dev.establish_shared_secret() {
+                let mut shared_secret = match dev.establish_shared_secret() {
                     Ok(s) => s,
                     Err(e) => {
                         callback.call(Err(AuthenticatorError::HIDError(e)));
+                        return;
+                    }
+                };
+
+                let authinfo = match dev.get_authenticator_info() {
+                    Some(i) => i.clone(),
+                    None => {
+                        callback.call(Err(HIDError::DeviceNotInitialized.into()));
                         return;
                     }
                 };
@@ -844,9 +956,15 @@ impl StateMachineCtap2 {
                 // Check if a client-pin is already set, or if a new one should be created
                 let res = if authinfo.options.client_pin.unwrap_or_default() {
                     let mut res;
-                    let mut error = PinError::PinRequired;
+                    let mut was_invalid = false;
+                    let mut retries = None;
                     loop {
-                        let current_pin = match Self::ask_user_for_pin(error, &status, &callback) {
+                        let current_pin = match Self::ask_user_for_pin(
+                            was_invalid,
+                            retries,
+                            &status,
+                            &callback,
+                        ) {
                             Ok(pin) => pin,
                             _ => {
                                 return;
@@ -863,11 +981,12 @@ impl StateMachineCtap2 {
                         .and_then(|msg| dev.send_cbor_cancellable(&msg, alive))
                         .map_err(|e| repackage_pin_errors(&mut dev, e));
 
-                        if let Err(AuthenticatorError::PinError(e)) = res {
-                            error = e;
+                        if let Err(AuthenticatorError::PinError(PinError::InvalidPin(r))) = res {
+                            was_invalid = true;
+                            retries = r;
                             // We need to re-establish the shared secret for the next round.
                             match dev.establish_shared_secret() {
-                                Ok((s, _)) => {
+                                Ok(s) => {
                                     shared_secret = s;
                                 }
                                 Err(e) => {
