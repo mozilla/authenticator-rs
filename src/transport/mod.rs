@@ -9,7 +9,6 @@ use crate::ctap2::commands::selection::Selection;
 use crate::ctap2::commands::{
     CommandError, Request, RequestCtap1, RequestCtap2, Retryable, StatusCode,
 };
-use crate::errors::AuthenticatorError;
 use crate::transport::device_selector::BlinkResult;
 use crate::transport::errors::{ApduErrorStatus, HIDError};
 use crate::transport::hid::HIDDevice;
@@ -278,7 +277,7 @@ pub trait FidoDevice: HIDDevice {
         &mut self,
         client_data_hash: &ClientDataHash,
         pin: &Option<Pin>,
-    ) -> Result<Option<PinUvAuthParam>, AuthenticatorError> {
+    ) -> Result<Option<PinUvAuthParam>, HIDError> {
         // Not reusing the shared secret here, if it exists, since we might start again
         // with a different PIN (e.g. if the last one was wrong)
         let (shared_secret, info) = self.establish_shared_secret()?;
@@ -288,10 +287,7 @@ pub trait FidoDevice: HIDDevice {
         if info.options.client_pin == Some(true) {
             let pin = pin
                 .as_ref()
-                .ok_or(HIDError::Command(CommandError::StatusCode(
-                    StatusCode::PinRequired,
-                    None,
-                )))?;
+                .ok_or(CommandError::StatusCode(StatusCode::PinRequired, None))?;
 
             let pin_command = GetPinToken::new(&shared_secret, pin);
             let pin_token = self.send_cbor(&pin_command)?;
