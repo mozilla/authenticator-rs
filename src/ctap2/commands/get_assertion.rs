@@ -223,8 +223,20 @@ impl PinUvAuthCommand for GetAssertion {
         self.client_data_wrapper.hash()
     }
 
-    fn unset_uv_option(&mut self) {
-        self.options.user_verification = None;
+    fn set_uv_option(&mut self, uv: Option<bool>) {
+        self.options.user_verification = uv;
+    }
+
+    fn get_uv_option(&mut self) -> Option<bool> {
+        self.options.user_verification
+    }
+
+    fn get_rp_id(&self) -> Option<&String> {
+        match &self.rp {
+            // CTAP1 case: We only have the hash, not the entire RpID
+            RelyingPartyWrapper::Hash(..) => None,
+            RelyingPartyWrapper::Data(r) => Some(&r.id),
+        }
     }
 }
 

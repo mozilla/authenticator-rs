@@ -1,7 +1,10 @@
 use crate::consts::HIDCmd;
-use crate::crypto::SharedSecret;
-use crate::ctap2::commands::client_pin::GetKeyAgreement;
-use crate::ctap2::commands::get_info::{AuthenticatorInfo, AuthenticatorVersion, GetInfo};
+use crate::crypto::{PinUvAuthProtocol, PinUvAuthToken, SharedSecret};
+use crate::ctap2::commands::client_pin::{
+    GetKeyAgreement, GetPinToken, GetPinUvAuthTokenUsingPinWithPermissions,
+    GetPinUvAuthTokenUsingUvWithPermissions, PinUvAuthTokenPermission,
+};
+use crate::ctap2::commands::get_info::{AuthenticatorVersion, GetInfo};
 use crate::ctap2::commands::get_version::GetVersion;
 use crate::ctap2::commands::make_credentials::dummy_make_credentials_cmd;
 use crate::ctap2::commands::selection::Selection;
@@ -12,6 +15,8 @@ use crate::transport::device_selector::BlinkResult;
 use crate::transport::errors::{ApduErrorStatus, HIDError};
 use crate::transport::hid::HIDDevice;
 use crate::util::io_err;
+use crate::Pin;
+use std::convert::TryFrom;
 use std::thread;
 use std::time::Duration;
 
@@ -245,29 +250,83 @@ pub trait FidoDevice: HIDDevice {
         }
     }
 
-    fn establish_shared_secret(&mut self) -> Result<(SharedSecret, AuthenticatorInfo), HIDError> {
+    fn establish_shared_secret(&mut self) -> Result<SharedSecret, HIDError> {
         if !self.supports_ctap2() {
             return Err(HIDError::UnsupportedCommand);
         }
 
-        let info = if let Some(authenticator_info) = self.get_authenticator_info().cloned() {
-            authenticator_info
-        } else {
-            // We should already have it, since it is queried upon `init()`, but just to be safe
-            let info_command = GetInfo::default();
-            let info = self.send_cbor(&info_command)?;
-            debug!("infos: {:?}", info);
-
-            self.set_authenticator_info(info.clone());
-            info
-        };
+        let info = self
+            .get_authenticator_info()
+            .ok_or(HIDError::DeviceNotInitialized)?;
+        let pin_protocol = PinUvAuthProtocol::try_from(info)?;
 
         // Not reusing the shared secret here, if it exists, since we might start again
         // with a different PIN (e.g. if the last one was wrong)
-        let pin_command = GetKeyAgreement::new(&info)?;
+        let pin_command = GetKeyAgreement::new(pin_protocol);
         let device_key_agreement = self.send_cbor(&pin_command)?;
         let shared_secret = device_key_agreement.shared_secret()?;
         self.set_shared_secret(shared_secret.clone());
-        Ok((shared_secret, info))
+        Ok(shared_secret)
+    }
+
+    /// CTAP 2.0-only version:
+    /// "Getting pinUvAuthToken using getPinToken (superseded)"
+    fn get_pin_token(&mut self, pin: &Option<Pin>) -> Result<PinUvAuthToken, HIDError> {
+        // Asking the user for PIN before establishing the shared secret
+        let pin = pin
+            .as_ref()
+            .ok_or(CommandError::StatusCode(StatusCode::PinRequired, None))?;
+
+        // Not reusing the shared secret here, if it exists, since we might start again
+        // with a different PIN (e.g. if the last one was wrong)
+        let shared_secret = self.establish_shared_secret()?;
+
+        let pin_command = GetPinToken::new(&shared_secret, pin);
+        let pin_token = self.send_cbor(&pin_command)?;
+
+        Ok(pin_token)
+    }
+
+    fn get_pin_uv_auth_token_using_uv_with_permissions(
+        &mut self,
+        permission: PinUvAuthTokenPermission,
+        rp_id: Option<&String>,
+    ) -> Result<PinUvAuthToken, HIDError> {
+        // Not reusing the shared secret here, if it exists, since we might start again
+        // with a different PIN (e.g. if the last one was wrong)
+        let shared_secret = self.establish_shared_secret()?;
+        let pin_command = GetPinUvAuthTokenUsingUvWithPermissions::new(
+            &shared_secret,
+            permission,
+            rp_id.cloned(),
+        );
+        let pin_auth_token = self.send_cbor(&pin_command)?;
+
+        Ok(pin_auth_token)
+    }
+
+    fn get_pin_uv_auth_token_using_pin_with_permissions(
+        &mut self,
+        pin: &Option<Pin>,
+        permission: PinUvAuthTokenPermission,
+        rp_id: Option<&String>,
+    ) -> Result<PinUvAuthToken, HIDError> {
+        // Asking the user for PIN before establishing the shared secret
+        let pin = pin
+            .as_ref()
+            .ok_or(CommandError::StatusCode(StatusCode::PinRequired, None))?;
+
+        // Not reusing the shared secret here, if it exists, since we might start again
+        // with a different PIN (e.g. if the last one was wrong)
+        let shared_secret = self.establish_shared_secret()?;
+        let pin_command = GetPinUvAuthTokenUsingPinWithPermissions::new(
+            &shared_secret,
+            pin,
+            permission,
+            rp_id.cloned(),
+        );
+        let pin_auth_token = self.send_cbor(&pin_command)?;
+
+        Ok(pin_auth_token)
     }
 }

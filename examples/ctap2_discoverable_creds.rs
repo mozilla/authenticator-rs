@@ -10,9 +10,8 @@ use authenticator::{
     ctap2::server::{
         PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, Transport, User,
     },
-    errors::PinError,
     statecallback::StateCallback,
-    COSEAlgorithm, Pin, RegisterResult, SignResult, StatusUpdate,
+    COSEAlgorithm, Pin, RegisterResult, SignResult, StatusPinUv, StatusUpdate,
 };
 use getopts::Options;
 use sha2::{Digest, Sha256};
@@ -68,38 +67,45 @@ fn register_user(manager: &mut AuthenticatorService, username: &str, timeout_ms:
             Ok(StatusUpdate::DeviceSelected(dev_info)) => {
                 println!("STATUS: Continuing with device: {dev_info}");
             }
-            Ok(StatusUpdate::PinError(error, sender)) => match error {
-                PinError::PinRequired => {
-                    let raw_pin = rpassword::prompt_password_stderr("Enter PIN: ")
-                        .expect("Failed to read PIN");
-                    sender.send(Pin::new(&raw_pin)).expect("Failed to send PIN");
-                    continue;
-                }
-                PinError::InvalidPin(attempts) => {
-                    println!(
-                        "Wrong PIN! {}",
-                        attempts.map_or("Try again.".to_string(), |a| format!(
-                            "You have {a} attempts left."
-                        ))
-                    );
-                    let raw_pin = rpassword::prompt_password_stderr("Enter PIN: ")
-                        .expect("Failed to read PIN");
-                    sender.send(Pin::new(&raw_pin)).expect("Failed to send PIN");
-                    continue;
-                }
-                PinError::PinAuthBlocked => {
-                    panic!("Too many failed attempts in one row. Your device has been temporarily blocked. Please unplug it and plug in again.")
-                }
-                PinError::PinBlocked => {
-                    panic!("Too many failed attempts. Your device has been blocked. Reset it.")
-                }
-                e => {
-                    panic!("Unexpected error: {:?}", e)
-                }
-            },
-            Ok(StatusUpdate::PinAuthInvalid) => {
-                println!("Internal UV usage failed (e.g. using the wrong finger for your fingerprint sensor).");
+            Ok(StatusUpdate::PinUvError(StatusPinUv::PinRequired(sender))) => {
+                let raw_pin =
+                    rpassword::prompt_password_stderr("Enter PIN: ").expect("Failed to read PIN");
+                sender.send(Pin::new(&raw_pin)).expect("Failed to send PIN");
                 continue;
+            }
+            Ok(StatusUpdate::PinUvError(StatusPinUv::InvalidPin(sender, attempts))) => {
+                println!(
+                    "Wrong PIN! {}",
+                    attempts.map_or("Try again.".to_string(), |a| format!(
+                        "You have {a} attempts left."
+                    ))
+                );
+                let raw_pin =
+                    rpassword::prompt_password_stderr("Enter PIN: ").expect("Failed to read PIN");
+                sender.send(Pin::new(&raw_pin)).expect("Failed to send PIN");
+                continue;
+            }
+            Ok(StatusUpdate::PinUvError(StatusPinUv::PinAuthBlocked)) => {
+                panic!("Too many failed attempts in one row. Your device has been temporarily blocked. Please unplug it and plug in again.")
+            }
+            Ok(StatusUpdate::PinUvError(StatusPinUv::PinBlocked)) => {
+                panic!("Too many failed attempts. Your device has been blocked. Reset it.")
+            }
+            Ok(StatusUpdate::PinUvError(StatusPinUv::InvalidUv(attempts))) => {
+                println!(
+                    "Wrong UV! {}",
+                    attempts.map_or("Try again.".to_string(), |a| format!(
+                        "You have {a} attempts left."
+                    ))
+                );
+                continue;
+            }
+            Ok(StatusUpdate::PinUvError(StatusPinUv::UvBlocked)) => {
+                println!("Too many failed UV-attempts.");
+                continue;
+            }
+            Ok(StatusUpdate::PinUvError(e)) => {
+                panic!("Unexpected error: {:?}", e)
             }
             Err(RecvError) => {
                 println!("STATUS: end");
@@ -255,38 +261,45 @@ fn main() {
             Ok(StatusUpdate::DeviceSelected(dev_info)) => {
                 println!("STATUS: Continuing with device: {dev_info}");
             }
-            Ok(StatusUpdate::PinError(error, sender)) => match error {
-                PinError::PinRequired => {
-                    let raw_pin = rpassword::prompt_password_stderr("Enter PIN: ")
-                        .expect("Failed to read PIN");
-                    sender.send(Pin::new(&raw_pin)).expect("Failed to send PIN");
-                    continue;
-                }
-                PinError::InvalidPin(attempts) => {
-                    println!(
-                        "Wrong PIN! {}",
-                        attempts.map_or("Try again.".to_string(), |a| format!(
-                            "You have {a} attempts left."
-                        ))
-                    );
-                    let raw_pin = rpassword::prompt_password_stderr("Enter PIN: ")
-                        .expect("Failed to read PIN");
-                    sender.send(Pin::new(&raw_pin)).expect("Failed to send PIN");
-                    continue;
-                }
-                PinError::PinAuthBlocked => {
-                    panic!("Too many failed attempts in one row. Your device has been temporarily blocked. Please unplug it and plug in again.")
-                }
-                PinError::PinBlocked => {
-                    panic!("Too many failed attempts. Your device has been blocked. Reset it.")
-                }
-                e => {
-                    panic!("Unexpected error: {:?}", e)
-                }
-            },
-            Ok(StatusUpdate::PinAuthInvalid) => {
-                println!("Internal UV usage failed (e.g. using the wrong finger for your fingerprint sensor).");
+            Ok(StatusUpdate::PinUvError(StatusPinUv::PinRequired(sender))) => {
+                let raw_pin =
+                    rpassword::prompt_password_stderr("Enter PIN: ").expect("Failed to read PIN");
+                sender.send(Pin::new(&raw_pin)).expect("Failed to send PIN");
                 continue;
+            }
+            Ok(StatusUpdate::PinUvError(StatusPinUv::InvalidPin(sender, attempts))) => {
+                println!(
+                    "Wrong PIN! {}",
+                    attempts.map_or("Try again.".to_string(), |a| format!(
+                        "You have {a} attempts left."
+                    ))
+                );
+                let raw_pin =
+                    rpassword::prompt_password_stderr("Enter PIN: ").expect("Failed to read PIN");
+                sender.send(Pin::new(&raw_pin)).expect("Failed to send PIN");
+                continue;
+            }
+            Ok(StatusUpdate::PinUvError(StatusPinUv::PinAuthBlocked)) => {
+                panic!("Too many failed attempts in one row. Your device has been temporarily blocked. Please unplug it and plug in again.")
+            }
+            Ok(StatusUpdate::PinUvError(StatusPinUv::PinBlocked)) => {
+                panic!("Too many failed attempts. Your device has been blocked. Reset it.")
+            }
+            Ok(StatusUpdate::PinUvError(StatusPinUv::InvalidUv(attempts))) => {
+                println!(
+                    "Wrong UV! {}",
+                    attempts.map_or("Try again.".to_string(), |a| format!(
+                        "You have {a} attempts left."
+                    ))
+                );
+                continue;
+            }
+            Ok(StatusUpdate::PinUvError(StatusPinUv::UvBlocked)) => {
+                println!("Too many failed UV-attempts.");
+                continue;
+            }
+            Ok(StatusUpdate::PinUvError(e)) => {
+                panic!("Unexpected error: {:?}", e)
             }
             Err(RecvError) => {
                 println!("STATUS: end");
