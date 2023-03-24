@@ -293,11 +293,6 @@ impl StateMachine {
     }
 }
 
-enum PinUvAuthError {
-    ContinueLoop,
-    Return,
-}
-
 #[derive(Default)]
 // TODO(MS): To be renamed to `StateMachine` once U2FManager and the original StateMachine can be removed.
 pub struct StateMachineCtap2 {
@@ -421,31 +416,34 @@ impl StateMachineCtap2 {
         skip_uv: bool,
         status: &Sender<StatusUpdate>,
         callback: &StateCallback<crate::Result<U>>,
-    ) -> Result<PinUvAuthResult, PinUvAuthError> {
-        let mut pin_uv_auth_result = PinUvAuthResult::RequestIsCtap1;
-        if cmd.is_ctap2_request() {
+        alive: &dyn Fn() -> bool,
+    ) -> Result<PinUvAuthResult, ()> {
+        if !cmd.is_ctap2_request() {
+            return Ok(PinUvAuthResult::RequestIsCtap1);
+        }
+        while alive() {
             debug!("-----------------------------------------------------------------");
             debug!("Getting pinUvAuthToken");
             match cmd.determine_pin_uv_auth(dev, skip_uv) {
                 Ok(r) => {
-                    pin_uv_auth_result = r;
+                    return Ok(r);
                 }
                 Err(AuthenticatorError::PinError(e)) => {
                     if let Ok(pin) = Self::ask_user_for_pin(e, status, callback) {
                         cmd.set_pin(Some(pin));
-                        return Err(PinUvAuthError::ContinueLoop);
+                        continue;
                     } else {
-                        return Err(PinUvAuthError::Return);
+                        return Err(());
                     }
                 }
                 Err(e) => {
                     error!("Error when determining pinAuth: {:?}", e);
                     callback.call(Err(e));
-                    return Err(PinUvAuthError::Return);
+                    return Err(());
                 }
-            };
+            }
         }
-        Ok(pin_uv_auth_result)
+        Err(())
     }
 
     pub fn register(
@@ -508,12 +506,10 @@ impl StateMachineCtap2 {
                         skip_uv,
                         &status,
                         &callback,
+                        alive,
                     ) {
                         Ok(r) => r,
-                        Err(PinUvAuthError::ContinueLoop) => {
-                            continue;
-                        }
-                        Err(PinUvAuthError::Return) => {
+                        Err(()) => {
                             return;
                         }
                     };
@@ -543,32 +539,18 @@ impl StateMachineCtap2 {
                             callback.call(Ok(RegisterResult::CTAP1(data, dev.get_device_info())))
                         }
 
-                        Err(HIDError::Command(CommandError::StatusCode(
-                            StatusCode::ChannelBusy,
-                            _,
-                        ))) => {}
                         Err(e) => {
-                            match repackage_pin_errors(&mut dev, e.into()) {
-                                AuthenticatorError::PinError(PinError::PinAuthInvalid)
-                                    if pin_uv_auth_result == PinUvAuthResult::UsingInternalUv =>
-                                {
-                                    // This should only happen for CTAP2.0 tokens that use internal UV and failed
-                                    // (e.g. wrong fingerprint used)
-                                    send_status(&status, crate::StatusUpdate::PinAuthInvalid);
-                                    continue;
-                                }
-                                AuthenticatorError::PinError(PinError::PinRequired)
-                                    if pin_uv_auth_result == PinUvAuthResult::UsingInternalUv =>
-                                {
-                                    // This should only happen for CTAP2.0 tokens that use internal UV and failed
-                                    // repeatedly, so that we have to fall back to PINs
-                                    skip_uv = true;
-                                    continue;
-                                }
-                                e => {
-                                    warn!("error happened: {}", e);
-                                    callback.call(Err(e));
-                                }
+                            if let Some(err) = makecred.handle_auth_command_errors(
+                                &mut dev,
+                                e,
+                                pin_uv_auth_result,
+                                &mut skip_uv,
+                                &status,
+                            ) {
+                                warn!("error happened: {}", err);
+                                callback.call(Err(err));
+                            } else {
+                                continue;
                             }
                         }
                     }
@@ -628,12 +610,10 @@ impl StateMachineCtap2 {
                         skip_uv,
                         &status,
                         &callback,
+                        alive,
                     ) {
                         Ok(r) => r,
-                        Err(PinUvAuthError::ContinueLoop) => {
-                            continue;
-                        }
-                        Err(PinUvAuthError::Return) => {
+                        Err(()) => {
                             return;
                         }
                     };
@@ -698,33 +678,19 @@ impl StateMachineCtap2 {
                         Ok(GetAssertionResult::CTAP2(assertion, client_data)) => {
                             callback.call(Ok(SignResult::CTAP2(assertion, client_data)))
                         }
-                        Err(HIDError::Command(CommandError::StatusCode(
-                            StatusCode::ChannelBusy,
-                            _,
-                        ))) => {}
-
-                        // This should only happen for CTAP2.0 tokens that use internal UV and failed
-                        // (e.g. wrong fingerprint used)
-                        // Yes, this is different than for MakeCredential.
-                        Err(HIDError::Command(CommandError::StatusCode(
-                            StatusCode::OperationDenied,
-                            _,
-                        ))) if pin_uv_auth_result == PinUvAuthResult::UsingInternalUv => {
-                            send_status(&status, crate::StatusUpdate::PinAuthInvalid);
-                            continue;
-                        }
-                        // This should only happen for CTAP2.0 tokens that use internal UV and failed
-                        // repeatedly, so that we have to fall back to PINs
-                        Err(HIDError::Command(CommandError::StatusCode(
-                            StatusCode::PinRequired,
-                            _,
-                        ))) if pin_uv_auth_result == PinUvAuthResult::UsingInternalUv => {
-                            skip_uv = true;
-                            continue;
-                        }
                         Err(e) => {
-                            warn!("error happened: {}", e);
-                            callback.call(Err(e.into()));
+                            if let Some(err) = getassertion.handle_auth_command_errors(
+                                &mut dev,
+                                e,
+                                pin_uv_auth_result,
+                                &mut skip_uv,
+                                &status,
+                            ) {
+                                warn!("error happened: {}", err);
+                                callback.call(Err(err));
+                            } else {
+                                continue;
+                            }
                         }
                     }
                     break;
@@ -869,7 +835,6 @@ impl StateMachineCtap2 {
                         )
                         .map_err(HIDError::Command)
                         .and_then(|msg| dev.send_cbor_cancellable(&msg, alive))
-                        .map_err(AuthenticatorError::HIDError)
                         .map_err(|e| repackage_pin_errors(&mut dev, e));
 
                         if let Err(AuthenticatorError::PinError(e)) = res {

@@ -4,11 +4,14 @@ use crate::ctap2::commands::client_pin::{GetPinToken, GetRetries, Pin, PinError}
 use crate::errors::AuthenticatorError;
 use crate::transport::errors::{ApduErrorStatus, HIDError};
 use crate::transport::FidoDevice;
+use crate::{send_status, StatusUpdate};
 use serde_cbor::{error::Error as CborError, Value};
 use serde_json as json;
 use std::error::Error as StdErrorT;
-use std::fmt;
 use std::io::{Read, Write};
+use std::sync::mpsc::Sender;
+use std::time::Duration;
+use std::{fmt, thread};
 
 pub(crate) mod client_pin;
 pub(crate) mod get_assertion;
@@ -106,7 +109,7 @@ pub(crate) enum PinUvAuthResult {
     SuccessGetPinToken,
 }
 
-pub(crate) trait PinUvAuthCommand {
+pub(crate) trait PinUvAuthCommand: RequestCtap2 {
     fn pin(&self) -> &Option<Pin>;
     fn set_pin(&mut self, pin: Option<Pin>);
     fn set_pin_auth(&mut self, pin_auth: Option<PinUvAuthParam>);
@@ -150,6 +153,9 @@ pub(crate) trait PinUvAuthCommand {
             // If the device supports internal user-verification (e.g. fingerprints),
             // skip PIN-stuff
             if supports_uv {
+                // We may need the shared secret for HMAC-extension, so we
+                // have to establish one
+                let (_shared_secret, _info) = dev.establish_shared_secret()?;
                 return Ok(PinUvAuthResult::UsingInternalUv);
             }
 
@@ -178,51 +184,93 @@ pub(crate) trait PinUvAuthCommand {
         self.set_pin_auth(pin_auth);
         Ok(PinUvAuthResult::SuccessGetPinToken)
     }
+
+    fn handle_auth_command_errors<D: FidoDevice>(
+        &self,
+        dev: &mut D,
+        error: HIDError,
+        pin_uv_auth_result: PinUvAuthResult,
+        skip_uv: &mut bool,
+        status: &Sender<crate::StatusUpdate>,
+    ) -> Option<AuthenticatorError> {
+        match repackage_pin_errors(dev, error) {
+            AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
+                StatusCode::ChannelBusy,
+                _,
+            ))) => {
+                // Channel busy. Client SHOULD retry the request after a short delay.
+                thread::sleep(Duration::from_millis(100));
+                None
+            }
+            // This should only happen for CTAP2.0 tokens that use internal UV and failed
+            // (e.g. wrong fingerprint used), while doing MakeCredentials
+            AuthenticatorError::PinError(PinError::PinAuthInvalid)
+                if pin_uv_auth_result == PinUvAuthResult::UsingInternalUv
+                    && Self::command() == Command::MakeCredentials =>
+            {
+                send_status(status, StatusUpdate::PinAuthInvalid);
+                None
+            }
+            // This should only happen for CTAP2.0 tokens that use internal UV and failed
+            // (e.g. wrong fingerprint used), while doing GetAssertion
+            // Yes, this is different than for MakeCredential.
+            AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
+                StatusCode::OperationDenied,
+                _,
+            ))) if pin_uv_auth_result == PinUvAuthResult::UsingInternalUv
+                && Self::command() == Command::GetAssertion =>
+            {
+                send_status(status, StatusUpdate::PinAuthInvalid);
+                None
+            }
+            AuthenticatorError::PinError(PinError::PinRequired)
+                if pin_uv_auth_result == PinUvAuthResult::UsingInternalUv =>
+            {
+                // This should only happen for CTAP2.0 tokens that use internal UV and failed
+                // repeatedly, so that we have to fall back to PINs
+                *skip_uv = true;
+                None
+            }
+            err => Some(err),
+        }
+    }
 }
 
 pub(crate) fn repackage_pin_errors<D: FidoDevice>(
     dev: &mut D,
-    error: AuthenticatorError,
+    error: HIDError,
 ) -> AuthenticatorError {
     match error {
-        AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
-            StatusCode::PinInvalid,
-            _,
-        ))) => {
+        HIDError::Command(CommandError::StatusCode(StatusCode::PinInvalid, _)) => {
             // If the given PIN was wrong, determine no. of left retries
             let cmd = GetRetries::new();
             let retries = dev.send_cbor(&cmd).ok(); // If we got retries, wrap it in Some, otherwise ignore err
             AuthenticatorError::PinError(PinError::InvalidPin(retries))
         }
-        AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
-            StatusCode::PinAuthBlocked,
-            _,
-        ))) => AuthenticatorError::PinError(PinError::PinAuthBlocked),
-        AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
-            StatusCode::PinBlocked,
-            _,
-        ))) => AuthenticatorError::PinError(PinError::PinBlocked),
-        AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
-            StatusCode::PinRequired,
-            _,
-        ))) => AuthenticatorError::PinError(PinError::PinRequired),
-        AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
-            StatusCode::PinNotSet,
-            _,
-        ))) => AuthenticatorError::PinError(PinError::PinNotSet),
-        AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
-            StatusCode::PinAuthInvalid,
-            _,
-        ))) => AuthenticatorError::PinError(PinError::PinAuthInvalid),
+        HIDError::Command(CommandError::StatusCode(StatusCode::PinAuthBlocked, _)) => {
+            AuthenticatorError::PinError(PinError::PinAuthBlocked)
+        }
+        HIDError::Command(CommandError::StatusCode(StatusCode::PinBlocked, _)) => {
+            AuthenticatorError::PinError(PinError::PinBlocked)
+        }
+        HIDError::Command(CommandError::StatusCode(StatusCode::PinRequired, _)) => {
+            AuthenticatorError::PinError(PinError::PinRequired)
+        }
+        HIDError::Command(CommandError::StatusCode(StatusCode::PinNotSet, _)) => {
+            AuthenticatorError::PinError(PinError::PinNotSet)
+        }
+        HIDError::Command(CommandError::StatusCode(StatusCode::PinAuthInvalid, _)) => {
+            AuthenticatorError::PinError(PinError::PinAuthInvalid)
+        }
         // TODO(MS): Add "PinPolicyViolated"
-        err => err,
+        err => AuthenticatorError::HIDError(err),
     }
 }
 
 // Spec: https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html#authenticator-api
 // and: https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-20210615.html#authenticator-api
 #[repr(u8)]
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Command {
     MakeCredentials = 0x01,
     GetAssertion = 0x02,
