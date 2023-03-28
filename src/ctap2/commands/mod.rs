@@ -143,46 +143,41 @@ pub(crate) trait PinUvAuthCommand: RequestCtap2 {
             .get_authenticator_info()
             .ok_or(AuthenticatorError::Platform)?;
 
-        if self.pin().is_none() {
-            // Only use UV, if the device supports it and we don't skip it
-            // which happens as a fallback, if UV-usage failed too many times
-            let supports_uv = !skip_uv && info.options.user_verification == Some(true);
-            let supports_pin = info.options.client_pin.is_some();
-            let pin_configured = info.options.client_pin == Some(true);
+        let supports_uv = info.options.user_verification == Some(true);
+        let supports_pin = info.options.client_pin.is_some();
+        let pin_configured = info.options.client_pin == Some(true);
 
-            // If the device supports internal user-verification (e.g. fingerprints),
-            // skip PIN-stuff
-            if supports_uv {
-                // We may need the shared secret for HMAC-extension, so we
-                // have to establish one
-                let (_shared_secret, _info) = dev.establish_shared_secret()?;
-                return Ok(PinUvAuthResult::UsingInternalUv);
-            }
+        // Only use UV if the device supports it and we don't skip it,
+        // which happens if UV-usage failed too many times
+        if !skip_uv && supports_uv {
+            // We may need the shared secret for HMAC-extension, so we
+            // have to establish one
+            let (_shared_secret, _info) = dev.establish_shared_secret()?;
+            return Ok(PinUvAuthResult::UsingInternalUv);
+        }
 
-            // Device does not support any auth-method
-            if !supports_pin && !supports_uv {
-                // We'll send it to the device anyways, and let it error out (or magically work)
-                return Ok(PinUvAuthResult::NoAuthTypeSupported);
-            }
-
-            // Device supports PIN: Ask user for it.
-            if !supports_uv && pin_configured {
+        if supports_pin && pin_configured {
+            if let Some(pin) = self.pin() {
+                // Getting pinUvAuthToken using getPinToken
+                let (shared_secret, _info) = dev.establish_shared_secret()?;
+                let pin_command = GetPinToken::new(&shared_secret, pin);
+                let pin_token = dev
+                    .send_cbor(&pin_command)
+                    .map_err(|e| repackage_pin_errors(dev, e))?;
+                let pin_auth = pin_token.derive(self.client_data_hash().as_ref())?;
+                // CTAP 2.0 spec is a bit vague here, but CTAP 2.1 is very specific, that the request
+                // should either include pinAuth OR uv=true, but not both at the same time.
+                // Do not set user_verification, if pinAuth is provided
+                self.unset_uv_option();
+                self.set_pin_auth(Some(pin_auth));
+                return Ok(PinUvAuthResult::SuccessGetPinToken);
+            } else {
+                // Ask user for it.
                 return Err(AuthenticatorError::PinError(PinError::PinRequired));
             }
         }
 
-        let pin_auth = dev
-            .get_pin_token(&self.client_data_hash(), self.pin())
-            .map_err(|e| repackage_pin_errors(dev, e))?;
-
-        // CTAP 2.0 spec is a bit vague here, but CTAP 2.1 is very specific, that the request
-        // should either include pinAuth OR uv=true, but not both at the same time.
-        // Do not set user_verification, if pinAuth is provided
-        if pin_auth.is_some() {
-            self.unset_uv_option();
-        }
-        self.set_pin_auth(pin_auth);
-        Ok(PinUvAuthResult::SuccessGetPinToken)
+        Ok(PinUvAuthResult::NoAuthTypeSupported)
     }
 
     fn handle_auth_command_errors<D: FidoDevice>(
