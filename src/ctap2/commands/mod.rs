@@ -4,14 +4,11 @@ use crate::ctap2::commands::client_pin::{GetPinToken, GetRetries, Pin, PinError}
 use crate::errors::AuthenticatorError;
 use crate::transport::errors::{ApduErrorStatus, HIDError};
 use crate::transport::FidoDevice;
-use crate::{send_status, StatusUpdate};
 use serde_cbor::{error::Error as CborError, Value};
 use serde_json as json;
 use std::error::Error as StdErrorT;
 use std::io::{Read, Write};
-use std::sync::mpsc::Sender;
-use std::time::Duration;
-use std::{fmt, thread};
+use std::fmt;
 
 pub(crate) mod client_pin;
 pub(crate) mod get_assertion;
@@ -178,56 +175,6 @@ pub(crate) trait PinUvAuthCommand: RequestCtap2 {
         }
 
         Ok(PinUvAuthResult::NoAuthTypeSupported)
-    }
-
-    fn handle_auth_command_errors<D: FidoDevice>(
-        &self,
-        dev: &mut D,
-        error: HIDError,
-        pin_uv_auth_result: PinUvAuthResult,
-        skip_uv: &mut bool,
-        status: &Sender<crate::StatusUpdate>,
-    ) -> Option<AuthenticatorError> {
-        match repackage_pin_errors(dev, error) {
-            AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
-                StatusCode::ChannelBusy,
-                _,
-            ))) => {
-                // Channel busy. Client SHOULD retry the request after a short delay.
-                thread::sleep(Duration::from_millis(100));
-                None
-            }
-            // This should only happen for CTAP2.0 tokens that use internal UV and failed
-            // (e.g. wrong fingerprint used), while doing MakeCredentials
-            AuthenticatorError::PinError(PinError::PinAuthInvalid)
-                if pin_uv_auth_result == PinUvAuthResult::UsingInternalUv
-                    && Self::command() == Command::MakeCredentials =>
-            {
-                send_status(status, StatusUpdate::PinAuthInvalid);
-                None
-            }
-            // This should only happen for CTAP2.0 tokens that use internal UV and failed
-            // (e.g. wrong fingerprint used), while doing GetAssertion
-            // Yes, this is different than for MakeCredential.
-            AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
-                StatusCode::OperationDenied,
-                _,
-            ))) if pin_uv_auth_result == PinUvAuthResult::UsingInternalUv
-                && Self::command() == Command::GetAssertion =>
-            {
-                send_status(status, StatusUpdate::PinAuthInvalid);
-                None
-            }
-            AuthenticatorError::PinError(PinError::PinRequired)
-                if pin_uv_auth_result == PinUvAuthResult::UsingInternalUv =>
-            {
-                // This should only happen for CTAP2.0 tokens that use internal UV and failed
-                // repeatedly, so that we have to fall back to PINs
-                *skip_uv = true;
-                None
-            }
-            err => Some(err),
-        }
     }
 }
 

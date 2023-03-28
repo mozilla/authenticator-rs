@@ -533,28 +533,40 @@ impl StateMachineCtap2 {
                     }
                     match resp {
                         Ok(MakeCredentialsResult::CTAP2(attestation, client_data)) => {
-                            callback.call(Ok(RegisterResult::CTAP2(attestation, client_data)))
+                            callback.call(Ok(RegisterResult::CTAP2(attestation, client_data)));
+                            break;
                         }
                         Ok(MakeCredentialsResult::CTAP1(data)) => {
-                            callback.call(Ok(RegisterResult::CTAP1(data, dev.get_device_info())))
+                            callback.call(Ok(RegisterResult::CTAP1(data, dev.get_device_info())));
+                            break;
                         }
-
+                        Err(HIDError::Command(CommandError::StatusCode(StatusCode::ChannelBusy, _,))) => {
+                            // Channel busy. Client SHOULD retry the request after a short delay.
+                            thread::sleep(Duration::from_millis(100));
+                            continue;
+                        }
+                        Err(HIDError::Command(CommandError::StatusCode(StatusCode::PinAuthInvalid, _)))
+                            if pin_uv_auth_result == PinUvAuthResult::UsingInternalUv =>
+                        {
+                            // This should only happen for CTAP2.0 tokens that use internal UV and
+                            // failed (e.g. wrong fingerprint used), while doing MakeCredentials
+                            send_status(&status, StatusUpdate::PinAuthInvalid);
+                            continue;
+                        }
+                        Err(HIDError::Command(CommandError::StatusCode(StatusCode::PinRequired, _)))
+                            if pin_uv_auth_result == PinUvAuthResult::UsingInternalUv =>
+                        {
+                            // This should only happen for CTAP2.0 tokens that use internal UV and failed
+                            // repeatedly, so that we have to fall back to PINs
+                            skip_uv = true;
+                            continue;
+                        }
                         Err(e) => {
-                            if let Some(err) = makecred.handle_auth_command_errors(
-                                &mut dev,
-                                e,
-                                pin_uv_auth_result,
-                                &mut skip_uv,
-                                &status,
-                            ) {
-                                warn!("error happened: {}", err);
-                                callback.call(Err(err));
-                            } else {
-                                continue;
-                            }
+                            warn!("error happened: {e}");
+                            callback.call(Err(AuthenticatorError::HIDError(e)));
+                            break;
                         }
                     }
-                    break;
                 }
             },
         );
@@ -673,27 +685,41 @@ impl StateMachineCtap2 {
                                 key_handle,
                                 resp,
                                 dev.get_device_info(),
-                            )))
+                            )));
+                            break;
                         }
                         Ok(GetAssertionResult::CTAP2(assertion, client_data)) => {
-                            callback.call(Ok(SignResult::CTAP2(assertion, client_data)))
+                            callback.call(Ok(SignResult::CTAP2(assertion, client_data)));
+                            break;
+                        }
+                        Err(HIDError::Command(CommandError::StatusCode(StatusCode::ChannelBusy, _,))) => {
+                            // Channel busy. Client SHOULD retry the request after a short delay.
+                            thread::sleep(Duration::from_millis(100));
+                            continue;
+                        }
+                        Err(HIDError::Command(CommandError::StatusCode(StatusCode::OperationDenied, _,)))
+                            if pin_uv_auth_result == PinUvAuthResult::UsingInternalUv =>
+                        {
+                            // This should only happen for CTAP2.0 tokens that use internal UV and failed
+                            // (e.g. wrong fingerprint used), while doing GetAssertion
+                            // Yes, this is a different error code than for MakeCredential.
+                            send_status(&status, StatusUpdate::PinAuthInvalid);
+                            continue;
+                        }
+                        Err(HIDError::Command(CommandError::StatusCode(StatusCode::PinRequired, _)))
+                            if pin_uv_auth_result == PinUvAuthResult::UsingInternalUv =>
+                        {
+                            // This should only happen for CTAP2.0 tokens that use internal UV and failed
+                            // repeatedly, so that we have to fall back to PINs
+                            skip_uv = true;
+                            continue;
                         }
                         Err(e) => {
-                            if let Some(err) = getassertion.handle_auth_command_errors(
-                                &mut dev,
-                                e,
-                                pin_uv_auth_result,
-                                &mut skip_uv,
-                                &status,
-                            ) {
-                                warn!("error happened: {}", err);
-                                callback.call(Err(err));
-                            } else {
-                                continue;
-                            }
+                            warn!("error happened: {e}");
+                            callback.call(Err(AuthenticatorError::HIDError(e)));
+                            break;
                         }
                     }
-                    break;
                 }
             },
         );
