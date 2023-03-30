@@ -182,7 +182,7 @@ impl AuthenticatorService {
         self.add_u2f_usb_hid_platform_transports();
     }
 
-    fn add_transport(&mut self, boxed_token: Box<dyn AuthenticatorTransport + Send>) {
+    pub fn add_transport(&mut self, boxed_token: Box<dyn AuthenticatorTransport + Send>) {
         self.transports.push(Arc::new(Mutex::new(boxed_token)))
     }
 
