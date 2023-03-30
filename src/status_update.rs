@@ -118,7 +118,7 @@ pub mod tests {
         let json = to_string(&st).expect("Failed to serialize");
         assert_eq!(&json, r#"{"PinUvError":{"InvalidPin":3}}"#);
 
-        let st = StatusUpdate::PinUvError(StatusPinUv::InvalidPin(tx.clone(), None));
+        let st = StatusUpdate::PinUvError(StatusPinUv::InvalidPin(tx, None));
         let json = to_string(&st).expect("Failed to serialize");
         assert_eq!(&json, r#"{"PinUvError":{"InvalidPin":null}}"#);
 

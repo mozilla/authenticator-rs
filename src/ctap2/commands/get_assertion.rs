@@ -176,7 +176,7 @@ pub struct GetAssertion {
     pub(crate) extensions: GetAssertionExtensions,
     pub(crate) options: GetAssertionOptions,
     pub(crate) pin: Option<Pin>,
-    pub(crate) pin_auth: Option<PinUvAuthParam>,
+    pub(crate) pin_uv_auth_param: Option<PinUvAuthParam>,
 
     // This is used to implement the FIDO AppID extension.
     pub(crate) alternate_rp_id: Option<String>,
@@ -200,7 +200,7 @@ impl GetAssertion {
             extensions,
             options,
             pin,
-            pin_auth: None,
+            pin_uv_auth_param: None,
             alternate_rp_id,
         })
     }
@@ -215,8 +215,8 @@ impl PinUvAuthCommand for GetAssertion {
         self.pin = pin;
     }
 
-    fn set_pin_auth(&mut self, pin_auth: Option<PinUvAuthParam>) {
-        self.pin_auth = pin_auth;
+    fn set_pin_uv_auth_param(&mut self, pin_uv_auth_param: Option<PinUvAuthParam>) {
+        self.pin_uv_auth_param = pin_uv_auth_param;
     }
 
     fn client_data_hash(&self) -> ClientDataHash {
@@ -257,7 +257,7 @@ impl Serialize for GetAssertion {
         if self.options.has_some() {
             map_len += 1;
         }
-        if self.pin_auth.is_some() {
+        if self.pin_uv_auth_param.is_some() {
             map_len += 2;
         }
 
@@ -284,9 +284,9 @@ impl Serialize for GetAssertion {
         if self.options.has_some() {
             map.serialize_entry(&5, &self.options)?;
         }
-        if let Some(pin_auth) = &self.pin_auth {
-            map.serialize_entry(&6, &pin_auth)?;
-            map.serialize_entry(&7, &pin_auth.pin_protocol.id())?;
+        if let Some(pin_uv_auth_param) = &self.pin_uv_auth_param {
+            map.serialize_entry(&6, &pin_uv_auth_param)?;
+            map.serialize_entry(&7, &pin_uv_auth_param.pin_protocol.id())?;
         }
         map.end()
     }
