@@ -1,3 +1,7 @@
+#![allow(non_upper_case_globals)]
+// Note: Needed for PinUvAuthTokenPermission
+//       The current version of `bitflags` doesn't seem to allow
+//       to set this for an individual bitflag-struct.
 use super::{get_info::AuthenticatorInfo, Command, CommandError, RequestCtap2, StatusCode};
 use crate::crypto::{COSEKey, CryptoError, PinUvAuthProtocol, PinUvAuthToken, SharedSecret};
 use crate::transport::errors::HIDError;
@@ -29,15 +33,24 @@ pub enum PINSubcommand {
     GetPinUvAuthTokenUsingPinWithPermissions = 0x09, // Yes, 0x08 is missing
 }
 
-#[derive(Debug, Copy, Clone)]
-#[repr(u8)]
-pub enum PinUvAuthTokenPermission {
-    MakeCredential = 0x01,             // rp_id required
-    GetAssertion = 0x02,               // rp_id required
-    CredentialManagement = 0x04,       // rp_id optional
-    BioEnrollment = 0x08,              // rp_id ignored
-    LargeBlobWrite = 0x10,             // rp_id ignored
-    AuthenticatorConfiguration = 0x20, // rp_id ignored
+bitflags! {
+    pub struct PinUvAuthTokenPermission: u8 {
+        const MakeCredential = 0x01;             // rp_id required
+        const GetAssertion = 0x02;               // rp_id required
+        const CredentialManagement = 0x04;       // rp_id optional
+        const BioEnrollment = 0x08;              // rp_id ignored
+        const LargeBlobWrite = 0x10;             // rp_id ignored
+        const AuthenticatorConfiguration = 0x20; // rp_id ignored
+    }
+}
+
+impl Default for PinUvAuthTokenPermission {
+    fn default() -> Self {
+        // CTAP 2.1 spec:
+        // If authenticatorClientPIN's getPinToken subcommand is invoked, default permissions
+        // of `mc` and `ga` (value 0x03) are granted for the returned pinUvAuthToken.
+        PinUvAuthTokenPermission::MakeCredential | PinUvAuthTokenPermission::GetAssertion
+    }
 }
 
 #[derive(Debug)]
@@ -295,9 +308,13 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinToken<'sc, 'pin> {
             from_slice(input).map_err(CommandError::Deserializing)?;
         match get_pin_response.pin_token {
             Some(encrypted_pin_token) => {
+                // CTAP 2.1 spec:
+                // If authenticatorClientPIN's getPinToken subcommand is invoked, default permissions
+                // of `mc` and `ga` (value 0x03) are granted for the returned pinUvAuthToken.
+                let default_permissions = PinUvAuthTokenPermission::default();
                 let pin_token = self
                     .shared_secret
-                    .decrypt_pin_token(encrypted_pin_token.as_ref())?;
+                    .decrypt_pin_token(default_permissions, encrypted_pin_token.as_ref())?;
                 Ok(pin_token)
             }
             None => Err(CommandError::MissingRequiredField("key_agreement")),
@@ -341,7 +358,7 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinUvAuthTokenUsingPinWithPermissions
             subcommand: PINSubcommand::GetPinUvAuthTokenUsingPinWithPermissions,
             key_agreement: Some(self.shared_secret.client_input().clone()),
             pin_hash_enc: Some(ByteBuf::from(pin_hash_enc)),
-            permissions: Some(self.permissions as u8),
+            permissions: Some(self.permissions.bits()),
             rp_id: self.rp_id.clone(), /* TODO: This could probably be done less wasteful with
                                         * &str all the way */
             ..ClientPIN::default()
@@ -361,7 +378,7 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinUvAuthTokenUsingPinWithPermissions
             Some(encrypted_pin_token) => {
                 let pin_token = self
                     .shared_secret
-                    .decrypt_pin_token(encrypted_pin_token.as_ref())?;
+                    .decrypt_pin_token(self.permissions, encrypted_pin_token.as_ref())?;
                 Ok(pin_token)
             }
             None => Err(CommandError::MissingRequiredField("key_agreement")),
@@ -437,7 +454,7 @@ impl<'sc> ClientPINSubCommand for GetPinUvAuthTokenUsingUvWithPermissions<'sc> {
             pin_protocol: Some(self.shared_secret.pin_protocol.clone()),
             subcommand: PINSubcommand::GetPinUvAuthTokenUsingUvWithPermissions,
             key_agreement: Some(self.shared_secret.client_input().clone()),
-            permissions: Some(self.permissions as u8),
+            permissions: Some(self.permissions.bits()),
             rp_id: self.rp_id.clone(), /* TODO: This could probably be done less wasteful with
                                         * &str all the way */
             ..ClientPIN::default()
@@ -454,7 +471,7 @@ impl<'sc> ClientPINSubCommand for GetPinUvAuthTokenUsingUvWithPermissions<'sc> {
             Some(encrypted_pin_token) => {
                 let pin_token = self
                     .shared_secret
-                    .decrypt_pin_token(encrypted_pin_token.as_ref())?;
+                    .decrypt_pin_token(self.permissions, encrypted_pin_token.as_ref())?;
                 Ok(pin_token)
             }
             None => Err(CommandError::MissingRequiredField("key_agreement")),

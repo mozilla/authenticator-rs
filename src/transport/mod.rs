@@ -292,8 +292,7 @@ pub trait FidoDevice: HIDDevice {
         permission: PinUvAuthTokenPermission,
         rp_id: Option<&String>,
     ) -> Result<PinUvAuthToken, HIDError> {
-        // Not reusing the shared secret here, if it exists, since we might start again
-        // with a different PIN (e.g. if the last one was wrong)
+        // Explicitly not reusing the shared secret here
         let shared_secret = self.establish_shared_secret()?;
         let pin_command = GetPinUvAuthTokenUsingUvWithPermissions::new(
             &shared_secret,
