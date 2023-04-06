@@ -5,7 +5,7 @@ use super::{
 use crate::consts::{PARAMETER_SIZE, U2F_REGISTER, U2F_REQUEST_USER_PRESENCE};
 use crate::crypto::{
     parse_u2f_der_certificate, COSEAlgorithm, COSEEC2Key, COSEKey, COSEKeyType, Curve,
-    PinUvAuthParam,
+    PinUvAuthParam, PinUvAuthToken,
 };
 use crate::ctap2::attestation::{
     AAGuid, AttestationObject, AttestationStatement, AttestationStatementFidoU2F,
@@ -20,6 +20,7 @@ use crate::ctap2::server::{
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty,
     RelyingPartyWrapper, User,
 };
+use crate::errors::AuthenticatorError;
 use crate::transport::{
     errors::{ApduErrorStatus, HIDError},
     FidoDevice,
@@ -150,8 +151,20 @@ impl PinUvAuthCommand for MakeCredentials {
         self.pin = pin;
     }
 
-    fn set_pin_uv_auth_param(&mut self, pin_uv_auth_param: Option<PinUvAuthParam>) {
-        self.pin_uv_auth_param = pin_uv_auth_param;
+    fn set_pin_uv_auth_param(
+        &mut self,
+        pin_uv_auth_token: Option<PinUvAuthToken>,
+    ) -> Result<(), AuthenticatorError> {
+        let mut param = None;
+        if let Some(token) = pin_uv_auth_token {
+            param = Some(
+                token
+                    .derive(self.client_data_hash().as_ref())
+                    .map_err(CommandError::Crypto)?,
+            );
+        }
+        self.pin_uv_auth_param = param;
+        Ok(())
     }
 
     fn client_data_hash(&self) -> ClientDataHash {
@@ -172,6 +185,17 @@ impl PinUvAuthCommand for MakeCredentials {
             RelyingPartyWrapper::Hash(..) => None,
             RelyingPartyWrapper::Data(r) => Some(&r.id),
         }
+    }
+
+    fn set_discouraged_uv_option(&mut self) {
+        // "[..] the Relying Party wants to create a non-discoverable credential and not require user verification
+        // (e.g., by setting options.authenticatorSelection.userVerification to "discouraged" in the WebAuthn API),
+        // the platform invokes the authenticatorMakeCredential operation using the marshalled input parameters along
+        // with the "uv" option key set to false and terminate these steps."
+        // Note: This is basically a no-op right now, since we use `get_uv_option() == Some(false)`, to determine if
+        //       the RP is discouraging UV. But we may change that part of the API in the future, so better to be
+        //       explicit here.
+        self.set_uv_option(Some(false))
     }
 }
 
