@@ -421,7 +421,92 @@ impl StateMachineCtap2 {
         }
     }
 
-    fn determine_pin_auth<T: PinUvAuthCommand + Request<V>, U, V>(
+    /// Try to fetch PinUvAuthToken from the device and derive from it PinUvAuthParam.
+    /// Prefer UV, fallback to PIN.
+    /// Prefer newer pinUvAuth-methods, if supported by the device.
+    fn get_pin_uv_auth_param<T: PinUvAuthCommand + Request<V>, V>(
+        cmd: &mut T,
+        dev: &mut Device,
+        permission: PinUvAuthTokenPermission,
+        skip_uv: bool,
+    ) -> Result<PinUvAuthResult, AuthenticatorError> {
+        let info = dev
+            .get_authenticator_info()
+            .ok_or(AuthenticatorError::HIDError(HIDError::DeviceNotInitialized))?;
+
+        // Only use UV, if the device supports it and we don't skip it
+        // which happens as a fallback, if UV-usage failed too many times
+        // Note: In theory, we could also repeatedly query GetInfo here and check
+        //       if uv is set to Some(true), as tokens should set it to Some(false)
+        //       if UV is blocked (too many failed attempts). But the CTAP2.0-spec is
+        //       vague and I don't trust all tokens to implement it that way. So we
+        //       keep track of it ourselves, using `skip_uv`.
+        let supports_uv = info.options.user_verification == Some(true);
+        let supports_pin = info.options.client_pin.is_some();
+        let pin_configured = info.options.client_pin == Some(true);
+
+        // Device does not support any auth-method
+        if !pin_configured && !supports_uv {
+            // We'll send it to the device anyways, and let it error out (or magically work)
+            return Ok(PinUvAuthResult::NoAuthTypeSupported);
+        }
+        let (res, pin_auth_token) = if info.options.pin_uv_auth_token == Some(true) {
+            if !skip_uv && supports_uv {
+                // CTAP 2.1 - UV
+                let pin_auth_token = dev
+                    .get_pin_uv_auth_token_using_uv_with_permissions(permission, cmd.get_rp_id());
+                (
+                    PinUvAuthResult::SuccessGetPinUvAuthTokenUsingUvWithPermissions,
+                    pin_auth_token,
+                )
+            } else if supports_pin && pin_configured {
+                // CTAP 2.1 - PIN
+                let pin_auth_token = dev.get_pin_uv_auth_token_using_pin_with_permissions(
+                    cmd.pin(),
+                    permission,
+                    cmd.get_rp_id(),
+                );
+                (
+                    PinUvAuthResult::SuccessGetPinUvAuthTokenUsingPinWithPermissions,
+                    pin_auth_token,
+                )
+            } else {
+                return Ok(PinUvAuthResult::NoAuthTypeSupported);
+            }
+        } else {
+            // CTAP 2.0 fallback
+            if !skip_uv && supports_uv && cmd.pin().is_none() {
+                // If the device supports internal user-verification (e.g. fingerprints),
+                // skip PIN-stuff
+
+                // We may need the shared secret for HMAC-extension, so we
+                // have to establish one
+                let _shared_secret = dev.establish_shared_secret()?;
+                return Ok(PinUvAuthResult::UsingInternalUv);
+            }
+
+            let pin_auth_token = dev.get_pin_token(cmd.pin());
+            (PinUvAuthResult::SuccessGetPinToken, pin_auth_token)
+        };
+
+        let pin_auth_token = pin_auth_token.map_err(|e| repackage_pin_errors(dev, e))?;
+        cmd.set_pin_uv_auth_param(Some(pin_auth_token))?;
+        // CTAP 2.0 spec is a bit vague here, but CTAP 2.1 is very specific, that the request
+        // should either include pinAuth OR uv=true, but not both at the same time.
+        // Do not set user_verification, if pinAuth is provided
+        cmd.set_uv_option(None);
+        Ok(res)
+    }
+
+    /// PUAP, as per spec: PinUvAuthParam
+    /// Determines, if we need to establish a PinUvAuthParam, based on the
+    /// capabilities of the device and the incoming request.
+    /// If it is needed, tries to establish one and save it inside the Request.
+    /// Returns Ok() if we can proceed with sending the actual Request to
+    /// the device, Err() otherwise.
+    /// Handles asking the user for a PIN, if needed and sending StatusUpdates
+    /// regarding PIN and UV usage.
+    fn determine_puap_if_needed<T: PinUvAuthCommand + Request<V>, U, V>(
         cmd: &mut T,
         dev: &mut Device,
         mut skip_uv: bool,
@@ -430,13 +515,28 @@ impl StateMachineCtap2 {
         callback: &StateCallback<crate::Result<U>>,
         alive: &dyn Fn() -> bool,
     ) -> Result<PinUvAuthResult, ()> {
+        // Starting from a blank slate.
+        cmd.set_pin_uv_auth_param(None).map_err(|_| ())?;
+
         if !cmd.is_ctap2_request() {
             return Ok(PinUvAuthResult::RequestIsCtap1);
         }
+
+        // CTAP1/U2F-only devices do not support PinUvAuth, so we skip it
+        if !dev.supports_ctap2() {
+            return Ok(PinUvAuthResult::DeviceIsCtap1);
+        }
+
+        // TODO: API needs a better way to express "uv = discouraged"
+        if cmd.get_uv_option() == Some(false) {
+            cmd.set_discouraged_uv_option();
+            return Ok(PinUvAuthResult::NoAuthRequired);
+        }
+
         while alive() {
             debug!("-----------------------------------------------------------------");
-            debug!("Getting pinUvAuthToken");
-            match cmd.determine_pin_uv_auth(dev, skip_uv, permission) {
+            debug!("Getting pinUvAuthParam");
+            match Self::get_pin_uv_auth_param(cmd, dev, permission, skip_uv) {
                 Ok(r) => {
                     return Ok(r);
                 }
@@ -564,7 +664,7 @@ impl StateMachineCtap2 {
 
                 let mut skip_uv = false;
                 while alive() {
-                    let pin_uv_auth_result = match Self::determine_pin_auth(
+                    let pin_uv_auth_result = match Self::determine_puap_if_needed(
                         &mut makecred,
                         &mut dev,
                         skip_uv,
@@ -700,7 +800,7 @@ impl StateMachineCtap2 {
                 }
                 let mut skip_uv = false;
                 while alive() {
-                    let pin_uv_auth_result = match Self::determine_pin_auth(
+                    let pin_uv_auth_result = match Self::determine_puap_if_needed(
                         &mut getassertion,
                         &mut dev,
                         skip_uv,

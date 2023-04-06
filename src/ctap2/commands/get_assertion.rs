@@ -5,7 +5,7 @@ use super::{
 use crate::consts::{
     PARAMETER_SIZE, U2F_AUTHENTICATE, U2F_CHECK_IS_REGISTERED, U2F_REQUEST_USER_PRESENCE,
 };
-use crate::crypto::{COSEKey, CryptoError, PinUvAuthParam, SharedSecret};
+use crate::crypto::{COSEKey, CryptoError, PinUvAuthParam, PinUvAuthToken, SharedSecret};
 use crate::ctap2::attestation::{AuthenticatorData, AuthenticatorDataFlags};
 use crate::ctap2::client_data::{ClientDataHash, CollectedClientData, CollectedClientDataWrapper};
 use crate::ctap2::commands::client_pin::Pin;
@@ -215,8 +215,20 @@ impl PinUvAuthCommand for GetAssertion {
         self.pin = pin;
     }
 
-    fn set_pin_uv_auth_param(&mut self, pin_uv_auth_param: Option<PinUvAuthParam>) {
-        self.pin_uv_auth_param = pin_uv_auth_param;
+    fn set_pin_uv_auth_param(
+        &mut self,
+        pin_uv_auth_token: Option<PinUvAuthToken>,
+    ) -> Result<(), AuthenticatorError> {
+        let mut param = None;
+        if let Some(token) = pin_uv_auth_token {
+            param = Some(
+                token
+                    .derive(self.client_data_hash().as_ref())
+                    .map_err(CommandError::Crypto)?,
+            );
+        }
+        self.pin_uv_auth_param = param;
+        Ok(())
     }
 
     fn client_data_hash(&self) -> ClientDataHash {
@@ -237,6 +249,13 @@ impl PinUvAuthCommand for GetAssertion {
             RelyingPartyWrapper::Hash(..) => None,
             RelyingPartyWrapper::Data(r) => Some(&r.id),
         }
+    }
+
+    fn set_discouraged_uv_option(&mut self) {
+        // "[..] the Relying Party does not wish to require user verification (e.g., by setting options.userVerification
+        // to "discouraged" in the WebAuthn API), the platform invokes the authenticatorGetAssertion operation using
+        // the marshalled input parameters along with an absent "uv" option key."
+        self.set_uv_option(None);
     }
 }
 
