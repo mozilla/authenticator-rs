@@ -311,11 +311,7 @@ impl RequestCtap1 for MakeCredentials {
             )));
         }
 
-        let flags = if self.options.ask_user_verification() {
-            U2F_REQUEST_USER_PRESENCE
-        } else {
-            0
-        };
+        let flags = U2F_REQUEST_USER_PRESENCE;
 
         let mut register_data = Vec::with_capacity(2 * PARAMETER_SIZE);
         if self.is_ctap2_request() {
@@ -976,7 +972,7 @@ pub mod test {
         // CBOR Header
         0x0, // CLA
         0x1, // INS U2F_Register
-        0x0, // P1 Flags
+        0x3, // P1 Flags
         0x0, // P2
         0x0, 0x0, 0x40, // Lc
         // NOTE: This has been taken from CTAP2.0 spec, but the clientDataHash has been replaced
