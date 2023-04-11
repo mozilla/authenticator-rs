@@ -41,11 +41,17 @@ pub mod ctap2;
 pub mod errors;
 pub mod statecallback;
 pub use ctap2::attestation::AttestationObject;
+pub use ctap2::commands::bio_enrollment::BioEnrollmentResult;
 pub use ctap2::commands::client_pin::{Pin, PinError};
+pub use ctap2::commands::credential_management::CredentialManagementResult;
 pub use ctap2::commands::get_assertion::{Assertion, GetAssertionResult};
 pub use ctap2::commands::get_info::AuthenticatorInfo;
+use serde::Serialize;
 pub use statemachine::StateMachine;
-pub use status_update::{InteractiveRequest, StatusPinUv, StatusUpdate};
+pub use status_update::{
+    BioEnrollmentCmd, CredManagementCmd, InteractiveRequest, InteractiveUpdate, StatusPinUv,
+    StatusUpdate,
+};
 pub use transport::{FidoDevice, FidoDeviceIO, FidoProtocol, VirtualFidoDevice};
 
 // Keep this in sync with the constants in u2fhid-capi.h.
@@ -89,7 +95,20 @@ pub enum SignResult {
     CTAP2(GetAssertionResult),
 }
 
+#[derive(Debug, Serialize)]
+pub enum ManageResult {
+    Success,
+    CredManagement(CredentialManagementResult),
+    BioEnrollment(BioEnrollmentResult),
+}
+
 pub type ResetResult = ();
+
+impl From<ResetResult> for ManageResult {
+    fn from(_value: ResetResult) -> Self {
+        ManageResult::Success
+    }
+}
 
 pub type Result<T> = std::result::Result<T, errors::AuthenticatorError>;
 

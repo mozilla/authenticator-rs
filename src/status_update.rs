@@ -1,13 +1,38 @@
 use super::Pin;
-use crate::ctap2::commands::get_info::AuthenticatorInfo;
+use crate::ctap2::{
+    commands::{
+        authenticator_config::AuthConfigCommand,
+        bio_enrollment::{BioTemplateId, LastEnrollmentSampleStatus},
+        get_info::AuthenticatorInfo,
+    },
+    server::{PublicKeyCredentialId, User},
+};
 use serde::{Deserialize, Serialize as DeriveSer, Serializer};
 use std::sync::mpsc::Sender;
+
+#[derive(Debug, Deserialize, DeriveSer)]
+pub enum CredManagementCmd {
+    GetCredentials,
+    DeleteCredential(PublicKeyCredentialId),
+    UpdateUserInformation((PublicKeyCredentialId, User)),
+}
+
+#[derive(Debug, Deserialize, DeriveSer)]
+pub enum BioEnrollmentCmd {
+    GetEnrollments,
+    StartNewEnrollment(Option<String>),
+    DeleteEnrollment(BioTemplateId),
+    ChangeName((BioTemplateId, String)),
+}
 
 #[derive(Debug, Deserialize, DeriveSer)]
 pub enum InteractiveRequest {
     Reset,
     ChangePIN(Pin, Pin),
     SetPIN(Pin),
+    ChangeConfig(AuthConfigCommand),
+    CredentialManagement(CredManagementCmd),
+    BioEnrollment(BioEnrollmentCmd),
 }
 
 // Simply ignoring the Sender when serializing
@@ -54,6 +79,12 @@ pub enum StatusPinUv {
 }
 
 #[derive(Debug)]
+pub enum InteractiveUpdate {
+    StartManagement((Sender<InteractiveRequest>, Option<AuthenticatorInfo>)),
+    BioEnrollmentUpdate((LastEnrollmentSampleStatus, u64)),
+}
+
+#[derive(Debug)]
 pub enum StatusUpdate {
     /// We're waiting for the user to touch their token
     PresenceRequired,
@@ -63,7 +94,7 @@ pub enum StatusUpdate {
     /// Sent, if multiple devices are found and the user has to select one
     SelectDeviceNotice,
     /// Sent when a token was selected for interactive management
-    InteractiveManagement((Sender<InteractiveRequest>, Option<AuthenticatorInfo>)),
+    InteractiveManagement(InteractiveUpdate),
 }
 
 pub(crate) fn send_status(status: &Sender<StatusUpdate>, msg: StatusUpdate) {

@@ -78,7 +78,13 @@ pub enum FidoProtocol {
 }
 
 pub trait FidoDeviceIO {
-    fn send_msg<Out, Req: Request<Out>>(&mut self, msg: &Req) -> Result<Out, HIDError> {
+    fn send_msg<
+        Out,
+        Req: Request<Out> + RequestCtap1<Output = Out> + RequestCtap2<Output = Out>,
+    >(
+        &mut self,
+        msg: &Req,
+    ) -> Result<Out, HIDError> {
         self.send_msg_cancellable(msg, &|| true)
     }
 
@@ -90,7 +96,10 @@ pub trait FidoDeviceIO {
         self.send_ctap1_cancellable(msg, &|| true)
     }
 
-    fn send_msg_cancellable<Out, Req: Request<Out>>(
+    fn send_msg_cancellable<
+        Out,
+        Req: Request<Out> + RequestCtap1<Output = Out> + RequestCtap2<Output = Out>,
+    >(
         &mut self,
         msg: &Req,
         keep_alive: &dyn Fn() -> bool,

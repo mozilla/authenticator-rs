@@ -88,7 +88,7 @@ pub trait AuthenticatorTransport {
         &mut self,
         timeout: u64,
         status: Sender<crate::StatusUpdate>,
-        callback: StateCallback<crate::Result<crate::ResetResult>>,
+        callback: StateCallback<crate::Result<crate::ManageResult>>,
     ) -> crate::Result<()>;
 }
 
@@ -298,7 +298,7 @@ impl AuthenticatorService {
         &mut self,
         timeout: u64,
         status: Sender<crate::StatusUpdate>,
-        callback: StateCallback<crate::Result<crate::ResetResult>>,
+        callback: StateCallback<crate::Result<crate::ManageResult>>,
     ) -> crate::Result<()> {
         let iterable_transports = self.transports.clone();
         if iterable_transports.is_empty() {
@@ -446,7 +446,7 @@ mod tests {
             &mut self,
             _timeout: u64,
             _status: Sender<crate::StatusUpdate>,
-            _callback: StateCallback<crate::Result<crate::ResetResult>>,
+            _callback: StateCallback<crate::Result<crate::ManageResult>>,
         ) -> crate::Result<()> {
             unimplemented!();
         }

@@ -10,14 +10,13 @@ use crate::ctap2::client_data::ClientDataHash;
 use crate::ctap2::commands::client_pin::Pin;
 use crate::ctap2::commands::get_assertion::GetAssertionResult;
 use crate::ctap2::commands::make_credentials::MakeCredentialsResult;
-
 use crate::ctap2::server::{
     PublicKeyCredentialDescriptor, RelyingParty, RelyingPartyWrapper, ResidentKeyRequirement,
     RpIdHash, UserVerificationRequirement,
 };
 use crate::errors::{self, AuthenticatorError};
 use crate::statecallback::StateCallback;
-use crate::status_update::send_status;
+use crate::status_update::{send_status, InteractiveUpdate};
 use crate::transport::device_selector::{
     BlinkResult, Device, DeviceBuildParameters, DeviceCommand, DeviceSelectorEvent,
 };
@@ -603,7 +602,7 @@ impl StateMachine {
         &mut self,
         timeout: u64,
         status: Sender<crate::StatusUpdate>,
-        callback: StateCallback<crate::Result<crate::ResetResult>>,
+        callback: StateCallback<crate::Result<crate::ManageResult>>,
     ) {
         // Abort any prior register/sign calls.
         self.cancel();
@@ -627,9 +626,8 @@ impl StateMachine {
                 let (tx, rx) = channel();
                 send_status(
                     &status,
-                    crate::StatusUpdate::InteractiveManagement((
-                        tx,
-                        dev.get_authenticator_info().cloned(),
+                    crate::StatusUpdate::InteractiveManagement(InteractiveUpdate::StartManagement(
+                        (tx, dev.get_authenticator_info().cloned()),
                     )),
                 );
                 while alive() {
@@ -658,6 +656,33 @@ impl StateMachine {
                                 &mut dev,
                                 None,
                                 pin,
+                                status,
+                                callback.clone(),
+                                alive,
+                            );
+                        }
+                        Ok(InteractiveRequest::ChangeConfig(authcfg)) => {
+                            ctap2::configure_authenticator(
+                                &mut dev,
+                                authcfg,
+                                status,
+                                callback.clone(),
+                                alive,
+                            );
+                        }
+                        Ok(InteractiveRequest::CredentialManagement(cred_management)) => {
+                            ctap2::credential_management(
+                                &mut dev,
+                                cred_management,
+                                status,
+                                callback.clone(),
+                                alive,
+                            );
+                        }
+                        Ok(InteractiveRequest::BioEnrollment(bio_enrollment)) => {
+                            ctap2::bio_enrollment(
+                                &mut dev,
+                                bio_enrollment,
                                 status,
                                 callback.clone(),
                                 alive,
