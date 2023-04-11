@@ -39,8 +39,7 @@ impl RpIdHash {
     }
 }
 
-#[derive(Debug, Serialize, Clone, Default)]
-#[cfg_attr(test, derive(Deserialize))]
+#[derive(Debug, Serialize, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct RelyingParty {
     // TODO(baloo): spec is wrong !!!!111
     //              https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html#commands
@@ -209,9 +208,11 @@ impl From<AuthenticatorTransports> for Vec<Transport> {
     }
 }
 
+pub type PublicKeyCredentialId = Vec<u8>;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicKeyCredentialDescriptor {
-    pub id: Vec<u8>,
+    pub id: PublicKeyCredentialId,
     pub transports: Vec<Transport>,
 }
 

@@ -17,7 +17,7 @@ pub struct GetInfo {}
 impl RequestCtap2 for GetInfo {
     type Output = AuthenticatorInfo;
 
-    fn command() -> Command {
+    fn command(&self) -> Command {
         Command::GetInfo
     }
 
@@ -357,6 +357,10 @@ impl AuthenticatorInfo {
             }
         }
         AuthenticatorVersion::U2F_V2
+    }
+
+    pub fn device_is_protected(&self) -> bool {
+        self.options.client_pin == Some(true) || self.options.user_verification == Some(true)
     }
 }
 

@@ -228,12 +228,12 @@ impl PinUvAuthCommand for GetAssertion {
         self.options.user_verification = uv;
     }
 
-    fn get_uv_option(&mut self) -> Option<bool> {
-        self.options.user_verification
-    }
-
-    fn get_rp(&self) -> &RelyingPartyWrapper {
-        &self.rp
+    fn get_rp_id(&self) -> Option<&String> {
+        match &self.rp {
+            // CTAP1 case: We only have the hash, not the entire RpID
+            RelyingPartyWrapper::Hash(..) => None,
+            RelyingPartyWrapper::Data(r) => Some(&r.id),
+        }
     }
 
     fn can_skip_user_verification(
@@ -376,7 +376,7 @@ impl RequestCtap1 for GetAssertion {
 impl RequestCtap2 for GetAssertion {
     type Output = GetAssertionResult;
 
-    fn command() -> Command {
+    fn command(&self) -> Command {
         Command::GetAssertion
     }
 
