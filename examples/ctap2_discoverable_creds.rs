@@ -4,8 +4,8 @@
 
 use authenticator::{
     authenticatorservice::{
-        AuthenticatorService, CtapVersion, GetAssertionOptions, MakeCredentialsOptions,
-        RegisterArgsCtap2, SignArgsCtap2,
+        AuthenticatorService, GetAssertionOptions, MakeCredentialsOptions,
+        RegisterArgs, SignArgs,
     },
     ctap2::server::{
         PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, Transport, User,
@@ -45,9 +45,6 @@ fn register_user(manager: &mut AuthenticatorService, username: &str, timeout_ms:
     let mut challenge = Sha256::new();
     challenge.update(challenge_str.as_bytes());
     let chall_bytes = challenge.finalize().to_vec();
-
-    // TODO(MS): Needs to be added to RegisterArgsCtap2
-    // let flags = RegisterFlags::empty();
 
     let (status_tx, status_rx) = channel::<StatusUpdate>();
     thread::spawn(move || loop {
@@ -121,7 +118,7 @@ fn register_user(manager: &mut AuthenticatorService, username: &str, timeout_ms:
         display_name: None,
     };
     let origin = "https://example.com".to_string();
-    let ctap_args = RegisterArgsCtap2 {
+    let ctap_args = RegisterArgs {
         challenge: chall_bytes,
         relying_party: RelyingParty {
             id: "example.com".to_string(),
@@ -159,7 +156,7 @@ fn register_user(manager: &mut AuthenticatorService, username: &str, timeout_ms:
             register_tx.send(rv).unwrap();
         }));
 
-        if let Err(e) = manager.register(timeout_ms, ctap_args.into(), status_tx, callback) {
+        if let Err(e) = manager.register(timeout_ms, ctap_args, status_tx, callback) {
             panic!("Couldn't register: {:?}", e);
         };
 
@@ -207,7 +204,7 @@ fn main() {
         return;
     }
 
-    let mut manager = AuthenticatorService::new(CtapVersion::CTAP2)
+    let mut manager = AuthenticatorService::new()
         .expect("The auth service should initialize safely");
 
     if !matches.opt_present("no-u2f-usb-hid") {
@@ -312,7 +309,7 @@ fn main() {
     let mut challenge = Sha256::new();
     challenge.update(challenge_str.as_bytes());
     let chall_bytes = challenge.finalize().to_vec();
-    let ctap_args = SignArgsCtap2 {
+    let ctap_args = SignArgs {
         challenge: chall_bytes,
         origin,
         relying_party_id: "example.com".to_string(),
@@ -331,7 +328,7 @@ fn main() {
             sign_tx.send(rv).unwrap();
         }));
 
-        if let Err(e) = manager.sign(timeout_ms, ctap_args.into(), status_tx, callback) {
+        if let Err(e) = manager.sign(timeout_ms, ctap_args, status_tx, callback) {
             panic!("Couldn't sign: {:?}", e);
         }
 
