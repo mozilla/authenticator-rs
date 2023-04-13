@@ -44,6 +44,7 @@ pub struct RegisterArgsCtap2 {
     pub options: MakeCredentialsOptions,
     pub extensions: MakeCredentialsExtensions,
     pub pin: Option<Pin>,
+    pub use_ctap1_fallback: bool,
 }
 
 #[derive(Debug)]
@@ -82,6 +83,7 @@ pub struct SignArgsCtap2 {
     pub extensions: GetAssertionExtensions,
     pub pin: Option<Pin>,
     pub alternate_rp_id: Option<String>,
+    pub use_ctap1_fallback: bool,
     // Todo: Extensions
 }
 
@@ -821,6 +823,7 @@ mod tests {
             options: Default::default(),
             extensions: Default::default(),
             pin: None,
+            use_ctap1_fallback: false,
         };
 
         assert!(s
@@ -841,6 +844,7 @@ mod tests {
             extensions: Default::default(),
             pin: None,
             alternate_rp_id: None,
+            use_ctap1_fallback: false,
         };
         assert!(s
             .sign(

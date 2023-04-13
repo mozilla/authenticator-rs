@@ -174,6 +174,7 @@ fn main() {
         },
         extensions: Default::default(),
         pin: None,
+        use_ctap1_fallback: false,
     };
 
     loop {

@@ -191,6 +191,7 @@ fn main() {
             ..Default::default()
         },
         pin: None,
+        use_ctap1_fallback: false,
     };
 
     let attestation_object;
@@ -261,6 +262,7 @@ fn main() {
         },
         pin: None,
         alternate_rp_id: None,
+        use_ctap1_fallback: false,
     };
 
     loop {

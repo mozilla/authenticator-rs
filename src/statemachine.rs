@@ -22,7 +22,7 @@ use crate::transport::platform::transaction::Transaction;
 use crate::transport::{errors::HIDError, hid::HIDDevice, FidoDevice, Nonce};
 use crate::u2fprotocol::{u2f_init_device, u2f_is_keyhandle_valid, u2f_register, u2f_sign};
 use crate::u2ftypes::U2FDevice;
-use crate::{send_status, RegisterResult, SignResult, StatusPinUv, StatusUpdate};
+use crate::{send_status, AuthenticatorTransports, KeyHandle, RegisterFlags, RegisterResult, SignFlags, SignResult, StatusPinUv, StatusUpdate};
 use std::sync::mpsc::{channel, Sender};
 use std::thread;
 use std::time::Duration;
@@ -620,6 +620,29 @@ impl StateMachineCtap2 {
         status: Sender<crate::StatusUpdate>,
         callback: StateCallback<crate::Result<crate::RegisterResult>>,
     ) {
+        if params.use_ctap1_fallback {
+            /* Firefox uses this when security.webauthn.ctap2 is false. */
+            let mut flags = RegisterFlags::empty();
+            if params.options.resident_key == Some(true) {
+                flags |= RegisterFlags::REQUIRE_RESIDENT_KEY;
+            }
+            if params.options.user_verification == Some(true) {
+                flags |= RegisterFlags::REQUIRE_USER_VERIFICATION;
+            }
+            let application = params.rp.hash().0.to_vec();
+            let key_handles = params.exclude_list
+            .iter()
+            .map(|cred_desc| KeyHandle {
+                credential: cred_desc.id.clone(),
+                transports: AuthenticatorTransports::empty(),
+            })
+            .collect();
+            let challenge = params.client_data_wrapper.hash().as_ref().to_vec();
+
+            self.legacy_register(flags, timeout, challenge, application, key_handles, status, callback);
+            return;
+        }
+
         // Abort any prior register/sign calls.
         self.cancel();
         let cbc = callback.clone();
@@ -768,6 +791,40 @@ impl StateMachineCtap2 {
         status: Sender<crate::StatusUpdate>,
         callback: StateCallback<crate::Result<crate::SignResult>>,
     ) {
+        if params.use_ctap1_fallback {
+            /* Firefox uses this when security.webauthn.ctap2 is false. */
+            let flags = match params.options.user_verification {
+                Some(true) => SignFlags::REQUIRE_USER_VERIFICATION,
+                _ => SignFlags::empty(),
+            };
+            let mut app_ids = vec![params.rp.hash().0.to_vec()];
+            if let Some(app_id) = params.alternate_rp_id {
+                app_ids.push(RelyingPartyWrapper::Data(RelyingParty {
+                                id: app_id,
+                                ..Default::default()
+                            }).hash().0.to_vec());
+            }
+            let key_handles = params.allow_list
+            .iter()
+            .map(|cred_desc| KeyHandle {
+                credential: cred_desc.id.clone(),
+                transports: AuthenticatorTransports::empty(),
+            })
+            .collect();
+            let challenge = params.client_data_wrapper.hash().as_ref().to_vec();
+
+            self.legacy_sign(
+                flags,
+                timeout,
+                challenge,
+                app_ids,
+                key_handles,
+                status,
+                callback,
+            );
+            return;
+        }
+
         // Abort any prior register/sign calls.
         self.cancel();
         let cbc = callback.clone();
@@ -1112,5 +1169,226 @@ impl StateMachineCtap2 {
             },
         );
         self.transaction = Some(try_or!(transaction, move |e| cbc.call(Err(e))));
+    }
+
+    pub fn legacy_register(
+        &mut self,
+        flags: crate::RegisterFlags,
+        timeout: u64,
+        challenge: Vec<u8>,
+        application: crate::AppId,
+        key_handles: Vec<crate::KeyHandle>,
+        status: Sender<crate::StatusUpdate>,
+        callback: StateCallback<crate::Result<crate::RegisterResult>>,
+    ) {
+        // Abort any prior register/sign calls.
+        self.cancel();
+
+        let cbc = callback.clone();
+
+        let transaction = Transaction::new(
+            timeout,
+            cbc.clone(),
+            status,
+            move |info, _, status, alive| {
+                // Create a new device.
+                let dev = &mut match Device::new(info) {
+                    Ok(dev) => dev,
+                    _ => return,
+                };
+
+                // Try initializing it.
+                if !dev.is_u2f() || !u2f_init_device(dev) {
+                    return;
+                }
+
+                // We currently support none of the authenticator selection
+                // criteria because we can't ask tokens whether they do support
+                // those features. If flags are set, ignore all tokens for now.
+                //
+                // Technically, this is a ConstraintError because we shouldn't talk
+                // to this authenticator in the first place. But the result is the
+                // same anyway.
+                if !flags.is_empty() {
+                    return;
+                }
+
+                send_status(
+                    &status,
+                    crate::StatusUpdate::DeviceAvailable {
+                        dev_info: dev.get_device_info(),
+                    },
+                );
+
+                // Iterate the exclude list and see if there are any matches.
+                // If so, we'll keep polling the device anyway to test for user
+                // consent, to be consistent with CTAP2 device behavior.
+                let excluded = key_handles.iter().any(|key_handle| {
+                    is_valid_transport(key_handle.transports)
+                        && u2f_is_keyhandle_valid(
+                            dev,
+                            &challenge,
+                            &application,
+                            &key_handle.credential,
+                        )
+                        .unwrap_or(false) /* no match on failure */
+                });
+
+                while alive() {
+                    if excluded {
+                        let blank = vec![0u8; PARAMETER_SIZE];
+                        if u2f_register(dev, &blank, &blank).is_ok() {
+                            callback.call(Err(errors::AuthenticatorError::U2FToken(
+                                errors::U2FTokenError::InvalidState,
+                            )));
+                            break;
+                        }
+                    } else if let Ok(bytes) = u2f_register(dev, &challenge, &application) {
+                        let dev_info = dev.get_device_info();
+                        send_status(
+                            &status,
+                            crate::StatusUpdate::Success {
+                                dev_info: dev.get_device_info(),
+                            },
+                        );
+                        callback.call(Ok(RegisterResult::CTAP1(bytes, dev_info)));
+                        break;
+                    }
+
+                    // Sleep a bit before trying again.
+                    thread::sleep(Duration::from_millis(100));
+                }
+
+                send_status(
+                    &status,
+                    crate::StatusUpdate::DeviceUnavailable {
+                        dev_info: dev.get_device_info(),
+                    },
+                );
+            },
+        );
+
+        self.transaction = Some(try_or!(transaction, |e| cbc.call(Err(e))));
+    }
+
+    pub fn legacy_sign(
+        &mut self,
+        flags: crate::SignFlags,
+        timeout: u64,
+        challenge: Vec<u8>,
+        app_ids: Vec<crate::AppId>,
+        key_handles: Vec<crate::KeyHandle>,
+        status: Sender<crate::StatusUpdate>,
+        callback: StateCallback<crate::Result<crate::SignResult>>,
+    ) {
+        // Abort any prior register/sign calls.
+        self.cancel();
+
+        let cbc = callback.clone();
+
+        let transaction = Transaction::new(
+            timeout,
+            cbc.clone(),
+            status,
+            move |info, _, status, alive| {
+                // Create a new device.
+                let dev = &mut match Device::new(info) {
+                    Ok(dev) => dev,
+                    _ => return,
+                };
+
+                // Try initializing it.
+                if !dev.is_u2f() || !u2f_init_device(dev) {
+                    return;
+                }
+
+                // We currently don't support user verification because we can't
+                // ask tokens whether they do support that. If the flag is set,
+                // ignore all tokens for now.
+                //
+                // Technically, this is a ConstraintError because we shouldn't talk
+                // to this authenticator in the first place. But the result is the
+                // same anyway.
+                if !flags.is_empty() {
+                    return;
+                }
+
+                // For each appId, try all key handles. If there's at least one
+                // valid key handle for an appId, we'll use that appId below.
+                let (app_id, valid_handles) =
+                    find_valid_key_handles(&app_ids, &key_handles, |app_id, key_handle| {
+                        u2f_is_keyhandle_valid(dev, &challenge, app_id, &key_handle.credential)
+                            .unwrap_or(false) /* no match on failure */
+                    });
+
+                // Aggregate distinct transports from all given credentials.
+                let transports = key_handles
+                    .iter()
+                    .fold(crate::AuthenticatorTransports::empty(), |t, k| {
+                        t | k.transports
+                    });
+
+                // We currently only support USB. If the RP specifies transports
+                // and doesn't include USB it's probably lying.
+                if !is_valid_transport(transports) {
+                    return;
+                }
+
+                send_status(
+                    &status,
+                    crate::StatusUpdate::DeviceAvailable {
+                        dev_info: dev.get_device_info(),
+                    },
+                );
+
+                'outer: while alive() {
+                    // If the device matches none of the given key handles
+                    // then just make it blink with bogus data.
+                    if valid_handles.is_empty() {
+                        let blank = vec![0u8; PARAMETER_SIZE];
+                        if u2f_register(dev, &blank, &blank).is_ok() {
+                            callback.call(Err(errors::AuthenticatorError::U2FToken(
+                                errors::U2FTokenError::InvalidState,
+                            )));
+                            break;
+                        }
+                    } else {
+                        // Otherwise, try to sign.
+                        for key_handle in &valid_handles {
+                            if let Ok(bytes) =
+                                u2f_sign(dev, &challenge, app_id, &key_handle.credential)
+                            {
+                                let dev_info = dev.get_device_info();
+                                send_status(
+                                    &status,
+                                    crate::StatusUpdate::Success {
+                                        dev_info: dev.get_device_info(),
+                                    },
+                                );
+                                callback.call(Ok(SignResult::CTAP1(
+                                    app_id.clone(),
+                                    key_handle.credential.clone(),
+                                    bytes,
+                                    dev_info,
+                                )));
+                                break 'outer;
+                            }
+                        }
+                    }
+
+                    // Sleep a bit before trying again.
+                    thread::sleep(Duration::from_millis(100));
+                }
+
+                send_status(
+                    &status,
+                    crate::StatusUpdate::DeviceUnavailable {
+                        dev_info: dev.get_device_info(),
+                    },
+                );
+            },
+        );
+
+        self.transaction = Some(try_or!(transaction, |e| cbc.call(Err(e))));
     }
 }
