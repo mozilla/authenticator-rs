@@ -36,18 +36,12 @@ mod u2ftypes;
 mod manager;
 pub use crate::manager::U2FManager;
 
-mod capi;
-pub use crate::capi::*;
-
 pub mod ctap2;
 pub use ctap2::attestation::AttestationObject;
 pub use ctap2::client_data::{CollectedClientData, CollectedClientDataWrapper};
 pub use ctap2::commands::client_pin::{Pin, PinError};
 pub use ctap2::AssertionObject;
 pub use ctap2::commands::get_assertion::Assertion;
-
-mod ctap2_capi;
-pub use crate::ctap2_capi::*;
 
 pub mod errors;
 pub mod statecallback;
