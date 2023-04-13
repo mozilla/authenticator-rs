@@ -4,9 +4,9 @@
 
 use authenticator::{
     authenticatorservice::{
-        AuthenticatorService, CtapVersion, GetAssertionExtensions, GetAssertionOptions,
-        HmacSecretExtension, MakeCredentialsExtensions, MakeCredentialsOptions, RegisterArgsCtap2,
-        SignArgsCtap2,
+        AuthenticatorService, GetAssertionExtensions, GetAssertionOptions,
+        HmacSecretExtension, MakeCredentialsExtensions, MakeCredentialsOptions, RegisterArgs,
+        SignArgs,
     },
     ctap2::server::{
         PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, Transport, User,
@@ -49,7 +49,7 @@ fn main() {
         return;
     }
 
-    let mut manager = AuthenticatorService::new(CtapVersion::CTAP2)
+    let mut manager = AuthenticatorService::new()
         .expect("The auth service should initialize safely");
 
     if !matches.opt_present("no-u2f-usb-hid") {
@@ -153,7 +153,7 @@ fn main() {
         display_name: None,
     };
     let origin = "https://example.com".to_string();
-    let ctap_args = RegisterArgsCtap2 {
+    let ctap_args = RegisterArgs{
         challenge: chall_bytes.clone(),
         relying_party: RelyingParty {
             id: "example.com".to_string(),
@@ -202,7 +202,7 @@ fn main() {
             register_tx.send(rv).unwrap();
         }));
 
-        if let Err(e) = manager.register(timeout_ms, ctap_args.into(), status_tx.clone(), callback)
+        if let Err(e) = manager.register(timeout_ms, ctap_args, status_tx.clone(), callback)
         {
             panic!("Couldn't register: {:?}", e);
         };
@@ -240,7 +240,7 @@ fn main() {
         allow_list = Vec::new();
     }
 
-    let ctap_args = SignArgsCtap2 {
+    let ctap_args = SignArgs {
         challenge: chall_bytes,
         origin,
         relying_party_id: "example.com".to_string(),
@@ -272,7 +272,7 @@ fn main() {
             sign_tx.send(rv).unwrap();
         }));
 
-        if let Err(e) = manager.sign(timeout_ms, ctap_args.into(), status_tx, callback) {
+        if let Err(e) = manager.sign(timeout_ms, ctap_args, status_tx, callback) {
             panic!("Couldn't sign: {:?}", e);
         }
 

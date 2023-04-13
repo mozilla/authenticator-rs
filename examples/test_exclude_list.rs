@@ -4,7 +4,7 @@
 
 use authenticator::{
     authenticatorservice::{
-        AuthenticatorService, CtapVersion, MakeCredentialsOptions, RegisterArgsCtap2,
+        AuthenticatorService, MakeCredentialsOptions, RegisterArgs,
     },
     ctap2::commands::StatusCode,
     ctap2::server::{
@@ -48,7 +48,7 @@ fn main() {
         return;
     }
 
-    let mut manager = AuthenticatorService::new(CtapVersion::CTAP2)
+    let mut manager = AuthenticatorService::new()
         .expect("The auth service should initialize safely");
 
     manager.add_u2f_usb_hid_platform_transports();
@@ -150,7 +150,7 @@ fn main() {
         display_name: None,
     };
     let origin = "https://example.com".to_string();
-    let mut ctap_args = RegisterArgsCtap2 {
+    let mut ctap_args = RegisterArgs {
         challenge: chall_bytes,
         relying_party: RelyingParty {
             id: "example.com".to_string(),
@@ -185,7 +185,7 @@ fn main() {
 
         if let Err(e) = manager.register(
             timeout_ms,
-            ctap_args.clone().into(),
+            ctap_args.clone(),
             status_tx.clone(),
             callback,
         ) {

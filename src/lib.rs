@@ -34,7 +34,6 @@ mod u2fprotocol;
 mod u2ftypes;
 
 mod manager;
-pub use crate::manager::U2FManager;
 
 pub mod ctap2;
 pub use ctap2::attestation::AttestationObject;
