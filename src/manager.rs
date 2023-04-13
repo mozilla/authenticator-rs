@@ -399,6 +399,7 @@ impl AuthenticatorTransport for Manager {
                     args.options,
                     args.extensions,
                     args.pin,
+                    args.use_ctap1_fallback,
                     // pin_auth will be filled in Statemachine, once we have a device
                 )
             }
@@ -428,6 +429,7 @@ impl AuthenticatorTransport for Manager {
                     },
                     Default::default(),
                     None,
+                    false,
                 )
             }
         }?;
@@ -496,6 +498,7 @@ impl AuthenticatorTransport for Manager {
                             Default::default(),
                             None,
                             None,
+                            false,
                         )?;
 
                         let action = QueueAction::SignCtap2 {
@@ -530,6 +533,7 @@ impl AuthenticatorTransport for Manager {
                     args.extensions,
                     args.pin,
                     args.alternate_rp_id,
+                    args.use_ctap1_fallback,
                 )?;
 
                 let action = QueueAction::SignCtap2 {

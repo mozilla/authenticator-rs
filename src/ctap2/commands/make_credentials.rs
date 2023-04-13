@@ -113,9 +113,11 @@ pub struct MakeCredentials {
     pub(crate) pin: Option<Pin>,
     pub(crate) pin_uv_auth_param: Option<PinUvAuthParam>,
     pub(crate) enterprise_attestation: Option<u64>,
+    pub(crate) use_ctap1_fallback: bool,
 }
 
 impl MakeCredentials {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         client_data: CollectedClientData,
         rp: RelyingPartyWrapper,
@@ -125,6 +127,7 @@ impl MakeCredentials {
         options: MakeCredentialsOptions,
         extensions: MakeCredentialsExtensions,
         pin: Option<Pin>,
+        use_ctap1_fallback: bool,
     ) -> Result<Self, HIDError> {
         let client_data_wrapper = CollectedClientDataWrapper::new(client_data)?;
         Ok(Self {
@@ -138,6 +141,7 @@ impl MakeCredentials {
             pin,
             pin_uv_auth_param: None,
             enterprise_attestation: None,
+            use_ctap1_fallback,
         })
     }
 }
@@ -482,6 +486,7 @@ pub(crate) fn dummy_make_credentials_cmd() -> Result<MakeCredentials, HIDError> 
         MakeCredentialsOptions::default(),
         MakeCredentialsExtensions::default(),
         None,
+        false,
     )
 }
 
@@ -632,6 +637,7 @@ pub mod test {
             },
             Default::default(),
             None,
+            false,
         )
         .expect("Failed to create MakeCredentials");
 
@@ -695,6 +701,7 @@ pub mod test {
             },
             Default::default(),
             None,
+            false,
         )
         .expect("Failed to create MakeCredentials");
 

@@ -148,6 +148,7 @@ fn register_user(manager: &mut AuthenticatorService, username: &str, timeout_ms:
         },
         extensions: Default::default(),
         pin: None,
+        use_ctap1_fallback: false,
     };
 
     let attestation_object;
@@ -320,6 +321,7 @@ fn main() {
         extensions: Default::default(),
         pin: None,
         alternate_rp_id: None,
+        use_ctap1_fallback: false,
     };
 
     loop {
