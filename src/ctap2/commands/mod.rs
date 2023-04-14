@@ -1,5 +1,5 @@
 use crate::crypto::{CryptoError, PinUvAuthToken};
-use crate::ctap2::client_data::ClientDataHash;
+
 use crate::ctap2::commands::client_pin::{GetPinRetries, GetUvRetries, Pin, PinError};
 use crate::ctap2::commands::get_info::AuthenticatorInfo;
 use crate::errors::AuthenticatorError;
@@ -25,9 +25,7 @@ where
     Self: fmt::Debug,
     Self: RequestCtap1<Output = T>,
     Self: RequestCtap2<Output = T>,
-{
-    fn is_ctap2_request(&self) -> bool;
-}
+{ }
 
 /// Retryable wraps an error type and may ask manager to retry sending a
 /// command, this is useful for ctap1 where token will reply with "condition not
@@ -121,7 +119,6 @@ pub(crate) trait PinUvAuthCommand: RequestCtap2 {
         &mut self,
         pin_uv_auth_token: Option<PinUvAuthToken>,
     ) -> Result<(), AuthenticatorError>;
-    fn client_data_hash(&self) -> ClientDataHash;
     fn set_uv_option(&mut self, uv: Option<bool>);
     fn get_uv_option(&mut self) -> Option<bool>;
     fn get_rp_id(&self) -> Option<&String>;

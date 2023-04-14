@@ -13,6 +13,7 @@ use crate::ctap2::commands::{
     repackage_pin_errors, CommandError, PinUvAuthCommand, PinUvAuthResult, Request, StatusCode,
 };
 use crate::ctap2::server::{RelyingParty, RelyingPartyWrapper};
+use crate::ctap2::client_data::ClientDataHash;
 use crate::errors::{self, AuthenticatorError, UnsupportedOption};
 use crate::statecallback::StateCallback;
 use crate::transport::device_selector::{
@@ -287,10 +288,6 @@ impl StateMachine {
         // Starting from a blank slate.
         cmd.set_pin_uv_auth_param(None).map_err(|_| ())?;
 
-        if !cmd.is_ctap2_request() {
-            return Ok(PinUvAuthResult::RequestIsCtap1);
-        }
-
         // CTAP1/U2F-only devices do not support PinUvAuth, so we skip it
         if !dev.supports_ctap2() {
             return Ok(PinUvAuthResult::DeviceIsCtap1);
@@ -397,7 +394,7 @@ impl StateMachine {
                 transports: AuthenticatorTransports::empty(),
             })
             .collect();
-            let challenge = params.client_data_wrapper.hash().as_ref().to_vec();
+            let challenge = params.client_data_hash;
 
             self.legacy_register(flags, timeout, challenge, application, key_handles, status, callback);
             return;
@@ -434,16 +431,14 @@ impl StateMachine {
                 // TODO(MS): This is wasteful, but the current setup with read only-functions doesn't allow me
                 //           to modify "params" directly.
                 let mut makecred = params.clone();
-                if params.is_ctap2_request() {
-                    // First check if extensions have been requested that are not supported by the device
-                    if let Some(true) = params.extensions.hmac_secret {
-                        if let Some(auth) = dev.get_authenticator_info() {
-                            if !auth.supports_hmac_secret() {
-                                callback.call(Err(AuthenticatorError::UnsupportedOption(
-                                    UnsupportedOption::HmacSecret,
-                                )));
-                                return;
-                            }
+                // First check if extensions have been requested that are not supported by the device
+                if let Some(true) = params.extensions.hmac_secret {
+                    if let Some(auth) = dev.get_authenticator_info() {
+                        if !auth.supports_hmac_secret() {
+                            callback.call(Err(AuthenticatorError::UnsupportedOption(
+                                UnsupportedOption::HmacSecret,
+                            )));
+                            return;
                         }
                     }
                 }
@@ -483,8 +478,8 @@ impl StateMachine {
                         let _ = selector.send(DeviceSelectorEvent::SelectedToken(dev.id()));
                     }
                     match resp {
-                        Ok(MakeCredentialsResult::CTAP2(attestation, client_data)) => {
-                            callback.call(Ok(RegisterResult::CTAP2(attestation, client_data)));
+                        Ok(MakeCredentialsResult::CTAP2(attestation)) => {
+                            callback.call(Ok(RegisterResult::CTAP2(attestation)));
                             break;
                         }
                         Ok(MakeCredentialsResult::CTAP1(data)) => {
@@ -571,7 +566,7 @@ impl StateMachine {
                 transports: AuthenticatorTransports::empty(),
             })
             .collect();
-            let challenge = params.client_data_wrapper.hash().as_ref().to_vec();
+            let challenge = params.client_data_hash;
 
             self.legacy_sign(
                 flags,
@@ -605,16 +600,14 @@ impl StateMachine {
                 // TODO(MS): This is wasteful, but the current setup with read only-functions doesn't allow me
                 //           to modify "params" directly.
                 let mut getassertion = params.clone();
-                if params.is_ctap2_request() {
-                    // First check if extensions have been requested that are not supported by the device
-                    if params.extensions.hmac_secret.is_some() {
-                        if let Some(auth) = dev.get_authenticator_info() {
-                            if !auth.supports_hmac_secret() {
-                                callback.call(Err(AuthenticatorError::UnsupportedOption(
-                                    UnsupportedOption::HmacSecret,
-                                )));
-                                return;
-                            }
+                // First check if extensions have been requested that are not supported by the device
+                if params.extensions.hmac_secret.is_some() {
+                    if let Some(auth) = dev.get_authenticator_info() {
+                        if !auth.supports_hmac_secret() {
+                            callback.call(Err(AuthenticatorError::UnsupportedOption(
+                                UnsupportedOption::HmacSecret,
+                            )));
+                            return;
                         }
                     }
                 }
@@ -635,16 +628,14 @@ impl StateMachine {
                         }
                     };
 
-                    if params.is_ctap2_request() {
-                        // Third, use the shared secret in the extensions, if requested
-                        if let Some(extension) = getassertion.extensions.hmac_secret.as_mut() {
-                            if let Some(secret) = dev.get_shared_secret() {
-                                match extension.calculate(secret) {
-                                    Ok(x) => x,
-                                    Err(e) => {
-                                        callback.call(Err(e));
-                                        return;
-                                    }
+                    // Third, use the shared secret in the extensions, if requested
+                    if let Some(extension) = getassertion.extensions.hmac_secret.as_mut() {
+                        if let Some(secret) = dev.get_shared_secret() {
+                            match extension.calculate(secret) {
+                                Ok(x) => x,
+                                Err(e) => {
+                                    callback.call(Err(e));
+                                    return;
                                 }
                             }
                         }
@@ -693,8 +684,8 @@ impl StateMachine {
                             )));
                             break;
                         }
-                        Ok(GetAssertionResult::CTAP2(assertion, client_data)) => {
-                            callback.call(Ok(SignResult::CTAP2(assertion, client_data)));
+                        Ok(GetAssertionResult::CTAP2(assertion)) => {
+                            callback.call(Ok(SignResult::CTAP2(assertion)));
                             break;
                         }
                         Err(HIDError::Command(CommandError::StatusCode(
@@ -935,7 +926,7 @@ impl StateMachine {
         &mut self,
         flags: crate::RegisterFlags,
         timeout: u64,
-        challenge: Vec<u8>,
+        challenge: ClientDataHash,
         application: crate::AppId,
         key_handles: Vec<crate::KeyHandle>,
         status: Sender<crate::StatusUpdate>,
@@ -987,7 +978,7 @@ impl StateMachine {
                     is_valid_transport(key_handle.transports)
                         && u2f_is_keyhandle_valid(
                             dev,
-                            &challenge,
+                            challenge.as_ref(),
                             &application,
                             &key_handle.credential,
                         )
@@ -1003,7 +994,7 @@ impl StateMachine {
                             )));
                             break;
                         }
-                    } else if let Ok(bytes) = u2f_register(dev, &challenge, &application) {
+                    } else if let Ok(bytes) = u2f_register(dev, challenge.as_ref(), &application) {
                         let dev_info = dev.get_device_info();
                         send_status(
                             &status,
@@ -1035,7 +1026,7 @@ impl StateMachine {
         &mut self,
         flags: crate::SignFlags,
         timeout: u64,
-        challenge: Vec<u8>,
+        challenge: ClientDataHash,
         app_ids: Vec<crate::AppId>,
         key_handles: Vec<crate::KeyHandle>,
         status: Sender<crate::StatusUpdate>,
@@ -1077,7 +1068,7 @@ impl StateMachine {
                 // valid key handle for an appId, we'll use that appId below.
                 let (app_id, valid_handles) =
                     find_valid_key_handles(&app_ids, &key_handles, |app_id, key_handle| {
-                        u2f_is_keyhandle_valid(dev, &challenge, app_id, &key_handle.credential)
+                        u2f_is_keyhandle_valid(dev, challenge.as_ref(), app_id, &key_handle.credential)
                             .unwrap_or(false) /* no match on failure */
                     });
 
@@ -1116,7 +1107,7 @@ impl StateMachine {
                         // Otherwise, try to sign.
                         for key_handle in &valid_handles {
                             if let Ok(bytes) =
-                                u2f_sign(dev, &challenge, app_id, &key_handle.credential)
+                                u2f_sign(dev, challenge.as_ref(), app_id, &key_handle.credential)
                             {
                                 let dev_info = dev.get_device_info();
                                 send_status(

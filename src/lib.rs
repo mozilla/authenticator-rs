@@ -85,13 +85,13 @@ pub type AppId = Vec<u8>;
 #[derive(Debug)]
 pub enum RegisterResult {
     CTAP1(Vec<u8>, u2ftypes::U2FDeviceInfo),
-    CTAP2(AttestationObject, CollectedClientDataWrapper),
+    CTAP2(AttestationObject),
 }
 
 #[derive(Debug)]
 pub enum SignResult {
     CTAP1(AppId, Vec<u8>, Vec<u8>, u2ftypes::U2FDeviceInfo),
-    CTAP2(AssertionObject, CollectedClientDataWrapper),
+    CTAP2(AssertionObject),
 }
 
 pub type ResetResult = ();

@@ -5,14 +5,12 @@
 use crate::authenticatorservice::AuthenticatorTransport;
 use crate::authenticatorservice::{RegisterArgs, SignArgs};
 
-
-use crate::ctap2::client_data::{CollectedClientData, WebauthnType};
-use crate::ctap2::commands::get_assertion::{GetAssertion};
+use crate::ctap2::commands::get_assertion::GetAssertion;
 use crate::ctap2::commands::make_credentials::MakeCredentials;
-
 use crate::ctap2::server::{
     RelyingParty, RelyingPartyWrapper,
 };
+use crate::ctap2::client_data::ClientDataHash;
 use crate::errors::*;
 use crate::statecallback::StateCallback;
 use crate::statemachine::StateMachine;
@@ -139,16 +137,8 @@ impl AuthenticatorTransport for Manager {
         status: Sender<crate::StatusUpdate>,
         callback: StateCallback<crate::Result<crate::RegisterResult>>,
     ) -> Result<(), AuthenticatorError> {
-        let client_data = CollectedClientData {
-            webauthn_type: WebauthnType::Create,
-            challenge: args.challenge.into(),
-            origin: args.origin,
-            cross_origin: false,
-            token_binding: None,
-        };
-
         let make_credentials = MakeCredentials::new(
-                    client_data,
+                    ClientDataHash(args.client_data_hash),
                     RelyingPartyWrapper::Data(args.relying_party),
                     Some(args.user),
                     args.pub_cred_params,
@@ -176,16 +166,8 @@ impl AuthenticatorTransport for Manager {
         status: Sender<crate::StatusUpdate>,
         callback: StateCallback<crate::Result<crate::SignResult>>,
     ) -> crate::Result<()> {
-        let client_data = CollectedClientData {
-            webauthn_type: WebauthnType::Get,
-            challenge: args.challenge.into(),
-            origin: args.origin,
-            cross_origin: false,
-            token_binding: None,
-        };
-
         let get_assertion = GetAssertion::new(
-            client_data,
+            ClientDataHash(args.client_data_hash),
             RelyingPartyWrapper::Data(RelyingParty {
                 id: args.relying_party_id,
                 name: None,

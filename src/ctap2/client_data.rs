@@ -214,8 +214,8 @@ pub struct CollectedClientData {
     pub token_binding: Option<TokenBinding>,
 }
 
-#[derive(Debug, Eq, PartialEq)]
-pub struct ClientDataHash([u8; 32]);
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClientDataHash(pub [u8; 32]);
 
 impl PartialEq<[u8]> for ClientDataHash {
     fn eq(&self, other: &[u8]) -> bool {
