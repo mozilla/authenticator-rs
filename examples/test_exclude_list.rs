@@ -73,7 +73,7 @@ fn main() {
     );
     let mut challenge = Sha256::new();
     challenge.update(challenge_str.as_bytes());
-    let chall_bytes = challenge.finalize().to_vec();
+    let chall_bytes = challenge.finalize().into();
 
     // TODO(MS): Needs to be added to RegisterArgsCtap2
     // let flags = RegisterFlags::empty();
@@ -151,7 +151,7 @@ fn main() {
     };
     let origin = "https://example.com".to_string();
     let mut ctap_args = RegisterArgs {
-        challenge: chall_bytes,
+        client_data_hash: chall_bytes,
         relying_party: RelyingParty {
             id: "example.com".to_string(),
             name: None,
@@ -197,7 +197,7 @@ fn main() {
             .expect("Problem receiving, unable to continue");
         match register_result {
             Ok(RegisterResult::CTAP1(_, _)) => panic!("Requested CTAP2, but got CTAP1 results!"),
-            Ok(RegisterResult::CTAP2(a, _c)) => {
+            Ok(RegisterResult::CTAP2(a)) => {
                 println!("Ok!");
                 println!("Registering again with the key_handle we just got back. This should result in a 'already registered' error.");
                 let registered_key_handle =

@@ -76,7 +76,7 @@ fn main() {
     );
     let mut challenge = Sha256::new();
     challenge.update(challenge_str.as_bytes());
-    let chall_bytes = challenge.finalize().to_vec();
+    let chall_bytes: [u8; 32] = challenge.finalize().into();
 
     // TODO(MS): Needs to be added to RegisterArgsCtap2
     // let flags = RegisterFlags::empty();
@@ -154,7 +154,7 @@ fn main() {
     };
     let origin = "https://example.com".to_string();
     let ctap_args = RegisterArgs{
-        challenge: chall_bytes.clone(),
+        client_data_hash: chall_bytes,
         relying_party: RelyingParty {
             id: "example.com".to_string(),
             name: None,
@@ -195,7 +195,6 @@ fn main() {
     };
 
     let attestation_object;
-    let client_data;
     loop {
         let (register_tx, register_rx) = channel();
         let callback = StateCallback::new(Box::new(move |rv| {
@@ -212,10 +211,9 @@ fn main() {
             .expect("Problem receiving, unable to continue");
         match register_result {
             Ok(RegisterResult::CTAP1(_, _)) => panic!("Requested CTAP2, but got CTAP1 results!"),
-            Ok(RegisterResult::CTAP2(a, c)) => {
+            Ok(RegisterResult::CTAP2(a)) => {
                 println!("Ok!");
                 attestation_object = a;
-                client_data = c;
                 break;
             }
             Err(e) => panic!("Registration failed: {:?}", e),
@@ -223,7 +221,6 @@ fn main() {
     }
 
     println!("Register result: {:?}", &attestation_object);
-    println!("Collected client data: {:?}", &client_data);
 
     println!();
     println!("*********************************************************************");
@@ -241,7 +238,7 @@ fn main() {
     }
 
     let ctap_args = SignArgs {
-        challenge: chall_bytes,
+        client_data_hash: chall_bytes,
         origin,
         relying_party_id: "example.com".to_string(),
         allow_list,
@@ -282,7 +279,7 @@ fn main() {
 
         match sign_result {
             Ok(SignResult::CTAP1(..)) => panic!("Requested CTAP2, but got CTAP1 sign results!"),
-            Ok(SignResult::CTAP2(assertion_object, _client_data)) => {
+            Ok(SignResult::CTAP2(assertion_object)) => {
                 println!("Assertion Object: {assertion_object:?}");
                 println!("Done.");
                 break;
