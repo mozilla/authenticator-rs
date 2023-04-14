@@ -11,7 +11,7 @@ use crate::ctap2::client_data::{ClientDataHash};
 use crate::ctap2::commands::client_pin::Pin;
 use crate::ctap2::commands::get_next_assertion::GetNextAssertion;
 use crate::ctap2::commands::make_credentials::UserVerification;
-use crate::ctap2::server::{PublicKeyCredentialDescriptor, RelyingPartyWrapper, User};
+use crate::ctap2::server::{PublicKeyCredentialDescriptor, RelyingPartyWrapper, RpIdHash, User};
 use crate::errors::AuthenticatorError;
 use crate::transport::errors::{ApduErrorStatus, HIDError};
 use crate::transport::FidoDevice;
@@ -32,9 +32,42 @@ use std::fmt;
 use std::io;
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum GetAssertionResult {
-    CTAP1(Vec<u8>),
-    CTAP2(AssertionObject),
+pub struct GetAssertionResult(pub AssertionObject);
+
+impl GetAssertionResult {
+    pub fn from_ctap1(input: &[u8], rp_id_hash: &RpIdHash, key_handle: &PublicKeyCredentialDescriptor) -> Result<GetAssertionResult, CommandError> {
+        let parse_authentication = |input| {
+            // Parsing an u8, then a u32, and the rest is the signature
+            let (rest, (user_presence, counter)) = tuple((be_u8, be_u32))(input)?;
+            let signature = Vec::from(rest);
+            Ok((user_presence, counter, signature))
+        };
+        let (user_presence, counter, signature) = parse_authentication(input)
+            .map_err(|e: nom::Err<VerboseError<_>>| {
+                error!("error while parsing authentication: {:?}", e);
+                CommandError::Deserializing(DesError::custom("unable to parse authentication"))
+            })?;
+
+        let mut flags = AuthenticatorDataFlags::empty();
+        if user_presence == 1 {
+            flags |= AuthenticatorDataFlags::USER_PRESENT;
+        }
+        let auth_data = AuthenticatorData {
+            rp_id_hash: rp_id_hash.clone(),
+            flags,
+            counter,
+            credential_data: None,
+            extensions: Default::default(),
+        };
+        let assertion = Assertion {
+            credentials: Some(key_handle.clone()),
+            signature,
+            user: None,
+            auth_data,
+        };
+
+        Ok(GetAssertionResult(AssertionObject(vec![assertion])))
+    }
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -431,41 +464,9 @@ impl RequestCtap1 for GetAssertion {
             return Err(Retryable::Error(HIDError::ApduStatus(err)));
         }
 
-        let parse_authentication = |input| {
-            // Parsing an u8, then a u32, and the rest is the signature
-            let (rest, (user_presence, counter)) = tuple((be_u8, be_u32))(input)?;
-            let signature = Vec::from(rest);
-            Ok((user_presence, counter, signature))
-        };
-        let (user_presence, counter, signature) = parse_authentication(input)
-            .map_err(|e: nom::Err<VerboseError<_>>| {
-                error!("error while parsing authentication: {:?}", e);
-                CommandError::Deserializing(DesError::custom("unable to parse authentication"))
-            })
+        GetAssertionResult::from_ctap1(input, &self.rp.hash(), add_info)
             .map_err(HIDError::Command)
-            .map_err(Retryable::Error)?;
-
-        let mut flags = AuthenticatorDataFlags::empty();
-        if user_presence == 1 {
-            flags |= AuthenticatorDataFlags::USER_PRESENT;
-        }
-        let auth_data = AuthenticatorData {
-            rp_id_hash: self.rp.hash(),
-            flags,
-            counter,
-            credential_data: None,
-            extensions: Default::default(),
-        };
-        let assertion = Assertion {
-            credentials: Some(add_info.clone()),
-            signature,
-            user: None,
-            auth_data,
-        };
-
-        Ok(GetAssertionResult::CTAP2(
-            AssertionObject(vec![assertion]),
-        ))
+            .map_err(Retryable::Error)
     }
 }
 
@@ -516,9 +517,7 @@ impl RequestCtap2 for GetAssertion {
                     assertions.push(new_cred.into());
                 }
 
-                Ok(GetAssertionResult::CTAP2(
-                    AssertionObject(assertions),
-                ))
+                Ok(GetAssertionResult(AssertionObject(assertions)))
             } else {
                 let data: Value = from_slice(&input[1..]).map_err(CommandError::Deserializing)?;
                 Err(CommandError::StatusCode(status, Some(data)).into())
@@ -841,9 +840,7 @@ pub mod test {
             auth_data: expected_auth_data,
         };
 
-        let expected = GetAssertionResult::CTAP2(
-            AssertionObject(vec![expected_assertion]),
-        );
+        let expected = GetAssertionResult(AssertionObject(vec![expected_assertion]));
         let response = device.send_cbor(&assertion).unwrap();
         assert_eq!(response, expected);
     }
@@ -975,9 +972,7 @@ pub mod test {
             auth_data: expected_auth_data,
         };
 
-        let expected = GetAssertionResult::CTAP2(
-            AssertionObject(vec![expected_assertion]),
-        );
+        let expected = GetAssertionResult(AssertionObject(vec![expected_assertion]));
 
         assert_eq!(response, expected);
     }
@@ -1106,9 +1101,7 @@ pub mod test {
             auth_data: expected_auth_data,
         };
 
-        let expected = GetAssertionResult::CTAP2(
-            AssertionObject(vec![expected_assertion]),
-        );
+        let expected = GetAssertionResult(AssertionObject(vec![expected_assertion]));
 
         assert_eq!(response, expected);
     }

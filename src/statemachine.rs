@@ -12,7 +12,7 @@ use crate::ctap2::commands::reset::Reset;
 use crate::ctap2::commands::{
     repackage_pin_errors, CommandError, PinUvAuthCommand, PinUvAuthResult, Request, StatusCode,
 };
-use crate::ctap2::server::{RelyingParty, RelyingPartyWrapper};
+use crate::ctap2::server::{PublicKeyCredentialDescriptor, RelyingParty, RelyingPartyWrapper, RpIdHash};
 use crate::ctap2::client_data::ClientDataHash;
 use crate::errors::{self, AuthenticatorError, UnsupportedOption};
 use crate::statecallback::StateCallback;
@@ -477,12 +477,8 @@ impl StateMachine {
                         let _ = selector.send(DeviceSelectorEvent::SelectedToken(dev.id()));
                     }
                     match resp {
-                        Ok(MakeCredentialsResult::CTAP2(attestation)) => {
+                        Ok(MakeCredentialsResult(attestation)) => {
                             callback.call(Ok(RegisterResult::CTAP2(attestation)));
-                            break;
-                        }
-                        Ok(MakeCredentialsResult::CTAP1(data)) => {
-                            callback.call(Ok(RegisterResult::CTAP1(data, dev.get_device_info())));
                             break;
                         }
                         Err(HIDError::Command(CommandError::StatusCode(
@@ -671,19 +667,7 @@ impl StateMachine {
                         let _ = selector.send(DeviceSelectorEvent::SelectedToken(dev.id()));
                     }
                     match resp {
-                        Ok(GetAssertionResult::CTAP1(resp)) => {
-                            let app_id = getassertion.rp.hash().as_ref().to_vec();
-                            let key_handle = getassertion.allow_list[0].id.clone();
-
-                            callback.call(Ok(SignResult::CTAP1(
-                                app_id,
-                                key_handle,
-                                resp,
-                                dev.get_device_info(),
-                            )));
-                            break;
-                        }
-                        Ok(GetAssertionResult::CTAP2(assertion)) => {
+                        Ok(GetAssertionResult(assertion)) => {
                             callback.call(Ok(SignResult::CTAP2(assertion)));
                             break;
                         }
@@ -994,14 +978,20 @@ impl StateMachine {
                             break;
                         }
                     } else if let Ok(bytes) = u2f_register(dev, challenge.as_ref(), &application) {
+                        let mut rp_id_hash: RpIdHash = RpIdHash([0u8; 32]);
+                        rp_id_hash.0.copy_from_slice(&application);
+                        let result = match MakeCredentialsResult::from_ctap1(&bytes, &rp_id_hash) {
+                            Ok(MakeCredentialsResult(att_obj)) => att_obj,
+                            Err(_) => {
+                                callback.call(Err(errors::AuthenticatorError::U2FToken(
+                                errors::U2FTokenError::Unknown,
+                                )));
+                                break;
+                            }
+                        };
                         let dev_info = dev.get_device_info();
-                        send_status(
-                            &status,
-                            crate::StatusUpdate::Success {
-                                dev_info: dev.get_device_info(),
-                            },
-                        );
-                        callback.call(Ok(RegisterResult::CTAP1(bytes, dev_info)));
+                        send_status(&status, crate::StatusUpdate::Success { dev_info });
+                        callback.call(Ok(RegisterResult::CTAP2(result)));
                         break;
                     }
 
@@ -1108,19 +1098,21 @@ impl StateMachine {
                             if let Ok(bytes) =
                                 u2f_sign(dev, challenge.as_ref(), app_id, &key_handle.credential)
                             {
+                                let pkcd = PublicKeyCredentialDescriptor { id: key_handle.credential.clone(), transports: vec![] };
+                                let mut rp_id_hash: RpIdHash = RpIdHash([0u8; 32]);
+                                rp_id_hash.0.copy_from_slice(app_id);
+                                let result = match GetAssertionResult::from_ctap1(&bytes, &rp_id_hash, &pkcd) {
+                                    Ok(GetAssertionResult(assertion)) => assertion,
+                                    Err(_) => {
+                                        callback.call(Err(errors::AuthenticatorError::U2FToken(
+                                        errors::U2FTokenError::Unknown,
+                                        )));
+                                        break 'outer;
+                                    }
+                                };
                                 let dev_info = dev.get_device_info();
-                                send_status(
-                                    &status,
-                                    crate::StatusUpdate::Success {
-                                        dev_info: dev.get_device_info(),
-                                    },
-                                );
-                                callback.call(Ok(SignResult::CTAP1(
-                                    app_id.clone(),
-                                    key_handle.credential.clone(),
-                                    bytes,
-                                    dev_info,
-                                )));
+                                send_status(&status, crate::StatusUpdate::Success { dev_info });
+                                callback.call(Ok(SignResult::CTAP2(result)));
                                 break 'outer;
                             }
                         }
