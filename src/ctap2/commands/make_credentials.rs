@@ -1,3 +1,4 @@
+use super::get_info::{AuthenticatorInfo, AuthenticatorVersion};
 use super::{
     Command, CommandError, PinUvAuthCommand, Request, RequestCtap1, RequestCtap2, Retryable,
     StatusCode,
@@ -187,15 +188,40 @@ impl PinUvAuthCommand for MakeCredentials {
         }
     }
 
-    fn set_discouraged_uv_option(&mut self) {
-        // "[..] the Relying Party wants to create a non-discoverable credential and not require user verification
-        // (e.g., by setting options.authenticatorSelection.userVerification to "discouraged" in the WebAuthn API),
-        // the platform invokes the authenticatorMakeCredential operation using the marshalled input parameters along
-        // with the "uv" option key set to false and terminate these steps."
-        // Note: This is basically a no-op right now, since we use `get_uv_option() == Some(false)`, to determine if
-        //       the RP is discouraging UV. But we may change that part of the API in the future, so better to be
-        //       explicit here.
-        self.set_uv_option(Some(false))
+    fn can_skip_user_verification(&mut self, info: &AuthenticatorInfo) -> bool {
+        // TODO(MS): Handle here the case where we NEED a UV, the device supports PINs, but hasn't set a PIN.
+        //           For this, the user has to be prompted to set a PIN first (see https://github.com/mozilla/authenticator-rs/issues/223)
+
+        let supports_uv = info.options.user_verification == Some(true);
+        let pin_configured = info.options.client_pin == Some(true);
+        let device_protected = supports_uv || pin_configured;
+        // make_cred_uv_not_rqd is only relevant for rk = false
+        let make_cred_uv_not_required = info.options.make_cred_uv_not_rqd == Some(true)
+            && self.options.resident_key != Some(true);
+        // For CTAP2.0, UV is always required when doing MakeCredential
+        let always_uv = info.options.always_uv == Some(true)
+            || info.max_supported_version() == AuthenticatorVersion::FIDO_2_0;
+        let uv_discouraged = self.get_uv_option() == Some(false);
+
+        // CTAP 2.1 authenticators can allow MakeCredential without PinUvAuth,
+        // but that is only relevant, if RP also discourages UV.
+        let can_make_cred_without_uv = make_cred_uv_not_required && uv_discouraged;
+
+        if always_uv || (device_protected && !can_make_cred_without_uv) {
+            // If the token is protected, we have to require UV anyways
+            self.set_uv_option(Some(true));
+            false
+        } else {
+            // "[..] the Relying Party wants to create a non-discoverable credential and not require user verification
+            // (e.g., by setting options.authenticatorSelection.userVerification to "discouraged" in the WebAuthn API),
+            // the platform invokes the authenticatorMakeCredential operation using the marshalled input parameters along
+            // with the "uv" option key set to false and terminate these steps."
+            // Note: This is basically a no-op right now, since we use `get_uv_option() == Some(false)`, to determine if
+            //       the RP is discouraging UV. But we may change that part of the API in the future, so better to be
+            //       explicit here.
+            self.set_uv_option(Some(false));
+            true
+        }
     }
 }
 
