@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use crate::consts::PARAMETER_SIZE;
+use crate::ctap2::client_data::ClientDataHash;
 use crate::ctap2::commands::client_pin::{
     ChangeExistingPin, Pin, PinError, PinUvAuthTokenPermission, SetNewPin,
 };
@@ -12,8 +13,9 @@ use crate::ctap2::commands::reset::Reset;
 use crate::ctap2::commands::{
     repackage_pin_errors, CommandError, PinUvAuthCommand, PinUvAuthResult, Request, StatusCode,
 };
-use crate::ctap2::server::{PublicKeyCredentialDescriptor, RelyingParty, RelyingPartyWrapper, RpIdHash};
-use crate::ctap2::client_data::ClientDataHash;
+use crate::ctap2::server::{
+    PublicKeyCredentialDescriptor, RelyingParty, RelyingPartyWrapper, RpIdHash,
+};
 use crate::errors::{self, AuthenticatorError, UnsupportedOption};
 use crate::statecallback::StateCallback;
 use crate::transport::device_selector::{
@@ -23,7 +25,10 @@ use crate::transport::platform::transaction::Transaction;
 use crate::transport::{errors::HIDError, hid::HIDDevice, FidoDevice, Nonce};
 use crate::u2fprotocol::{u2f_init_device, u2f_is_keyhandle_valid, u2f_register, u2f_sign};
 use crate::u2ftypes::U2FDevice;
-use crate::{send_status, AuthenticatorTransports, KeyHandle, RegisterFlags, RegisterResult, SignFlags, SignResult, StatusPinUv, StatusUpdate};
+use crate::{
+    send_status, AuthenticatorTransports, KeyHandle, RegisterFlags, RegisterResult, SignFlags,
+    SignResult, StatusPinUv, StatusUpdate,
+};
 use std::sync::mpsc::{channel, Sender};
 use std::thread;
 use std::time::Duration;
@@ -386,16 +391,25 @@ impl StateMachine {
                 flags |= RegisterFlags::REQUIRE_USER_VERIFICATION;
             }
             let application = params.rp.hash().0.to_vec();
-            let key_handles = params.exclude_list
-            .iter()
-            .map(|cred_desc| KeyHandle {
-                credential: cred_desc.id.clone(),
-                transports: AuthenticatorTransports::empty(),
-            })
-            .collect();
+            let key_handles = params
+                .exclude_list
+                .iter()
+                .map(|cred_desc| KeyHandle {
+                    credential: cred_desc.id.clone(),
+                    transports: AuthenticatorTransports::empty(),
+                })
+                .collect();
             let challenge = params.client_data_hash;
 
-            self.legacy_register(flags, timeout, challenge, application, key_handles, status, callback);
+            self.legacy_register(
+                flags,
+                timeout,
+                challenge,
+                application,
+                key_handles,
+                status,
+                callback,
+            );
             return;
         }
 
@@ -549,18 +563,24 @@ impl StateMachine {
             };
             let mut app_ids = vec![params.rp.hash().0.to_vec()];
             if let Some(app_id) = params.alternate_rp_id {
-                app_ids.push(RelyingPartyWrapper::Data(RelyingParty {
-                                id: app_id,
-                                ..Default::default()
-                            }).hash().0.to_vec());
+                app_ids.push(
+                    RelyingPartyWrapper::Data(RelyingParty {
+                        id: app_id,
+                        ..Default::default()
+                    })
+                    .hash()
+                    .0
+                    .to_vec(),
+                );
             }
-            let key_handles = params.allow_list
-            .iter()
-            .map(|cred_desc| KeyHandle {
-                credential: cred_desc.id.clone(),
-                transports: AuthenticatorTransports::empty(),
-            })
-            .collect();
+            let key_handles = params
+                .allow_list
+                .iter()
+                .map(|cred_desc| KeyHandle {
+                    credential: cred_desc.id.clone(),
+                    transports: AuthenticatorTransports::empty(),
+                })
+                .collect();
             let challenge = params.client_data_hash;
 
             self.legacy_sign(
@@ -984,7 +1004,7 @@ impl StateMachine {
                             Ok(MakeCredentialsResult(att_obj)) => att_obj,
                             Err(_) => {
                                 callback.call(Err(errors::AuthenticatorError::U2FToken(
-                                errors::U2FTokenError::Unknown,
+                                    errors::U2FTokenError::Unknown,
                                 )));
                                 break;
                             }
@@ -1057,8 +1077,13 @@ impl StateMachine {
                 // valid key handle for an appId, we'll use that appId below.
                 let (app_id, valid_handles) =
                     find_valid_key_handles(&app_ids, &key_handles, |app_id, key_handle| {
-                        u2f_is_keyhandle_valid(dev, challenge.as_ref(), app_id, &key_handle.credential)
-                            .unwrap_or(false) /* no match on failure */
+                        u2f_is_keyhandle_valid(
+                            dev,
+                            challenge.as_ref(),
+                            app_id,
+                            &key_handle.credential,
+                        )
+                        .unwrap_or(false) /* no match on failure */
                     });
 
                 // Aggregate distinct transports from all given credentials.
@@ -1098,14 +1123,21 @@ impl StateMachine {
                             if let Ok(bytes) =
                                 u2f_sign(dev, challenge.as_ref(), app_id, &key_handle.credential)
                             {
-                                let pkcd = PublicKeyCredentialDescriptor { id: key_handle.credential.clone(), transports: vec![] };
+                                let pkcd = PublicKeyCredentialDescriptor {
+                                    id: key_handle.credential.clone(),
+                                    transports: vec![],
+                                };
                                 let mut rp_id_hash: RpIdHash = RpIdHash([0u8; 32]);
                                 rp_id_hash.0.copy_from_slice(app_id);
-                                let result = match GetAssertionResult::from_ctap1(&bytes, &rp_id_hash, &pkcd) {
+                                let result = match GetAssertionResult::from_ctap1(
+                                    &bytes,
+                                    &rp_id_hash,
+                                    &pkcd,
+                                ) {
                                     Ok(GetAssertionResult(assertion)) => assertion,
                                     Err(_) => {
                                         callback.call(Err(errors::AuthenticatorError::U2FToken(
-                                        errors::U2FTokenError::Unknown,
+                                            errors::U2FTokenError::Unknown,
                                         )));
                                         break 'outer;
                                     }

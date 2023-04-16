@@ -2,7 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-
 use crate::ctap2::commands::client_pin::Pin;
 pub use crate::ctap2::commands::get_assertion::{
     GetAssertionExtensions, GetAssertionOptions, HmacSecretExtension,
@@ -297,9 +296,7 @@ impl AuthenticatorService {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        AuthenticatorService, AuthenticatorTransport, Pin, RegisterArgs, SignArgs,
-    };
+    use super::{AuthenticatorService, AuthenticatorTransport, Pin, RegisterArgs, SignArgs};
     use crate::consts::{Capability, PARAMETER_SIZE};
     use crate::ctap2::server::{RelyingParty, User};
     use crate::statecallback::StateCallback;

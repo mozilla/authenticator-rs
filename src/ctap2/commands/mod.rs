@@ -24,7 +24,8 @@ where
     Self: fmt::Debug,
     Self: RequestCtap1<Output = T>,
     Self: RequestCtap2<Output = T>,
-{ }
+{
+}
 
 /// Retryable wraps an error type and may ask manager to retry sending a
 /// command, this is useful for ctap1 where token will reply with "condition not

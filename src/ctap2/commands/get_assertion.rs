@@ -7,7 +7,7 @@ use crate::consts::{
 };
 use crate::crypto::{COSEKey, CryptoError, PinUvAuthParam, PinUvAuthToken, SharedSecret};
 use crate::ctap2::attestation::{AuthenticatorData, AuthenticatorDataFlags};
-use crate::ctap2::client_data::{ClientDataHash};
+use crate::ctap2::client_data::ClientDataHash;
 use crate::ctap2::commands::client_pin::Pin;
 use crate::ctap2::commands::get_next_assertion::GetNextAssertion;
 use crate::ctap2::commands::make_credentials::UserVerification;
@@ -35,15 +35,19 @@ use std::io;
 pub struct GetAssertionResult(pub AssertionObject);
 
 impl GetAssertionResult {
-    pub fn from_ctap1(input: &[u8], rp_id_hash: &RpIdHash, key_handle: &PublicKeyCredentialDescriptor) -> Result<GetAssertionResult, CommandError> {
+    pub fn from_ctap1(
+        input: &[u8],
+        rp_id_hash: &RpIdHash,
+        key_handle: &PublicKeyCredentialDescriptor,
+    ) -> Result<GetAssertionResult, CommandError> {
         let parse_authentication = |input| {
             // Parsing an u8, then a u32, and the rest is the signature
             let (rest, (user_presence, counter)) = tuple((be_u8, be_u32))(input)?;
             let signature = Vec::from(rest);
             Ok((user_presence, counter, signature))
         };
-        let (user_presence, counter, signature) = parse_authentication(input)
-            .map_err(|e: nom::Err<VerboseError<_>>| {
+        let (user_presence, counter, signature) =
+            parse_authentication(input).map_err(|e: nom::Err<VerboseError<_>>| {
                 error!("error while parsing authentication: {:?}", e);
                 CommandError::Deserializing(DesError::custom("unable to parse authentication"))
             })?;
@@ -341,7 +345,7 @@ impl Serialize for GetAssertion {
     }
 }
 
-impl Request<GetAssertionResult> for GetAssertion { }
+impl Request<GetAssertionResult> for GetAssertion {}
 
 /// This command is used to check which key_handle is valid for this
 /// token. This is sent before a GetAssertion command, to determine which
@@ -691,7 +695,9 @@ pub mod test {
             token_binding: Some(TokenBinding::Present(String::from("AAECAw"))),
         };
         let assertion = GetAssertion::new(
-            CollectedClientDataWrapper::new(client_data).expect("failed to serialize client data").hash(),
+            CollectedClientDataWrapper::new(client_data)
+                .expect("failed to serialize client data")
+                .hash(),
             RelyingPartyWrapper::Data(RelyingParty {
                 id: String::from("example.com"),
                 name: Some(String::from("Acme")),
@@ -903,7 +909,9 @@ pub mod test {
             transports: vec![Transport::USB],
         };
         let assertion = GetAssertion::new(
-            CollectedClientDataWrapper::new(client_data).expect("failed to serialize client data").hash(),
+            CollectedClientDataWrapper::new(client_data)
+                .expect("failed to serialize client data")
+                .hash(),
             RelyingPartyWrapper::Data(RelyingParty {
                 id: String::from("example.com"),
                 name: Some(String::from("Acme")),
@@ -992,7 +1000,9 @@ pub mod test {
             transports: vec![Transport::USB],
         };
         let mut assertion = GetAssertion::new(
-            CollectedClientDataWrapper::new(client_data).expect("failed to serialize client data").hash(),
+            CollectedClientDataWrapper::new(client_data)
+                .expect("failed to serialize client data")
+                .hash(),
             RelyingPartyWrapper::Data(RelyingParty {
                 id: String::from("example.com"),
                 name: Some(String::from("Acme")),

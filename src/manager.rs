@@ -5,16 +5,14 @@
 use crate::authenticatorservice::AuthenticatorTransport;
 use crate::authenticatorservice::{RegisterArgs, SignArgs};
 
+use crate::ctap2::client_data::ClientDataHash;
 use crate::ctap2::commands::get_assertion::GetAssertion;
 use crate::ctap2::commands::make_credentials::MakeCredentials;
-use crate::ctap2::server::{
-    RelyingParty, RelyingPartyWrapper,
-};
-use crate::ctap2::client_data::ClientDataHash;
+use crate::ctap2::server::{RelyingParty, RelyingPartyWrapper};
 use crate::errors::*;
 use crate::statecallback::StateCallback;
 use crate::statemachine::StateMachine;
-use crate::{Pin};
+use crate::Pin;
 use runloop::RunLoop;
 use std::io;
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
@@ -138,17 +136,17 @@ impl AuthenticatorTransport for Manager {
         callback: StateCallback<crate::Result<crate::RegisterResult>>,
     ) -> Result<(), AuthenticatorError> {
         let make_credentials = MakeCredentials::new(
-                    ClientDataHash(args.client_data_hash),
-                    RelyingPartyWrapper::Data(args.relying_party),
-                    Some(args.user),
-                    args.pub_cred_params,
-                    args.exclude_list,
-                    args.options,
-                    args.extensions,
-                    args.pin,
-                    args.use_ctap1_fallback,
-                    // pin_auth will be filled in Statemachine, once we have a device
-                )?;
+            ClientDataHash(args.client_data_hash),
+            RelyingPartyWrapper::Data(args.relying_party),
+            Some(args.user),
+            args.pub_cred_params,
+            args.exclude_list,
+            args.options,
+            args.extensions,
+            args.pin,
+            args.use_ctap1_fallback,
+            // pin_auth will be filled in Statemachine, once we have a device
+        )?;
 
         let action = QueueAction::Register {
             timeout,
