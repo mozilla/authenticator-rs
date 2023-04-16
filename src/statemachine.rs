@@ -481,7 +481,9 @@ impl StateMachineCtap2 {
 
                 // We may need the shared secret for HMAC-extension, so we
                 // have to establish one
-                let _shared_secret = dev.establish_shared_secret()?;
+                if info.supports_hmac_secret() {
+                    let _shared_secret = dev.establish_shared_secret()?;
+                }
                 return Ok(PinUvAuthResult::UsingInternalUv);
             }
 
