@@ -47,7 +47,10 @@ use std::io;
 pub struct MakeCredentialsResult(pub AttestationObject);
 
 impl MakeCredentialsResult {
-    pub fn from_ctap1(input: &[u8], rp_id_hash: &RpIdHash) -> Result<MakeCredentialsResult, CommandError> {
+    pub fn from_ctap1(
+        input: &[u8],
+        rp_id_hash: &RpIdHash,
+    ) -> Result<MakeCredentialsResult, CommandError> {
         let parse_register = |input| {
             let (rest, _) = tag(&[0x05])(input)?;
             let (rest, public_key) = take(65u8)(rest)?;
@@ -56,24 +59,22 @@ impl MakeCredentialsResult {
             Ok((rest, public_key, key_handle))
         };
 
-        let (rest, public_key, key_handle) = parse_register(input)
-            .map_err(|e: nom::Err<VerboseError<_>>| {
+        let (rest, public_key, key_handle) =
+            parse_register(input).map_err(|e: nom::Err<VerboseError<_>>| {
                 error!("error while parsing registration: {:?}", e);
                 CommandError::Deserializing(DesError::custom("unable to parse registration"))
             })?;
 
-        let cert_and_sig = parse_u2f_der_certificate(rest)
-            .map_err(|e| {
-                error!("error while parsing registration: {:?}", e);
-                CommandError::Deserializing(DesError::custom("unable to parse registration"))
-            })?;
+        let cert_and_sig = parse_u2f_der_certificate(rest).map_err(|e| {
+            error!("error while parsing registration: {:?}", e);
+            CommandError::Deserializing(DesError::custom("unable to parse registration"))
+        })?;
 
-        let credential_ec2_key =
-            COSEEC2Key::from_sec1_uncompressed(Curve::SECP256R1, public_key)
+        let credential_ec2_key = COSEEC2Key::from_sec1_uncompressed(Curve::SECP256R1, public_key)
             .map_err(|e| {
-                error!("error while parsing registration: {:?}", e);
-                CommandError::Deserializing(DesError::custom("unable to parse registration"))
-            })?;
+            error!("error while parsing registration: {:?}", e);
+            CommandError::Deserializing(DesError::custom("unable to parse registration"))
+        })?;
 
         let credential_public_key = COSEKey {
             alg: COSEAlgorithm::ES256,
@@ -344,7 +345,7 @@ impl Serialize for MakeCredentials {
     }
 }
 
-impl Request<MakeCredentialsResult> for MakeCredentials { }
+impl Request<MakeCredentialsResult> for MakeCredentials {}
 
 impl RequestCtap1 for MakeCredentials {
     type Output = MakeCredentialsResult;
@@ -477,7 +478,8 @@ pub(crate) fn dummy_make_credentials_cmd() -> Result<MakeCredentials, HIDError> 
             origin: String::new(),
             cross_origin: false,
             token_binding: None,
-        })?.hash(),
+        })?
+        .hash(),
         RelyingPartyWrapper::Data(RelyingParty {
             id: String::from("make.me.blink"),
             ..Default::default()
@@ -507,7 +509,9 @@ pub mod test {
         AttestationStatementFidoU2F, AttestationStatementPacked, AttestedCredentialData,
         AuthenticatorData, AuthenticatorDataFlags, Signature,
     };
-    use crate::ctap2::client_data::{Challenge, CollectedClientData, CollectedClientDataWrapper, TokenBinding, WebauthnType};
+    use crate::ctap2::client_data::{
+        Challenge, CollectedClientData, CollectedClientDataWrapper, TokenBinding, WebauthnType,
+    };
     use crate::ctap2::commands::{RequestCtap1, RequestCtap2};
     use crate::ctap2::server::RpIdHash;
     use crate::ctap2::server::{
@@ -614,7 +618,9 @@ pub mod test {
                 origin: String::from("example.com"),
                 cross_origin: false,
                 token_binding: Some(TokenBinding::Present(String::from("AAECAw"))),
-            }).expect("failed to serialize client data").hash(),
+            })
+            .expect("failed to serialize client data")
+            .hash(),
             RelyingPartyWrapper::Data(RelyingParty {
                 id: String::from("example.com"),
                 name: Some(String::from("Acme")),
@@ -656,7 +662,8 @@ pub mod test {
         assert_eq!(req_serialized, MAKE_CREDENTIALS_SAMPLE_REQUEST_CTAP2);
         let attestation_object = req
             .handle_response_ctap2(&mut device, &MAKE_CREDENTIALS_SAMPLE_RESPONSE_CTAP2)
-            .expect("Failed to handle CTAP2 response").0;
+            .expect("Failed to handle CTAP2 response")
+            .0;
         let expected = create_attestation_obj();
 
         assert_eq!(attestation_object, expected);
@@ -671,7 +678,9 @@ pub mod test {
                 origin: String::from("example.com"),
                 cross_origin: false,
                 token_binding: Some(TokenBinding::Present(String::from("AAECAw"))),
-            }).expect("failed to serialize client data").hash(),
+            })
+            .expect("failed to serialize client data")
+            .hash(),
             RelyingPartyWrapper::Data(RelyingParty {
                 id: String::from("example.com"),
                 name: Some(String::from("Acme")),
@@ -716,7 +725,8 @@ pub mod test {
         );
         let attestation_object = req
             .handle_response_ctap1(Ok(()), &MAKE_CREDENTIALS_SAMPLE_RESPONSE_CTAP1, &())
-            .expect("Failed to handle CTAP1 response").0;
+            .expect("Failed to handle CTAP1 response")
+            .0;
 
         let expected = AttestationObject {
             auth_data: AuthenticatorData {
