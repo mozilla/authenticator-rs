@@ -11,9 +11,7 @@ use crate::ctap2::attestation::{
     AAGuid, AttestationObject, AttestationStatement, AttestationStatementFidoU2F,
     AttestedCredentialData, AuthenticatorData, AuthenticatorDataFlags,
 };
-use crate::ctap2::client_data::{
-    Challenge, ClientDataHash, CollectedClientData, CollectedClientDataWrapper, WebauthnType,
-};
+use crate::ctap2::client_data::{Challenge, ClientDataHash, CollectedClientData, WebauthnType};
 use crate::ctap2::commands::client_pin::Pin;
 use crate::ctap2::commands::get_assertion::CheckKeyHandle;
 use crate::ctap2::server::{
@@ -446,14 +444,15 @@ impl RequestCtap2 for MakeCredentials {
 
 pub(crate) fn dummy_make_credentials_cmd() -> Result<MakeCredentials, HIDError> {
     MakeCredentials::new(
-        CollectedClientDataWrapper::new(CollectedClientData {
+        CollectedClientData {
             webauthn_type: WebauthnType::Create,
             challenge: Challenge::new(vec![0, 1, 2, 3, 4]),
             origin: String::new(),
             cross_origin: false,
             token_binding: None,
-        })?
-        .hash(),
+        }
+        .hash()
+        .expect("failed to serialize client data"),
         RelyingPartyWrapper::Data(RelyingParty {
             id: String::from("make.me.blink"),
             ..Default::default()
@@ -483,9 +482,7 @@ pub mod test {
         AttestationStatementFidoU2F, AttestationStatementPacked, AttestedCredentialData,
         AuthenticatorData, AuthenticatorDataFlags, Signature,
     };
-    use crate::ctap2::client_data::{
-        Challenge, CollectedClientData, CollectedClientDataWrapper, TokenBinding, WebauthnType,
-    };
+    use crate::ctap2::client_data::{Challenge, CollectedClientData, TokenBinding, WebauthnType};
     use crate::ctap2::commands::{RequestCtap1, RequestCtap2};
     use crate::ctap2::server::RpIdHash;
     use crate::ctap2::server::{
@@ -586,15 +583,15 @@ pub mod test {
     #[test]
     fn test_make_credentials_ctap2() {
         let req = MakeCredentials::new(
-            CollectedClientDataWrapper::new(CollectedClientData {
+            CollectedClientData {
                 webauthn_type: WebauthnType::Create,
                 challenge: Challenge::from(vec![0x00, 0x01, 0x02, 0x03]),
                 origin: String::from("example.com"),
                 cross_origin: false,
                 token_binding: Some(TokenBinding::Present(String::from("AAECAw"))),
-            })
-            .expect("failed to serialize client data")
-            .hash(),
+            }
+            .hash()
+            .expect("failed to serialize client data"),
             RelyingPartyWrapper::Data(RelyingParty {
                 id: String::from("example.com"),
                 name: Some(String::from("Acme")),
@@ -646,15 +643,15 @@ pub mod test {
     #[test]
     fn test_make_credentials_ctap1() {
         let req = MakeCredentials::new(
-            CollectedClientDataWrapper::new(CollectedClientData {
+            CollectedClientData {
                 webauthn_type: WebauthnType::Create,
                 challenge: Challenge::new(vec![0x00, 0x01, 0x02, 0x03]),
                 origin: String::from("example.com"),
                 cross_origin: false,
                 token_binding: Some(TokenBinding::Present(String::from("AAECAw"))),
-            })
-            .expect("failed to serialize client data")
-            .hash(),
+            }
+            .hash()
+            .expect("failed to serialize client data"),
             RelyingPartyWrapper::Data(RelyingParty {
                 id: String::from("example.com"),
                 name: Some(String::from("Acme")),

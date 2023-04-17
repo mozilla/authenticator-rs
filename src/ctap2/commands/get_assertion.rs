@@ -671,9 +671,7 @@ pub mod test {
         U2F_REQUEST_USER_PRESENCE,
     };
     use crate::ctap2::attestation::{AuthenticatorData, AuthenticatorDataFlags};
-    use crate::ctap2::client_data::{
-        Challenge, CollectedClientData, CollectedClientDataWrapper, TokenBinding, WebauthnType,
-    };
+    use crate::ctap2::client_data::{Challenge, CollectedClientData, TokenBinding, WebauthnType};
     use crate::ctap2::commands::get_assertion::AssertionObject;
     use crate::ctap2::commands::RequestCtap1;
     use crate::ctap2::server::{
@@ -695,9 +693,7 @@ pub mod test {
             token_binding: Some(TokenBinding::Present(String::from("AAECAw"))),
         };
         let assertion = GetAssertion::new(
-            CollectedClientDataWrapper::new(client_data)
-                .expect("failed to serialize client data")
-                .hash(),
+            client_data.hash().expect("failed to serialize client data"),
             RelyingPartyWrapper::Data(RelyingParty {
                 id: String::from("example.com"),
                 name: Some(String::from("Acme")),
@@ -909,9 +905,7 @@ pub mod test {
             transports: vec![Transport::USB],
         };
         let assertion = GetAssertion::new(
-            CollectedClientDataWrapper::new(client_data)
-                .expect("failed to serialize client data")
-                .hash(),
+            client_data.hash().expect("failed to serialize client data"),
             RelyingPartyWrapper::Data(RelyingParty {
                 id: String::from("example.com"),
                 name: Some(String::from("Acme")),
@@ -1000,9 +994,7 @@ pub mod test {
             transports: vec![Transport::USB],
         };
         let mut assertion = GetAssertion::new(
-            CollectedClientDataWrapper::new(client_data)
-                .expect("failed to serialize client data")
-                .hash(),
+            client_data.hash().expect("failed to serialize client data"),
             RelyingPartyWrapper::Data(RelyingParty {
                 id: String::from("example.com"),
                 name: Some(String::from("Acme")),

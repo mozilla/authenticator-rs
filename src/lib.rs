@@ -37,7 +37,7 @@ mod manager;
 
 pub mod ctap2;
 pub use ctap2::attestation::AttestationObject;
-pub use ctap2::client_data::{CollectedClientData, CollectedClientDataWrapper};
+pub use ctap2::client_data::CollectedClientData;
 pub use ctap2::commands::client_pin::{Pin, PinError};
 pub use ctap2::commands::get_assertion::Assertion;
 pub use ctap2::AssertionObject;
