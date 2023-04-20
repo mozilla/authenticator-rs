@@ -5,5 +5,6 @@ pub use commands::get_assertion::AssertionObject;
 pub mod attestation;
 
 pub mod client_data;
+pub(crate) mod preflight;
 pub mod server;
 pub(crate) mod utils;

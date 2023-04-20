@@ -201,8 +201,22 @@ fn main() {
                 continue;
             }
             Err(AuthenticatorError::CredentialExcluded) => {
-                println!("Got an 'already registered' error. Quitting.");
-                break;
+                println!("Got an 'already registered' error, as expected.");
+                if ctap_args.exclude_list.len() > 1 {
+                    println!("Quitting.");
+                    break;
+                }
+                println!("Extending the list to contain more invalid handles.");
+                let registered_handle = ctap_args.exclude_list[0].clone();
+                ctap_args.exclude_list = vec![];
+                for ii in 0..10 {
+                    ctap_args.exclude_list.push(PublicKeyCredentialDescriptor {
+                        id: vec![ii; 50],
+                        transports: vec![Transport::USB],
+                    });
+                }
+                ctap_args.exclude_list.push(registered_handle);
+                continue;
             }
             Err(e) => panic!("Registration failed: {:?}", e),
         };

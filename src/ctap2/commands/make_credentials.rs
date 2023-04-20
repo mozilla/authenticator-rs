@@ -14,12 +14,13 @@ use crate::ctap2::attestation::{
 };
 use crate::ctap2::client_data::{Challenge, ClientDataHash, CollectedClientData, WebauthnType};
 use crate::ctap2::commands::client_pin::Pin;
-use crate::ctap2::commands::get_assertion::CheckKeyHandle;
+use crate::ctap2::preflight::{CheckKeyHandle, PreFlightable};
 use crate::ctap2::server::{
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty,
     RelyingPartyWrapper, RpIdHash, User, UserVerificationRequirement,
 };
 use crate::errors::AuthenticatorError;
+use crate::transport::platform::device::Device;
 use crate::transport::{
     errors::{ApduErrorStatus, HIDError},
     FidoDevice,
@@ -267,6 +268,72 @@ impl PinUvAuthCommand for MakeCredentials {
     }
 }
 
+impl PreFlightable for MakeCredentials {
+    fn get_credential_id_list(&self) -> &[PublicKeyCredentialDescriptor] {
+        &self.exclude_list
+    }
+
+    fn set_credential_id_list(&mut self, list: Vec<PublicKeyCredentialDescriptor>) {
+        self.exclude_list = list;
+    }
+
+    fn do_pre_flight_ctap1<Dev: FidoDevice>(
+        &mut self,
+        dev: &mut Dev,
+    ) -> Result<(), AuthenticatorError> {
+        // TODO(MS): Mandatory sanity checks are missing:
+        // https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html#u2f-authenticatorMakeCredential-interoperability
+        // If any of the below conditions is not true, platform errors out with
+        // CTAP2_ERR_UNSUPPORTED_OPTION.
+        //  * pubKeyCredParams must use the ES256 algorithm (-7).
+        //  * Options must not include "rk" set to true.
+        //  * Options must not include "uv" set to true.
+
+        let is_already_registered = self
+            .exclude_list
+            .iter()
+            // key-handles in CTAP1 are limited to 255 bytes, but are not limited in CTAP2.
+            // Filter out key-handles that are too long (can happen if this is a CTAP2-request,
+            // but the token only speaks CTAP1). If none is found, return an error.
+            .filter(|exclude_handle| exclude_handle.id.len() < 256)
+            .map(|exclude_handle| {
+                let check_command = CheckKeyHandle {
+                    key_handle: exclude_handle.id.as_ref(),
+                    client_data_hash: self.client_data_hash.as_ref(),
+                    rp: &self.rp,
+                };
+                let res = dev.send_ctap1(&check_command);
+                res.is_ok()
+            })
+            .any(|x| x);
+
+        if is_already_registered {
+            // Now we need to send a dummy registration request, to make the token blink
+            // Spec says "dummy appid and invalid challenge". We use the same, as we do for
+            // making the token blink upon device selection.
+            let msg = dummy_make_credentials_cmd()?;
+            let _ = dev.send_ctap1(&msg); // Ignore answer, return "CredentialExcluded"
+            return Err(HIDError::Command(CommandError::StatusCode(
+                StatusCode::CredentialExcluded,
+                None,
+            ))
+            .into());
+        }
+
+        // something
+        Ok(())
+    }
+
+    fn do_pre_flight_ctap2<Dev: FidoDevice>(
+        &mut self,
+        chunk_size: usize,
+        dev: &mut Dev,
+    ) -> Result<(), AuthenticatorError> {
+        // something
+        Ok(())
+    }
+}
+
 impl Serialize for MakeCredentials {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -336,36 +403,6 @@ impl RequestCtap1 for MakeCredentials {
     where
         Dev: io::Read + io::Write + fmt::Debug + FidoDevice,
     {
-        let is_already_registered = self
-            .exclude_list
-            .iter()
-            // key-handles in CTAP1 are limited to 255 bytes, but are not limited in CTAP2.
-            // Filter out key-handles that are too long (can happen if this is a CTAP2-request,
-            // but the token only speaks CTAP1). If none is found, return an error.
-            .filter(|exclude_handle| exclude_handle.id.len() < 256)
-            .map(|exclude_handle| {
-                let check_command = CheckKeyHandle {
-                    key_handle: exclude_handle.id.as_ref(),
-                    client_data_hash: self.client_data_hash.as_ref(),
-                    rp: &self.rp,
-                };
-                let res = dev.send_ctap1(&check_command);
-                res.is_ok()
-            })
-            .any(|x| x);
-
-        if is_already_registered {
-            // Now we need to send a dummy registration request, to make the token blink
-            // Spec says "dummy appid and invalid challenge". We use the same, as we do for
-            // making the token blink upon device selection.
-            let msg = dummy_make_credentials_cmd()?;
-            let _ = dev.send_ctap1(&msg); // Ignore answer, return "CrednetialExcluded"
-            return Err(HIDError::Command(CommandError::StatusCode(
-                StatusCode::CredentialExcluded,
-                None,
-            )));
-        }
-
         let flags = U2F_REQUEST_USER_PRESENCE;
 
         let mut register_data = Vec::with_capacity(2 * PARAMETER_SIZE);
