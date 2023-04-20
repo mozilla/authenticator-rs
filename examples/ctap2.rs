@@ -40,6 +40,7 @@ fn main() {
     );
     opts.optflag("s", "hmac_secret", "With hmac-secret");
     opts.optflag("h", "help", "print this help menu");
+    opts.optflag("f", "fallback", "Use CTAP1 fallback implementation");
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
         Err(f) => panic!("{}", f.to_string()),
@@ -55,6 +56,8 @@ fn main() {
     if !matches.opt_present("no-u2f-usb-hid") {
         manager.add_u2f_usb_hid_platform_transports();
     }
+
+    let fallback = matches.opt_present("fallback");
 
     let timeout_ms = match matches.opt_get_default::<u64>("timeout", 25) {
         Ok(timeout_s) => {
@@ -191,7 +194,7 @@ fn main() {
             ..Default::default()
         },
         pin: None,
-        use_ctap1_fallback: false,
+        use_ctap1_fallback: fallback,
     };
 
     let attestation_object;
@@ -259,7 +262,7 @@ fn main() {
         },
         pin: None,
         alternate_rp_id: None,
-        use_ctap1_fallback: false,
+        use_ctap1_fallback: fallback,
     };
 
     loop {
