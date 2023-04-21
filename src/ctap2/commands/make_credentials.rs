@@ -14,7 +14,7 @@ use crate::ctap2::attestation::{
 };
 use crate::ctap2::client_data::{Challenge, ClientDataHash, CollectedClientData, WebauthnType};
 use crate::ctap2::commands::client_pin::Pin;
-use crate::ctap2::preflight::{CheckKeyHandle, PreFlightable};
+use crate::ctap2::preflight::PreFlightable;
 use crate::ctap2::server::{
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty,
     RelyingPartyWrapper, RpIdHash, User, UserVerificationRequirement,
@@ -272,6 +272,10 @@ impl PinUvAuthCommand for MakeCredentials {
 }
 
 impl PreFlightable for MakeCredentials {
+    fn get_client_data_hash(&self) -> &ClientDataHash {
+        &self.client_data_hash
+    }
+
     fn get_credential_id_list(&self) -> &[PublicKeyCredentialDescriptor] {
         &self.exclude_list
     }
@@ -280,37 +284,13 @@ impl PreFlightable for MakeCredentials {
         self.exclude_list = list;
     }
 
-    fn do_pre_flight_ctap1<Dev: FidoDevice>(
+    fn handle_ctap1_pre_flight_key<Dev: FidoDevice>(
         &mut self,
         dev: &mut Dev,
+        key_handle: Option<PublicKeyCredentialDescriptor>,
     ) -> Result<(), AuthenticatorError> {
-        // TODO(MS): Mandatory sanity checks are missing:
-        // https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html#u2f-authenticatorMakeCredential-interoperability
-        // If any of the below conditions is not true, platform errors out with
-        // CTAP2_ERR_UNSUPPORTED_OPTION.
-        //  * pubKeyCredParams must use the ES256 algorithm (-7).
-        //  * Options must not include "rk" set to true.
-        //  * Options must not include "uv" set to true.
-
-        let is_already_registered = self
-            .exclude_list
-            .iter()
-            // key-handles in CTAP1 are limited to 255 bytes, but are not limited in CTAP2.
-            // Filter out key-handles that are too long (can happen if this is a CTAP2-request,
-            // but the token only speaks CTAP1). If none is found, return an error.
-            .filter(|exclude_handle| exclude_handle.id.len() < 256)
-            .map(|exclude_handle| {
-                let check_command = CheckKeyHandle {
-                    key_handle: exclude_handle.id.as_ref(),
-                    client_data_hash: self.client_data_hash.as_ref(),
-                    rp: &self.rp,
-                };
-                let res = dev.send_ctap1(&check_command);
-                res.is_ok()
-            })
-            .any(|x| x);
-
-        if is_already_registered {
+        // That handle was already registered with the token
+        if key_handle.is_some() {
             // Now we need to send a dummy registration request, to make the token blink
             // Spec says "dummy appid and invalid challenge". We use the same, as we do for
             // making the token blink upon device selection.
@@ -322,8 +302,6 @@ impl PreFlightable for MakeCredentials {
             ))
             .into());
         }
-
-        // something
         Ok(())
     }
 }
