@@ -109,7 +109,7 @@ pub(crate) trait PreFlightable: PinUvAuthCommand {
                 let check_command = CheckKeyHandle {
                     key_handle: key_handle.id.as_ref(),
                     client_data_hash: self.get_client_data_hash().as_ref(),
-                    rp: &self.get_rp(),
+                    rp: self.get_rp(),
                 };
                 let res = dev.send_ctap1(&check_command);
                 match res {
