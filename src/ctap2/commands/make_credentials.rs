@@ -20,7 +20,6 @@ use crate::ctap2::server::{
     RelyingPartyWrapper, RpIdHash, User, UserVerificationRequirement,
 };
 use crate::errors::AuthenticatorError;
-use crate::transport::platform::device::Device;
 use crate::transport::{
     errors::{ApduErrorStatus, HIDError},
     FidoDevice,
@@ -233,12 +232,12 @@ impl PinUvAuthCommand for MakeCredentials {
         self.options.user_verification = uv;
     }
 
-    fn get_rp_id(&self) -> Option<&String> {
-        match &self.rp {
-            // CTAP1 case: We only have the hash, not the entire RpID
-            RelyingPartyWrapper::Hash(..) => None,
-            RelyingPartyWrapper::Data(r) => Some(&r.id),
-        }
+    fn get_uv_option(&mut self) -> Option<bool> {
+        self.options.user_verification
+    }
+
+    fn get_rp(&self) -> &RelyingPartyWrapper {
+        &self.rp
     }
 
     fn can_skip_user_verification(
@@ -265,6 +264,10 @@ impl PinUvAuthCommand for MakeCredentials {
         let can_make_cred_without_uv = make_cred_uv_not_required && uv_discouraged;
 
         !always_uv && (!device_protected || can_make_cred_without_uv)
+    }
+
+    fn get_pin_uv_auth_param(&self) -> Option<&PinUvAuthParam> {
+        self.pin_uv_auth_param.as_ref()
     }
 }
 
@@ -323,15 +326,6 @@ impl PreFlightable for MakeCredentials {
         // something
         Ok(())
     }
-
-    fn do_pre_flight_ctap2<Dev: FidoDevice>(
-        &mut self,
-        chunk_size: usize,
-        dev: &mut Dev,
-    ) -> Result<(), AuthenticatorError> {
-        // something
-        Ok(())
-    }
 }
 
 impl Serialize for MakeCredentials {
@@ -384,7 +378,7 @@ impl Serialize for MakeCredentials {
         }
         if let Some(pin_uv_auth_param) = &self.pin_uv_auth_param {
             map.serialize_entry(&0x08, &pin_uv_auth_param)?;
-            map.serialize_entry(&0x09, &pin_uv_auth_param.pin_protocol.id())?;
+            map.serialize_entry(&0x09, &pin_uv_auth_param.pin_auth_token.pin_protocol.id())?;
         }
         if let Some(enterprise_attestation) = self.enterprise_attestation {
             map.serialize_entry(&0x0a, &enterprise_attestation)?;
@@ -399,10 +393,7 @@ impl RequestCtap1 for MakeCredentials {
     type Output = MakeCredentialsResult;
     type AdditionalInfo = ();
 
-    fn ctap1_format<Dev>(&self, dev: &mut Dev) -> Result<(Vec<u8>, ()), HIDError>
-    where
-        Dev: io::Read + io::Write + fmt::Debug + FidoDevice,
-    {
+    fn ctap1_format(&self) -> Result<(Vec<u8>, ()), HIDError> {
         let flags = U2F_REQUEST_USER_PRESENCE;
 
         let mut register_data = Vec::with_capacity(2 * PARAMETER_SIZE);
@@ -440,10 +431,7 @@ impl RequestCtap2 for MakeCredentials {
         Command::MakeCredentials
     }
 
-    fn wire_format<Dev>(&self, _dev: &mut Dev) -> Result<Vec<u8>, HIDError>
-    where
-        Dev: U2FDevice + io::Read + io::Write + fmt::Debug,
-    {
+    fn wire_format(&self) -> Result<Vec<u8>, HIDError> {
         Ok(ser::to_vec(&self).map_err(CommandError::Serializing)?)
     }
 
@@ -667,7 +655,7 @@ pub mod test {
 
         let mut device = Device::new("commands/make_credentials").unwrap(); // not really used (all functions ignore it)
         let req_serialized = req
-            .wire_format(&mut device)
+            .wire_format()
             .expect("Failed to serialize MakeCredentials request");
         assert_eq!(req_serialized, MAKE_CREDENTIALS_SAMPLE_REQUEST_CTAP2);
         let attestation_object = req
@@ -723,9 +711,8 @@ pub mod test {
             None,
         );
 
-        let mut device = Device::new("commands/make_credentials").unwrap(); // not really used (all functions ignore it)
         let (req_serialized, _) = req
-            .ctap1_format(&mut device)
+            .ctap1_format()
             .expect("Failed to serialize MakeCredentials request");
         assert_eq!(
             req_serialized, MAKE_CREDENTIALS_SAMPLE_REQUEST_CTAP1,

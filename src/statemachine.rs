@@ -281,7 +281,7 @@ impl StateMachine {
             if !skip_uv && supports_uv {
                 // CTAP 2.1 - UV
                 let pin_auth_token = dev
-                    .get_pin_uv_auth_token_using_uv_with_permissions(permission, cmd.get_rp_id());
+                    .get_pin_uv_auth_token_using_uv_with_permissions(permission, cmd.get_rp().id());
                 (
                     PinUvAuthResult::SuccessGetPinUvAuthTokenUsingUvWithPermissions,
                     pin_auth_token,
@@ -295,7 +295,7 @@ impl StateMachine {
                 let pin_auth_token = dev.get_pin_uv_auth_token_using_pin_with_permissions(
                     cmd.pin(),
                     permission,
-                    cmd.get_rp_id(),
+                    cmd.get_rp().id(),
                 );
                 (
                     PinUvAuthResult::SuccessGetPinUvAuthTokenUsingPinWithPermissions,
@@ -420,50 +420,6 @@ impl StateMachine {
             }
         }
         Err(())
-    }
-
-    fn do_pre_flight<T: PreFlightable + Request<V>, V>(
-        cmd: &mut T,
-        dev: &mut Device,
-    ) -> Result<(), AuthenticatorError> {
-        // If there is max. one entry, we can skip all of this
-        if cmd.get_credential_id_list().len() <= 1 {
-            return Ok(());
-        }
-
-        debug!("------------------------------------------------------------------");
-        debug!("Doing pre-flight");
-        debug!("------------------------------------------------------------------");
-
-        // Step 1: Split the excludeList/allowList according to the capabilities of the token
-        // Step 1.1: Find out how long the exclude_list/allow_list is allowed to be
-        //           If the token doesn't tell us, we assume a length of 1
-        // TODO(MS): Chromium also checks the max_credential_id_length, and if that is 0 also
-        //           falls back to max_list_len = 1, but doesn't give an explanation as to why.
-
-        let max_list_len = match dev.get_authenticator_info() {
-            Some(info) => info.max_credential_count_in_list.unwrap_or(1),
-            None => 1, // U2F/CTAP1 token
-        };
-
-        // Step 1.2: Return early, if we only have one chunk anyways
-        if max_list_len <= 1 {
-            return Ok(());
-        }
-        let original_list = cmd.get_credential_id_list().to_vec();
-        let chunked_list = original_list.chunks(max_list_len);
-
-        // Step 2: If splits are more than one: Loop over all, doing GetAssertion
-        //         and if one of them comes back with a success, use only that batch.
-        cmd.set_credential_id_list(vec![]);
-        for chunk in chunked_list {
-            // TODO: Do stuff, if it comes back 'positive', replace credential_id_list with current chunk
-            cmd.set_credential_id_list(chunk.to_vec());
-        }
-
-        // Step 3: Now ExcludeList/AllowList is either empty or has one batch with a 'bad' credential
-        //         Send it as a normal Request and expect a "CredentialExcluded"
-        Ok(())
     }
 
     pub fn register(
@@ -591,11 +547,16 @@ impl StateMachine {
 
                 let mut skip_uv = false;
                 while alive() {
+                    let mut permissions = PinUvAuthTokenPermission::MakeCredential;
+                    if makecred.needs_pre_flight(&dev) {
+                        permissions |= PinUvAuthTokenPermission::GetAssertion;
+                    }
+
                     let pin_uv_auth_result = match Self::determine_puap_if_needed(
                         &mut makecred,
                         &mut dev,
                         skip_uv,
-                        PinUvAuthTokenPermission::MakeCredential,
+                        permissions,
                         args.user_verification_req,
                         &status,
                         &callback,
@@ -606,6 +567,7 @@ impl StateMachine {
                             break;
                         }
                     };
+
                     match makecred.do_pre_flight(&mut dev) {
                         Ok(()) => { /* Continue with the request */ }
                         Err(e) => {
@@ -840,7 +802,7 @@ impl StateMachine {
                         }
                     }
 
-                    match getassertion.do_pre_flight(&mut dev) {
+                    match get_assertion.do_pre_flight(&mut dev) {
                         Ok(()) => { /* Continue with the request */ }
                         Err(e) => {
                             warn!("error happened: {e}");

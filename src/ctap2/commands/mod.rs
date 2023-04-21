@@ -1,4 +1,5 @@
-use crate::crypto::{CryptoError, PinUvAuthToken};
+use super::server::RelyingPartyWrapper;
+use crate::crypto::{CryptoError, PinUvAuthParam, PinUvAuthToken};
 use crate::ctap2::commands::client_pin::{GetPinRetries, GetUvRetries, Pin, PinError};
 use crate::ctap2::commands::get_info::AuthenticatorInfo;
 use crate::ctap2::server::UserVerificationRequirement;
@@ -61,9 +62,7 @@ pub trait RequestCtap1: fmt::Debug {
     /// Serializes a request into FIDO v1.x / CTAP1 / U2F format.
     ///
     /// See [`crate::u2ftypes::CTAP1RequestAPDU::serialize()`]
-    fn ctap1_format<Dev>(&self, dev: &mut Dev) -> Result<(Vec<u8>, Self::AdditionalInfo), HIDError>
-    where
-        Dev: FidoDevice + Read + Write + fmt::Debug;
+    fn ctap1_format(&self) -> Result<(Vec<u8>, Self::AdditionalInfo), HIDError>;
 
     /// Deserializes a response from FIDO v1.x / CTAP1 / U2Fv2 format.
     fn handle_response_ctap1(
@@ -79,9 +78,7 @@ pub trait RequestCtap2: fmt::Debug {
 
     fn command() -> Command;
 
-    fn wire_format<Dev>(&self, dev: &mut Dev) -> Result<Vec<u8>, HIDError>
-    where
-        Dev: FidoDevice + Read + Write + fmt::Debug;
+    fn wire_format(&self) -> Result<Vec<u8>, HIDError>;
 
     fn handle_response_ctap2<Dev>(
         &self,
@@ -120,8 +117,10 @@ pub(crate) trait PinUvAuthCommand: RequestCtap2 {
         &mut self,
         pin_uv_auth_token: Option<PinUvAuthToken>,
     ) -> Result<(), AuthenticatorError>;
+    fn get_pin_uv_auth_param(&self) -> Option<&PinUvAuthParam>;
     fn set_uv_option(&mut self, uv: Option<bool>);
-    fn get_rp_id(&self) -> Option<&String>;
+    fn get_uv_option(&mut self) -> Option<bool>;
+    fn get_rp(&self) -> &RelyingPartyWrapper;
     fn can_skip_user_verification(
         &mut self,
         info: &AuthenticatorInfo,
