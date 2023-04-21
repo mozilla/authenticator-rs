@@ -1093,7 +1093,13 @@ pub mod test {
                 icon: None,
             }),
             vec![
-                // One we skip
+                // This should never be tested, because it gets pre-filtered, since it is too long
+                // (see max_credential_id_length)
+                PublicKeyCredentialDescriptor {
+                    id: vec![0x10; 100],
+                    transports: vec![Transport::USB],
+                },
+                // One we test and skip
                 PublicKeyCredentialDescriptor {
                     id: vec![
                         0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
@@ -1137,7 +1143,6 @@ pub mod test {
             Default::default(),
             None,
             None,
-            false,
         );
         let mut device = Device::new("commands/get_assertion").unwrap();
         let mut cid = [0u8; 4];
@@ -1167,7 +1172,7 @@ pub mod test {
             max_msg_size: Some(1200),
             pin_protocols: vec![1],
             max_credential_count_in_list: None,
-            max_credential_id_length: None,
+            max_credential_id_length: Some(80),
             transports: None,
             algorithms: None,
             max_ser_large_blob_array: None,
@@ -1209,12 +1214,12 @@ pub mod test {
         msg = cid.to_vec();
         msg.extend([0x0]); //SEQ
         msg.extend([0x40]); // 64)
-        msg.extend(&assertion.allow_list[0].id[..58]);
+        msg.extend(&assertion.allow_list[1].id[..58]);
         device.add_write(&msg, 0);
 
         msg = cid.to_vec();
         msg.extend([0x1]); //SEQ
-        msg.extend(&assertion.allow_list[0].id[58..64]);
+        msg.extend(&assertion.allow_list[1].id[58..64]);
         msg.extend(vec![
             0x64, // text(4),
             0x74, 0x79, 0x70, 0x65, // type
@@ -1264,12 +1269,12 @@ pub mod test {
         msg = cid.to_vec();
         msg.extend([0x0]); //SEQ
         msg.extend([0x40]); // 64)
-        msg.extend(&assertion.allow_list[1].id[..58]);
+        msg.extend(&assertion.allow_list[2].id[..58]);
         device.add_write(&msg, 0);
 
         msg = cid.to_vec();
         msg.extend([0x1]); //SEQ
-        msg.extend(&assertion.allow_list[1].id[58..64]);
+        msg.extend(&assertion.allow_list[2].id[58..64]);
         msg.extend(vec![
             0x64, // text(4),
             0x74, 0x79, 0x70, 0x65, // type
