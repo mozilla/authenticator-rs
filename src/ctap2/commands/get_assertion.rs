@@ -642,9 +642,11 @@ pub mod test {
     use crate::ctap2::client_data::{Challenge, CollectedClientData, TokenBinding, WebauthnType};
     use crate::ctap2::commands::get_assertion::AssertionObject;
     use crate::ctap2::commands::RequestCtap1;
+    use crate::ctap2::preflight::PreFlightable;
     use crate::ctap2::server::{
         PublicKeyCredentialDescriptor, RelyingParty, RelyingPartyWrapper, RpIdHash, Transport, User,
     };
+    use crate::errors::AuthenticatorError;
     use crate::transport::device_selector::Device;
     use crate::transport::hid::HIDDevice;
     use crate::transport::FidoDevice;
@@ -870,7 +872,7 @@ pub mod test {
             ],
             transports: vec![Transport::USB],
         };
-        let assertion = GetAssertion::new(
+        let mut assertion = GetAssertion::new(
             client_data.hash().expect("failed to serialize client data"),
             RelyingPartyWrapper::Data(RelyingParty {
                 id: String::from("example.com"),
@@ -900,18 +902,14 @@ pub mod test {
             U2F_CHECK_IS_REGISTERED,
             SW_CONDITIONS_NOT_SATISFIED,
         );
+        assert_matches!(assertion.do_pre_flight(&mut device), Ok(()));
         let (ctap1_request, key_handle) = assertion.ctap1_format().unwrap();
         // Check if the request is going to be correct
         assert_eq!(ctap1_request, GET_ASSERTION_SAMPLE_REQUEST_CTAP1);
         assert_eq!(key_handle, allowed_key);
 
         // Now do it again, but parse the actual response
-        fill_device_ctap1(
-            &mut device,
-            cid,
-            U2F_CHECK_IS_REGISTERED,
-            SW_CONDITIONS_NOT_SATISFIED,
-        );
+        // Pre-flighting is not done automatically
         fill_device_ctap1(&mut device, cid, U2F_REQUEST_USER_PRESENCE, SW_NO_ERROR);
 
         let response = device.send_ctap1(&assertion).unwrap();
@@ -982,6 +980,13 @@ pub mod test {
         device.set_cid(cid);
 
         assert_matches!(
+            assertion.do_pre_flight(&mut device),
+            Err(AuthenticatorError::HIDError(HIDError::Command(
+                CommandError::StatusCode(StatusCode::NoCredentials, ..)
+            )))
+        );
+        // It should also fail when trying to format
+        assert_matches!(
             assertion.ctap1_format(),
             Err(HIDError::Command(CommandError::StatusCode(
                 StatusCode::NoCredentials,
@@ -994,10 +999,9 @@ pub mod test {
             assertion.allow_list = allow_list;
 
             assert_matches!(
-                assertion.ctap1_format(),
-                Err(HIDError::Command(CommandError::StatusCode(
-                    StatusCode::NoCredentials,
-                    ..
+                assertion.do_pre_flight(&mut device),
+                Err(AuthenticatorError::HIDError(HIDError::Command(
+                    CommandError::StatusCode(StatusCode::NoCredentials, ..)
                 )))
             );
         }
@@ -1027,18 +1031,16 @@ pub mod test {
             U2F_CHECK_IS_REGISTERED,
             SW_CONDITIONS_NOT_SATISFIED,
         );
+        assertion
+            .do_pre_flight(&mut device)
+            .expect("Expected pre-flight to succeed.");
         let (ctap1_request, key_handle) = assertion.ctap1_format().unwrap();
         // Check if the request is going to be correct
         assert_eq!(ctap1_request, GET_ASSERTION_SAMPLE_REQUEST_CTAP1);
         assert_eq!(key_handle, ok_key_handle);
 
         // Now do it again, but parse the actual response
-        fill_device_ctap1(
-            &mut device,
-            cid,
-            U2F_CHECK_IS_REGISTERED,
-            SW_CONDITIONS_NOT_SATISFIED,
-        );
+        // Pre-flighting is not done automatically
         fill_device_ctap1(&mut device, cid, U2F_REQUEST_USER_PRESENCE, SW_NO_ERROR);
 
         let response = device.send_ctap1(&assertion).unwrap();
