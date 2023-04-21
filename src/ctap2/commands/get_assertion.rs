@@ -16,7 +16,6 @@ use crate::ctap2::server::{
 };
 use crate::errors::AuthenticatorError;
 use crate::transport::errors::{ApduErrorStatus, HIDError};
-use crate::transport::platform::device::Device;
 use crate::transport::FidoDevice;
 use crate::u2ftypes::CTAP1RequestAPDU;
 use nom::{
@@ -274,12 +273,12 @@ impl PinUvAuthCommand for GetAssertion {
         self.options.user_verification = uv;
     }
 
-    fn get_rp_id(&self) -> Option<&String> {
-        match &self.rp {
-            // CTAP1 case: We only have the hash, not the entire RpID
-            RelyingPartyWrapper::Hash(..) => None,
-            RelyingPartyWrapper::Data(r) => Some(&r.id),
-        }
+    fn get_uv_option(&mut self) -> Option<bool> {
+        self.options.user_verification
+    }
+
+    fn get_rp(&self) -> &RelyingPartyWrapper {
+        &self.rp
     }
 
     fn can_skip_user_verification(
@@ -294,6 +293,10 @@ impl PinUvAuthCommand for GetAssertion {
         let always_uv = info.options.always_uv == Some(true);
 
         !always_uv && (!device_protected || uv_discouraged)
+    }
+
+    fn get_pin_uv_auth_param(&self) -> Option<&PinUvAuthParam> {
+        self.pin_uv_auth_param.as_ref()
     }
 }
 
@@ -335,15 +338,6 @@ impl PreFlightable for GetAssertion {
             )))?;
 
         self.allow_list = vec![key_handle];
-        Ok(())
-    }
-
-    fn do_pre_flight_ctap2<Dev: FidoDevice>(
-        &mut self,
-        chunk_size: usize,
-        dev: &mut Dev,
-    ) -> Result<(), AuthenticatorError> {
-        // something
         Ok(())
     }
 }
@@ -393,7 +387,7 @@ impl Serialize for GetAssertion {
         }
         if let Some(pin_uv_auth_param) = &self.pin_uv_auth_param {
             map.serialize_entry(&6, &pin_uv_auth_param)?;
-            map.serialize_entry(&7, &pin_uv_auth_param.pin_protocol.id())?;
+            map.serialize_entry(&7, &pin_uv_auth_param.pin_auth_token.pin_protocol.id())?;
         }
         map.end()
     }
@@ -405,10 +399,7 @@ impl RequestCtap1 for GetAssertion {
     type Output = GetAssertionResult;
     type AdditionalInfo = PublicKeyCredentialDescriptor;
 
-    fn ctap1_format<Dev>(&self, dev: &mut Dev) -> Result<(Vec<u8>, Self::AdditionalInfo), HIDError>
-    where
-        Dev: io::Read + io::Write + fmt::Debug + FidoDevice,
-    {
+    fn ctap1_format(&self) -> Result<(Vec<u8>, Self::AdditionalInfo), HIDError> {
         // Pre-flighting should reduce the list to exactly one entry
         let key_handle = match &self.allow_list[..] {
             [key_handle] => key_handle,
@@ -469,10 +460,7 @@ impl RequestCtap2 for GetAssertion {
         Command::GetAssertion
     }
 
-    fn wire_format<Dev>(&self, _dev: &mut Dev) -> Result<Vec<u8>, HIDError>
-    where
-        Dev: FidoDevice + io::Read + io::Write + fmt::Debug,
-    {
+    fn wire_format(&self) -> Result<Vec<u8>, HIDError> {
         Ok(ser::to_vec(&self).map_err(CommandError::Serializing)?)
     }
 
@@ -920,7 +908,7 @@ pub mod test {
             U2F_CHECK_IS_REGISTERED,
             SW_CONDITIONS_NOT_SATISFIED,
         );
-        let (ctap1_request, key_handle) = assertion.ctap1_format(&mut device).unwrap();
+        let (ctap1_request, key_handle) = assertion.ctap1_format().unwrap();
         // Check if the request is going to be correct
         assert_eq!(ctap1_request, GET_ASSERTION_SAMPLE_REQUEST_CTAP1);
         assert_eq!(key_handle, allowed_key);
@@ -1002,7 +990,7 @@ pub mod test {
         device.set_cid(cid);
 
         assert_matches!(
-            assertion.ctap1_format(&mut device),
+            assertion.ctap1_format(),
             Err(HIDError::Command(CommandError::StatusCode(
                 StatusCode::NoCredentials,
                 ..
@@ -1014,7 +1002,7 @@ pub mod test {
             assertion.allow_list = allow_list;
 
             assert_matches!(
-                assertion.ctap1_format(&mut device),
+                assertion.ctap1_format(),
                 Err(HIDError::Command(CommandError::StatusCode(
                     StatusCode::NoCredentials,
                     ..
@@ -1047,7 +1035,7 @@ pub mod test {
             U2F_CHECK_IS_REGISTERED,
             SW_CONDITIONS_NOT_SATISFIED,
         );
-        let (ctap1_request, key_handle) = assertion.ctap1_format(&mut device).unwrap();
+        let (ctap1_request, key_handle) = assertion.ctap1_format().unwrap();
         // Check if the request is going to be correct
         assert_eq!(ctap1_request, GET_ASSERTION_SAMPLE_REQUEST_CTAP1);
         assert_eq!(key_handle, ok_key_handle);

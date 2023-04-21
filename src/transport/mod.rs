@@ -114,7 +114,7 @@ pub trait FidoDevice: HIDDevice {
     ) -> Result<Req::Output, HIDError> {
         debug!("sending {:?} to {:?}", msg, self);
 
-        let mut data = msg.wire_format(self)?;
+        let mut data = msg.wire_format()?;
         let mut buf: Vec<u8> = Vec::with_capacity(data.len() + 1);
         // CTAP2 command
         buf.push(Req::command() as u8);
@@ -142,7 +142,7 @@ pub trait FidoDevice: HIDDevice {
         keep_alive: &dyn Fn() -> bool,
     ) -> Result<Req::Output, HIDError> {
         debug!("sending {:?} to {:?}", msg, self);
-        let (data, add_info) = msg.ctap1_format(self)?;
+        let (data, add_info) = msg.ctap1_format()?;
 
         while keep_alive() {
             // sendrecv will not block with a CTAP1 device

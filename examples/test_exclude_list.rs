@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use authenticator::{
-    authenticatorservice::{AuthenticatorService, RegisterArgs},
+    authenticatorservice::{AuthenticatorService, GetAssertionExtensions, RegisterArgs, SignArgs},
     ctap2::commands::StatusCode,
     ctap2::server::{
         PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty,
@@ -11,7 +11,7 @@ use authenticator::{
     },
     errors::{AuthenticatorError, CommandError, HIDError},
     statecallback::StateCallback,
-    COSEAlgorithm, Pin, RegisterResult, StatusPinUv, StatusUpdate,
+    COSEAlgorithm, Pin, RegisterResult, SignResult, StatusPinUv, StatusUpdate,
 };
 
 use getopts::Options;
@@ -153,7 +153,7 @@ fn main() {
             name: None,
             icon: None,
         },
-        origin,
+        origin: origin.clone(),
         user,
         pub_cred_params: vec![
             PublicKeyCredentialParameters {
@@ -171,6 +171,7 @@ fn main() {
         use_ctap1_fallback: false,
     };
 
+    let mut registered_key_handle = None;
     loop {
         let (register_tx, register_rx) = channel();
         let callback = StateCallback::new(Box::new(move |rv| {
@@ -190,12 +191,13 @@ fn main() {
             Ok(RegisterResult::CTAP2(a)) => {
                 println!("Ok!");
                 println!("Registering again with the key_handle we just got back. This should result in a 'already registered' error.");
-                let registered_key_handle =
-                    a.auth_data.credential_data.unwrap().credential_id.clone();
-                ctap_args.exclude_list = vec![PublicKeyCredentialDescriptor {
-                    id: registered_key_handle.clone(),
+                let key_handle = a.auth_data.credential_data.unwrap().credential_id.clone();
+                let pub_key = PublicKeyCredentialDescriptor {
+                    id: key_handle,
                     transports: vec![Transport::USB],
-                }];
+                };
+                ctap_args.exclude_list = vec![pub_key.clone()];
+                registered_key_handle = Some(pub_key);
                 continue;
             }
             Err(AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
@@ -217,6 +219,67 @@ fn main() {
                     });
                 }
                 ctap_args.exclude_list.push(registered_handle);
+                continue;
+            }
+            Err(e) => panic!("Registration failed: {:?}", e),
+        };
+    }
+
+    // Signing
+    let mut ctap_args = SignArgs {
+        client_data_hash: chall_bytes,
+        origin,
+        relying_party_id: "example.com".to_string(),
+        allow_list: vec![],
+        extensions: GetAssertionExtensions::default(),
+        pin: None,
+        alternate_rp_id: None,
+        use_ctap1_fallback: false,
+        user_verification_req: UserVerificationRequirement::Preferred,
+        user_presence_req: true,
+    };
+
+    loop {
+        let (sign_tx, sign_rx) = channel();
+        let callback = StateCallback::new(Box::new(move |rv| {
+            sign_tx.send(rv).unwrap();
+        }));
+
+        if let Err(e) = manager.sign(timeout_ms, ctap_args.clone(), status_tx.clone(), callback) {
+            panic!("Couldn't sign: {:?}", e);
+        };
+
+        let sign_result = sign_rx
+            .recv()
+            .expect("Problem receiving, unable to continue");
+        match sign_result {
+            Ok(SignResult::CTAP1(..)) => panic!("Requested CTAP2, but got CTAP1 results!"),
+            Ok(SignResult::CTAP2(..)) => {
+                println!("Successfully signed!");
+                if ctap_args.allow_list.len() > 1 {
+                    println!("Quitting.");
+                    break;
+                }
+                println!("Signing again with a long allow_list that needs pre-flighting.");
+                let registered_handle = registered_key_handle.as_ref().unwrap().clone();
+                ctap_args.allow_list = vec![];
+                for ii in 0..10 {
+                    ctap_args.allow_list.push(PublicKeyCredentialDescriptor {
+                        id: vec![ii; 50],
+                        transports: vec![Transport::USB],
+                    });
+                }
+                ctap_args.allow_list.push(registered_handle);
+                continue;
+            }
+            Err(AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
+                StatusCode::NoCredentials,
+                None,
+            )))) => {
+                println!("Got an 'no credentials' error, as expected with an empty allow-list.");
+                println!("Extending the list to contain one valid handle.");
+                let registered_handle = registered_key_handle.as_ref().unwrap().clone();
+                ctap_args.allow_list = vec![registered_handle];
                 continue;
             }
             Err(e) => panic!("Registration failed: {:?}", e),
