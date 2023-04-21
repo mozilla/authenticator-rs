@@ -78,6 +78,16 @@ pub(crate) trait PreFlightable: PinUvAuthCommand {
 
         match dev.get_authenticator_info() {
             Some(info) => {
+                if let Some(max_key_length) = info.max_credential_id_length {
+                    // The device only supports keys up to a certain length.
+                    // Filter out all keys that are longer, because they can't be
+                    // from this device anyways.
+                    if max_key_length > 0 {
+                        let mut list = self.get_credential_id_list().to_vec();
+                        list.retain(|k| k.id.len() <= max_key_length);
+                        self.set_credential_id_list(list);
+                    }
+                }
                 // Step 1.1: Find out how long the exclude_list/allow_list is allowed to be
                 //           If the token doesn't tell us, we assume a length of 1
                 // TODO(MS): Chromium also checks the max_credential_id_length, and if that is 0 also
