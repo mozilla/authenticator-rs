@@ -10,7 +10,7 @@ use crate::ctap2::client_data::ClientDataHash;
 use crate::ctap2::commands::client_pin::Pin;
 use crate::ctap2::commands::get_next_assertion::GetNextAssertion;
 use crate::ctap2::commands::make_credentials::UserVerification;
-use crate::ctap2::preflight::{CheckKeyHandle, PreFlightable};
+use crate::ctap2::preflight::PreFlightable;
 use crate::ctap2::server::{
     PublicKeyCredentialDescriptor, RelyingPartyWrapper, RpIdHash, User, UserVerificationRequirement,
 };
@@ -301,6 +301,10 @@ impl PinUvAuthCommand for GetAssertion {
 }
 
 impl PreFlightable for GetAssertion {
+    fn get_client_data_hash(&self) -> &ClientDataHash {
+        &self.client_data_hash
+    }
+
     fn get_credential_id_list(&self) -> &[PublicKeyCredentialDescriptor] {
         &self.allow_list
     }
@@ -309,36 +313,24 @@ impl PreFlightable for GetAssertion {
         self.allow_list = list;
     }
 
-    fn do_pre_flight_ctap1<Dev: FidoDevice>(
+    fn handle_ctap1_pre_flight_key<Dev: FidoDevice>(
         &mut self,
-        dev: &mut Dev,
+        _dev: &mut Dev,
+        key_handle: Option<PublicKeyCredentialDescriptor>,
     ) -> Result<(), AuthenticatorError> {
-        let key_handle = self
-            .allow_list
-            .iter()
-            // key-handles in CTAP1 are limited to 255 bytes, but are not limited in CTAP2.
-            // Filter out key-handles that are too long (can happen if this is a CTAP2-request,
-            // but the token only speaks CTAP1). If none is found, return an error.
-            .filter(|allowed_handle| allowed_handle.id.len() < 256)
-            .find_map(|allowed_handle| {
-                let check_command = CheckKeyHandle {
-                    key_handle: allowed_handle.id.as_ref(),
-                    client_data_hash: self.client_data_hash.as_ref(),
-                    rp: &self.rp,
-                };
-                let res = dev.send_ctap1(&check_command);
-                match res {
-                    Ok(_) => Some(allowed_handle.clone()),
-                    _ => None,
-                }
-            })
-            .ok_or(HIDError::Command(CommandError::StatusCode(
-                StatusCode::NoCredentials,
-                None,
-            )))?;
-
-        self.allow_list = vec![key_handle];
-        Ok(())
+        match key_handle {
+            Some(key_handle) => {
+                self.allow_list = vec![key_handle];
+                Ok(())
+            }
+            None => {
+                self.allow_list.clear();
+                Err(
+                    HIDError::Command(CommandError::StatusCode(StatusCode::NoCredentials, None))
+                        .into(),
+                )
+            }
+        }
     }
 }
 

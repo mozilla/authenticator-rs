@@ -64,6 +64,7 @@ impl<'assertion> RequestCtap1 for CheckKeyHandle<'assertion> {
 }
 
 pub(crate) trait PreFlightable: PinUvAuthCommand {
+    fn get_client_data_hash(&self) -> &ClientDataHash;
     fn get_credential_id_list(&self) -> &[PublicKeyCredentialDescriptor];
     fn set_credential_id_list(&mut self, list: Vec<PublicKeyCredentialDescriptor>);
     /// "pre-flight": In order to determine whether authenticatorMakeCredential's excludeList or
@@ -87,10 +88,37 @@ pub(crate) trait PreFlightable: PinUvAuthCommand {
         }
     }
 
+    fn handle_ctap1_pre_flight_key<Dev: FidoDevice>(
+        &mut self,
+        dev: &mut Dev,
+        key_handle: Option<PublicKeyCredentialDescriptor>,
+    ) -> Result<(), AuthenticatorError>;
+
     fn do_pre_flight_ctap1<Dev: FidoDevice>(
         &mut self,
         dev: &mut Dev,
-    ) -> Result<(), AuthenticatorError>;
+    ) -> Result<(), AuthenticatorError> {
+        let key_handle = self
+            .get_credential_id_list()
+            .iter()
+            // key-handles in CTAP1 are limited to 255 bytes, but are not limited in CTAP2.
+            // Filter out key-handles that are too long (can happen if this is a CTAP2-request,
+            // but the token only speaks CTAP1).
+            .filter(|key_handle| key_handle.id.len() < 256)
+            .find_map(|key_handle| {
+                let check_command = CheckKeyHandle {
+                    key_handle: key_handle.id.as_ref(),
+                    client_data_hash: self.get_client_data_hash().as_ref(),
+                    rp: &self.get_rp(),
+                };
+                let res = dev.send_ctap1(&check_command);
+                match res {
+                    Ok(_) => Some(key_handle.clone()),
+                    _ => None,
+                }
+            });
+        self.handle_ctap1_pre_flight_key(dev, key_handle)
+    }
 
     fn do_pre_flight_ctap2<Dev: FidoDevice>(
         &mut self,
