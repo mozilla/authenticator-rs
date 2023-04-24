@@ -146,7 +146,7 @@ impl AuthenticatorTransport for Manager {
             args.pin,
             args.use_ctap1_fallback,
             // pin_auth will be filled in Statemachine, once we have a device
-        )?;
+        );
 
         let action = QueueAction::Register {
             timeout,

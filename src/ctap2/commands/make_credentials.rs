@@ -189,8 +189,8 @@ impl MakeCredentials {
         extensions: MakeCredentialsExtensions,
         pin: Option<Pin>,
         use_ctap1_fallback: bool,
-    ) -> Result<Self, HIDError> {
-        Ok(Self {
+    ) -> Self {
+        Self {
             client_data_hash,
             rp,
             user,
@@ -202,7 +202,7 @@ impl MakeCredentials {
             pin_uv_auth_param: None,
             enterprise_attestation: None,
             use_ctap1_fallback,
-        })
+        }
     }
 }
 
@@ -469,7 +469,7 @@ impl RequestCtap2 for MakeCredentials {
 }
 
 pub(crate) fn dummy_make_credentials_cmd() -> Result<MakeCredentials, HIDError> {
-    MakeCredentials::new(
+    let mut req = MakeCredentials::new(
         CollectedClientData {
             webauthn_type: WebauthnType::Create,
             challenge: Challenge::new(vec![0, 1, 2, 3, 4]),
@@ -496,7 +496,12 @@ pub(crate) fn dummy_make_credentials_cmd() -> Result<MakeCredentials, HIDError> 
         MakeCredentialsExtensions::default(),
         None,
         false,
-    )
+    );
+    // Using a zero-length pinAuth will trigger the device to blink.
+    // For CTAP1, this gets ignored anyways and we do a 'normal' register
+    // command, which also just blinks.
+    req.pin_uv_auth_param = Some(PinUvAuthParam::create_empty());
+    Ok(req)
 }
 
 #[cfg(test)]
@@ -649,8 +654,7 @@ pub mod test {
             Default::default(),
             None,
             false,
-        )
-        .expect("Failed to create MakeCredentials");
+        );
 
         let mut device = Device::new("commands/make_credentials").unwrap(); // not really used (all functions ignore it)
         let req_serialized = req
@@ -709,8 +713,7 @@ pub mod test {
             Default::default(),
             None,
             false,
-        )
-        .expect("Failed to create MakeCredentials");
+        );
 
         let mut device = Device::new("commands/make_credentials").unwrap(); // not really used (all functions ignore it)
         let (req_serialized, _) = req
