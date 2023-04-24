@@ -4,6 +4,7 @@
 
 use crate::authenticatorservice::{RegisterArgs, SignArgs};
 use crate::consts::PARAMETER_SIZE;
+use crate::crypto::COSEAlgorithm;
 use crate::ctap2::client_data::ClientDataHash;
 use crate::ctap2::commands::client_pin::{
     ChangeExistingPin, Pin, PinError, PinUvAuthTokenPermission, SetNewPin,
@@ -441,33 +442,60 @@ impl StateMachine {
 
                 info!("Device {:?} continues with the register process", dev.id());
 
-                // First check if extensions have been requested that are not supported by the device
-                if let Some(true) = args.extensions.hmac_secret {
-                    if let Some(auth) = dev.get_authenticator_info() {
-                        if !auth.supports_hmac_secret() {
+                // We need a copy of the arguments for this device
+                let args = args.clone();
+
+                let mut options = MakeCredentialsOptions::default();
+
+                if let Some(info) = dev.get_authenticator_info() {
+                    // Check if extensions have been requested that are not supported by the device
+                    if let Some(true) = args.extensions.hmac_secret {
+                        if !info.supports_hmac_secret() {
                             callback.call(Err(AuthenticatorError::UnsupportedOption(
                                 UnsupportedOption::HmacSecret,
                             )));
                             return;
                         }
                     }
+
+                    // Set options based on the arguments and the device info.
+                    // The user verification option will be set in `determine_puap_if_needed`.
+                    options.resident_key = match args.resident_key_req {
+                        ResidentKeyRequirement::Required => Some(true),
+                        ResidentKeyRequirement::Preferred => {
+                            // Use a resident key if the authenticator supports it
+                            Some(info.options.resident_key)
+                        }
+                        ResidentKeyRequirement::Discouraged => Some(false),
+                    }
+                } else {
+                    // Check that the request can be processed by a CTAP1 device.
+                    // See CTAP 2.1 Section 10.2. Some additional checks are performed in
+                    // MakeCredentials::RequestCtap1
+                    if args.resident_key_req == ResidentKeyRequirement::Required {
+                        callback.call(Err(AuthenticatorError::UnsupportedOption(
+                            UnsupportedOption::ResidentKey,
+                        )));
+                        return;
+                    }
+                    if args.user_verification_req == UserVerificationRequirement::Required {
+                        callback.call(Err(AuthenticatorError::UnsupportedOption(
+                            UnsupportedOption::UserVerification,
+                        )));
+                        return;
+                    }
+                    if !args
+                        .pub_cred_params
+                        .iter()
+                        .any(|x| x.alg == COSEAlgorithm::ES256)
+                    {
+                        callback.call(Err(AuthenticatorError::UnsupportedOption(
+                            UnsupportedOption::PubCredParams,
+                        )));
+                        return;
+                    }
                 }
 
-                // We need a local copy of the arguments so that the MakeCredentials request for
-                // this device can take ownership of some values
-                let args = args.clone();
-
-                let mut options = MakeCredentialsOptions::default();
-                match args.resident_key_req {
-                    ResidentKeyRequirement::Required => options.resident_key = Some(true),
-                    ResidentKeyRequirement::Preferred => options.resident_key = None,
-                    ResidentKeyRequirement::Discouraged => options.resident_key = Some(false),
-                }
-                match args.user_verification_req {
-                    UserVerificationRequirement::Required => options.user_verification = Some(true),
-                    UserVerificationRequirement::Preferred => options.user_verification = None,
-                    UserVerificationRequirement::Discouraged => options.user_verification = Some(false),
-                }
                 let mut makecred = MakeCredentials::new(
                     ClientDataHash(args.client_data_hash),
                     RelyingPartyWrapper::Data(args.relying_party),
@@ -638,29 +666,34 @@ impl StateMachine {
 
                 info!("Device {:?} continues with the signing process", dev.id());
 
-                // First check if extensions have been requested that are not supported by the device
-                if args.extensions.hmac_secret.is_some() {
-                    if let Some(auth) = dev.get_authenticator_info() {
-                        if !auth.supports_hmac_secret() {
-                            callback.call(Err(AuthenticatorError::UnsupportedOption(
-                                UnsupportedOption::HmacSecret,
-                            )));
-                            return;
-                        }
-                    }
-                }
-
-                // We need a local copy of the arguments so that the GetAssertion request for this
-                // device can take ownership of some values
+                // We need a copy of the arguments for this device
                 let args = args.clone();
 
-                let mut options = GetAssertionOptions::default();
-                match args.user_verification_req {
-                    UserVerificationRequirement::Required => options.user_verification = Some(true),
-                    UserVerificationRequirement::Preferred => options.user_verification = None,
-                    UserVerificationRequirement::Discouraged => options.user_verification = Some(false),
+                if let Some(info) = dev.get_authenticator_info() {
+                    // Check if extensions have been requested that are not supported by the device
+                    if args.extensions.hmac_secret.is_some() && !info.supports_hmac_secret() {
+                        callback.call(Err(AuthenticatorError::UnsupportedOption(
+                            UnsupportedOption::HmacSecret,
+                        )));
+                        return;
+                    }
+                } else {
+                    // Check that the request can be processed by a CTAP1 device.
+                    // See CTAP 2.1 Section 10.3. Some additional checks are performed in
+                    // GetAssertion::RequestCtap1
+                    if args.user_verification_req == UserVerificationRequirement::Required {
+                        callback.call(Err(AuthenticatorError::UnsupportedOption(
+                            UnsupportedOption::UserVerification,
+                        )));
+                        return;
+                    }
+                    if args.allow_list.is_empty() {
+                        callback.call(Err(AuthenticatorError::UnsupportedOption(
+                            UnsupportedOption::AllowList,
+                        )));
+                        return;
+                    }
                 }
-                options.user_presence = Some(args.user_presence_req);
 
                 let mut getassertion = GetAssertion::new(
                     ClientDataHash(args.client_data_hash),
@@ -670,7 +703,10 @@ impl StateMachine {
                         icon: None,
                     }),
                     args.allow_list,
-                    options,
+                    GetAssertionOptions {
+                        user_presence: Some(args.user_presence_req),
+                        user_verification: None,
+                    },
                     args.extensions,
                     args.pin,
                     args.alternate_rp_id,
