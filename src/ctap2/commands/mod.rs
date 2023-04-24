@@ -2,6 +2,7 @@ use crate::crypto::{CryptoError, PinUvAuthToken};
 
 use crate::ctap2::commands::client_pin::{GetPinRetries, GetUvRetries, Pin, PinError};
 use crate::ctap2::commands::get_info::AuthenticatorInfo;
+use crate::ctap2::server::UserVerificationRequirement;
 use crate::errors::AuthenticatorError;
 use crate::transport::errors::{ApduErrorStatus, HIDError};
 use crate::transport::FidoDevice;
@@ -123,7 +124,11 @@ pub(crate) trait PinUvAuthCommand: RequestCtap2 {
     fn set_uv_option(&mut self, uv: Option<bool>);
     fn get_uv_option(&mut self) -> Option<bool>;
     fn get_rp_id(&self) -> Option<&String>;
-    fn can_skip_user_verification(&mut self, info: &AuthenticatorInfo) -> bool;
+    fn can_skip_user_verification(
+        &mut self,
+        info: &AuthenticatorInfo,
+        uv_req: UserVerificationRequirement,
+    ) -> bool;
 }
 
 pub(crate) fn repackage_pin_errors<D: FidoDevice>(

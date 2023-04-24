@@ -12,7 +12,9 @@ use crate::ctap2::client_data::ClientDataHash;
 use crate::ctap2::commands::client_pin::Pin;
 use crate::ctap2::commands::get_next_assertion::GetNextAssertion;
 use crate::ctap2::commands::make_credentials::UserVerification;
-use crate::ctap2::server::{PublicKeyCredentialDescriptor, RelyingPartyWrapper, RpIdHash, User};
+use crate::ctap2::server::{
+    PublicKeyCredentialDescriptor, RelyingPartyWrapper, RpIdHash, User, UserVerificationRequirement,
+};
 use crate::errors::AuthenticatorError;
 use crate::transport::errors::{ApduErrorStatus, HIDError};
 use crate::transport::FidoDevice;
@@ -284,11 +286,15 @@ impl PinUvAuthCommand for GetAssertion {
         }
     }
 
-    fn can_skip_user_verification(&mut self, info: &AuthenticatorInfo) -> bool {
+    fn can_skip_user_verification(
+        &mut self,
+        info: &AuthenticatorInfo,
+        uv_req: UserVerificationRequirement,
+    ) -> bool {
         let supports_uv = info.options.user_verification == Some(true);
         let pin_configured = info.options.client_pin == Some(true);
         let device_protected = supports_uv || pin_configured;
-        let uv_preferred_or_required = self.get_uv_option() != Some(false);
+        let uv_preferred_or_required = uv_req != UserVerificationRequirement::Discouraged;
         let always_uv = info.options.always_uv == Some(true);
 
         if always_uv || (device_protected && uv_preferred_or_required) {

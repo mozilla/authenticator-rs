@@ -17,7 +17,7 @@ use crate::ctap2::commands::client_pin::Pin;
 use crate::ctap2::commands::get_assertion::CheckKeyHandle;
 use crate::ctap2::server::{
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty,
-    RelyingPartyWrapper, RpIdHash, User,
+    RelyingPartyWrapper, RpIdHash, User, UserVerificationRequirement,
 };
 use crate::errors::AuthenticatorError;
 use crate::transport::{
@@ -244,7 +244,11 @@ impl PinUvAuthCommand for MakeCredentials {
         }
     }
 
-    fn can_skip_user_verification(&mut self, info: &AuthenticatorInfo) -> bool {
+    fn can_skip_user_verification(
+        &mut self,
+        info: &AuthenticatorInfo,
+        uv_req: UserVerificationRequirement,
+    ) -> bool {
         // TODO(MS): Handle here the case where we NEED a UV, the device supports PINs, but hasn't set a PIN.
         //           For this, the user has to be prompted to set a PIN first (see https://github.com/mozilla/authenticator-rs/issues/223)
 
@@ -257,7 +261,7 @@ impl PinUvAuthCommand for MakeCredentials {
         // For CTAP2.0, UV is always required when doing MakeCredential
         let always_uv = info.options.always_uv == Some(true)
             || info.max_supported_version() == AuthenticatorVersion::FIDO_2_0;
-        let uv_discouraged = self.get_uv_option() == Some(false);
+        let uv_discouraged = uv_req == UserVerificationRequirement::Discouraged;
 
         // CTAP 2.1 authenticators can allow MakeCredential without PinUvAuth,
         // but that is only relevant, if RP also discourages UV.
@@ -350,14 +354,6 @@ impl RequestCtap1 for MakeCredentials {
     where
         Dev: io::Read + io::Write + fmt::Debug + FidoDevice,
     {
-        // TODO(MS): Mandatory sanity checks are missing:
-        // https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html#u2f-authenticatorMakeCredential-interoperability
-        // If any of the below conditions is not true, platform errors out with
-        // CTAP2_ERR_UNSUPPORTED_OPTION.
-        //  * pubKeyCredParams must use the ES256 algorithm (-7).
-        //  * Options must not include "rk" set to true.
-        //  * Options must not include "uv" set to true.
-
         let is_already_registered = self
             .exclude_list
             .iter()
