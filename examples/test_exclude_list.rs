@@ -3,12 +3,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use authenticator::{
-    authenticatorservice::{
-        AuthenticatorService, MakeCredentialsOptions, RegisterArgs,
-    },
+    authenticatorservice::{AuthenticatorService, RegisterArgs},
     ctap2::commands::StatusCode,
     ctap2::server::{
-        PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, Transport, User,
+        PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty,
+        ResidentKeyRequirement, Transport, User, UserVerificationRequirement,
     },
     errors::{AuthenticatorError, CommandError, HIDError},
     statecallback::StateCallback,
@@ -48,8 +47,8 @@ fn main() {
         return;
     }
 
-    let mut manager = AuthenticatorService::new()
-        .expect("The auth service should initialize safely");
+    let mut manager =
+        AuthenticatorService::new().expect("The auth service should initialize safely");
 
     manager.add_u2f_usb_hid_platform_transports();
 
@@ -74,9 +73,6 @@ fn main() {
     let mut challenge = Sha256::new();
     challenge.update(challenge_str.as_bytes());
     let chall_bytes = challenge.finalize().into();
-
-    // TODO(MS): Needs to be added to RegisterArgsCtap2
-    // let flags = RegisterFlags::empty();
 
     let (status_tx, status_rx) = channel::<StatusUpdate>();
     thread::spawn(move || loop {
@@ -168,10 +164,8 @@ fn main() {
             },
         ],
         exclude_list: vec![],
-        options: MakeCredentialsOptions {
-            resident_key: None,
-            user_verification: None,
-        },
+        user_verification_req: UserVerificationRequirement::Preferred,
+        resident_key_req: ResidentKeyRequirement::Discouraged,
         extensions: Default::default(),
         pin: None,
         use_ctap1_fallback: false,
@@ -183,12 +177,8 @@ fn main() {
             register_tx.send(rv).unwrap();
         }));
 
-        if let Err(e) = manager.register(
-            timeout_ms,
-            ctap_args.clone(),
-            status_tx.clone(),
-            callback,
-        ) {
+        if let Err(e) = manager.register(timeout_ms, ctap_args.clone(), status_tx.clone(), callback)
+        {
             panic!("Couldn't register: {:?}", e);
         };
 

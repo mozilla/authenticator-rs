@@ -2,19 +2,25 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+use crate::authenticatorservice::{RegisterArgs, SignArgs};
 use crate::consts::PARAMETER_SIZE;
 use crate::ctap2::client_data::ClientDataHash;
 use crate::ctap2::commands::client_pin::{
     ChangeExistingPin, Pin, PinError, PinUvAuthTokenPermission, SetNewPin,
 };
-use crate::ctap2::commands::get_assertion::{GetAssertion, GetAssertionResult};
-use crate::ctap2::commands::make_credentials::{MakeCredentials, MakeCredentialsResult};
+use crate::ctap2::commands::get_assertion::{
+    GetAssertion, GetAssertionOptions, GetAssertionResult,
+};
+use crate::ctap2::commands::make_credentials::{
+    MakeCredentials, MakeCredentialsOptions, MakeCredentialsResult,
+};
 use crate::ctap2::commands::reset::Reset;
 use crate::ctap2::commands::{
     repackage_pin_errors, CommandError, PinUvAuthCommand, PinUvAuthResult, Request, StatusCode,
 };
 use crate::ctap2::server::{
-    PublicKeyCredentialDescriptor, RelyingParty, RelyingPartyWrapper, RpIdHash,
+    PublicKeyCredentialDescriptor, RelyingParty, RelyingPartyWrapper, ResidentKeyRequirement,
+    RpIdHash, UserVerificationRequirement,
 };
 use crate::errors::{self, AuthenticatorError, UnsupportedOption};
 use crate::statecallback::StateCallback;
@@ -378,21 +384,23 @@ impl StateMachine {
     pub fn register(
         &mut self,
         timeout: u64,
-        params: MakeCredentials,
+        args: RegisterArgs,
         status: Sender<crate::StatusUpdate>,
         callback: StateCallback<crate::Result<crate::RegisterResult>>,
     ) {
-        if params.use_ctap1_fallback {
+        if args.use_ctap1_fallback {
             /* Firefox uses this when security.webauthn.ctap2 is false. */
             let mut flags = RegisterFlags::empty();
-            if params.options.resident_key == Some(true) {
+            if args.resident_key_req == ResidentKeyRequirement::Required {
                 flags |= RegisterFlags::REQUIRE_RESIDENT_KEY;
             }
-            if params.options.user_verification == Some(true) {
+            if args.user_verification_req == UserVerificationRequirement::Required {
                 flags |= RegisterFlags::REQUIRE_USER_VERIFICATION;
             }
-            let application = params.rp.hash().0.to_vec();
-            let key_handles = params
+
+            let rp = RelyingPartyWrapper::Data(args.relying_party);
+            let application = rp.hash().as_ref().to_vec();
+            let key_handles = args
                 .exclude_list
                 .iter()
                 .map(|cred_desc| KeyHandle {
@@ -400,7 +408,7 @@ impl StateMachine {
                     transports: AuthenticatorTransports::empty(),
                 })
                 .collect();
-            let challenge = params.client_data_hash;
+            let challenge = ClientDataHash(args.client_data_hash);
 
             self.legacy_register(
                 flags,
@@ -430,23 +438,9 @@ impl StateMachine {
                 };
 
                 info!("Device {:?} continues with the register process", dev.id());
-                // TODO(baloo): not sure about this, have to ask
-                // We currently support none of the authenticator selection
-                // criteria because we can't ask tokens whether they do support
-                // those features. If flags are set, ignore all tokens for now.
-                //
-                // Technically, this is a ConstraintError because we shouldn't talk
-                // to this authenticator in the first place. But the result is the
-                // same anyway.
-                //if !flags.is_empty() {
-                //    return;
-                //}
 
-                // TODO(MS): This is wasteful, but the current setup with read only-functions doesn't allow me
-                //           to modify "params" directly.
-                let mut makecred = params.clone();
                 // First check if extensions have been requested that are not supported by the device
-                if let Some(true) = params.extensions.hmac_secret {
+                if let Some(true) = args.extensions.hmac_secret {
                     if let Some(auth) = dev.get_authenticator_info() {
                         if !auth.supports_hmac_secret() {
                             callback.call(Err(AuthenticatorError::UnsupportedOption(
@@ -456,6 +450,32 @@ impl StateMachine {
                         }
                     }
                 }
+
+                // We need a local copy of the arguments so that the MakeCredentials request for
+                // this device can take ownership of some values
+                let args = args.clone();
+
+                let mut options = MakeCredentialsOptions::default();
+                match args.resident_key_req {
+                    ResidentKeyRequirement::Required => options.resident_key = Some(true),
+                    ResidentKeyRequirement::Preferred => options.resident_key = None,
+                    ResidentKeyRequirement::Discouraged => options.resident_key = Some(false),
+                }
+                match args.user_verification_req {
+                    UserVerificationRequirement::Required => options.user_verification = Some(true),
+                    UserVerificationRequirement::Preferred => options.user_verification = None,
+                    UserVerificationRequirement::Discouraged => options.user_verification = Some(false),
+                }
+                let mut makecred = MakeCredentials::new(
+                    ClientDataHash(args.client_data_hash),
+                    RelyingPartyWrapper::Data(args.relying_party),
+                    Some(args.user),
+                    args.pub_cred_params,
+                    args.exclude_list,
+                    options,
+                    args.extensions,
+                    args.pin,
+                );
 
                 let mut skip_uv = false;
                 while alive() {
@@ -552,29 +572,30 @@ impl StateMachine {
     pub fn sign(
         &mut self,
         timeout: u64,
-        params: GetAssertion,
+        args: SignArgs,
         status: Sender<crate::StatusUpdate>,
         callback: StateCallback<crate::Result<crate::SignResult>>,
     ) {
-        if params.use_ctap1_fallback {
+        if args.use_ctap1_fallback {
             /* Firefox uses this when security.webauthn.ctap2 is false. */
-            let flags = match params.options.user_verification {
-                Some(true) => SignFlags::REQUIRE_USER_VERIFICATION,
-                _ => SignFlags::empty(),
-            };
-            let mut app_ids = vec![params.rp.hash().0.to_vec()];
-            if let Some(app_id) = params.alternate_rp_id {
-                app_ids.push(
-                    RelyingPartyWrapper::Data(RelyingParty {
-                        id: app_id,
-                        ..Default::default()
-                    })
-                    .hash()
-                    .0
-                    .to_vec(),
-                );
+            let mut flags = SignFlags::empty();
+            if args.user_verification_req == UserVerificationRequirement::Required {
+                flags |= SignFlags::REQUIRE_USER_VERIFICATION;
             }
-            let key_handles = params
+            let mut app_ids = vec![];
+            let rp_id = RelyingPartyWrapper::Data(RelyingParty {
+                id: args.relying_party_id,
+                ..Default::default()
+            });
+            app_ids.push(rp_id.hash().as_ref().to_vec());
+            if let Some(app_id) = args.alternate_rp_id {
+                let app_id = RelyingPartyWrapper::Data(RelyingParty {
+                    id: app_id,
+                    ..Default::default()
+                });
+                app_ids.push(app_id.hash().as_ref().to_vec());
+            }
+            let key_handles = args
                 .allow_list
                 .iter()
                 .map(|cred_desc| KeyHandle {
@@ -582,7 +603,7 @@ impl StateMachine {
                     transports: AuthenticatorTransports::empty(),
                 })
                 .collect();
-            let challenge = params.client_data_hash;
+            let challenge = ClientDataHash(args.client_data_hash);
 
             self.legacy_sign(
                 flags,
@@ -613,11 +634,9 @@ impl StateMachine {
                 };
 
                 info!("Device {:?} continues with the signing process", dev.id());
-                // TODO(MS): This is wasteful, but the current setup with read only-functions doesn't allow me
-                //           to modify "params" directly.
-                let mut getassertion = params.clone();
+
                 // First check if extensions have been requested that are not supported by the device
-                if params.extensions.hmac_secret.is_some() {
+                if args.extensions.hmac_secret.is_some() {
                     if let Some(auth) = dev.get_authenticator_info() {
                         if !auth.supports_hmac_secret() {
                             callback.call(Err(AuthenticatorError::UnsupportedOption(
@@ -627,6 +646,33 @@ impl StateMachine {
                         }
                     }
                 }
+
+                // We need a local copy of the arguments so that the GetAssertion request for this
+                // device can take ownership of some values
+                let args = args.clone();
+
+                let mut options = GetAssertionOptions::default();
+                match args.user_verification_req {
+                    UserVerificationRequirement::Required => options.user_verification = Some(true),
+                    UserVerificationRequirement::Preferred => options.user_verification = None,
+                    UserVerificationRequirement::Discouraged => options.user_verification = Some(false),
+                }
+                options.user_presence = Some(args.user_presence_req);
+
+                let mut getassertion = GetAssertion::new(
+                    ClientDataHash(args.client_data_hash),
+                    RelyingPartyWrapper::Data(RelyingParty {
+                        id: args.relying_party_id,
+                        name: None,
+                        icon: None,
+                    }),
+                    args.allow_list,
+                    options,
+                    args.extensions,
+                    args.pin,
+                    args.alternate_rp_id,
+                );
+
                 let mut skip_uv = false;
                 while alive() {
                     let pin_uv_auth_result = match Self::determine_puap_if_needed(
