@@ -300,14 +300,14 @@ impl From<&KeyHandle> for PublicKeyCredentialDescriptor {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum ResidentKeyRequirement {
     Discouraged,
     Preferred,
     Required,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum UserVerificationRequirement {
     Discouraged,
     Preferred,

@@ -201,6 +201,7 @@ impl StateMachine {
         dev: &mut Device,
         permission: PinUvAuthTokenPermission,
         skip_uv: bool,
+        uv_req: UserVerificationRequirement,
     ) -> Result<PinUvAuthResult, AuthenticatorError> {
         let info = dev
             .get_authenticator_info()
@@ -219,7 +220,7 @@ impl StateMachine {
 
         // Check if the combination of device-protection and request-options
         // are allowing for 'discouraged', meaning no auth required.
-        if cmd.can_skip_user_verification(info) {
+        if cmd.can_skip_user_verification(info, uv_req) {
             return Ok(PinUvAuthResult::NoAuthRequired);
         }
 
@@ -292,6 +293,7 @@ impl StateMachine {
         dev: &mut Device,
         mut skip_uv: bool,
         permission: PinUvAuthTokenPermission,
+        uv_req: UserVerificationRequirement,
         status: &Sender<StatusUpdate>,
         callback: &StateCallback<crate::Result<U>>,
         alive: &dyn Fn() -> bool,
@@ -307,7 +309,7 @@ impl StateMachine {
         while alive() {
             debug!("-----------------------------------------------------------------");
             debug!("Getting pinUvAuthParam");
-            match Self::get_pin_uv_auth_param(cmd, dev, permission, skip_uv) {
+            match Self::get_pin_uv_auth_param(cmd, dev, permission, skip_uv, uv_req) {
                 Ok(r) => {
                     return Ok(r);
                 }
@@ -484,6 +486,7 @@ impl StateMachine {
                         &mut dev,
                         skip_uv,
                         PinUvAuthTokenPermission::MakeCredential,
+                        args.user_verification_req,
                         &status,
                         &callback,
                         alive,
@@ -680,6 +683,7 @@ impl StateMachine {
                         &mut dev,
                         skip_uv,
                         PinUvAuthTokenPermission::GetAssertion,
+                        args.user_verification_req,
                         &status,
                         &callback,
                         alive,
