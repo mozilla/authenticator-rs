@@ -4,12 +4,12 @@
 
 use authenticator::{
     authenticatorservice::{
-        AuthenticatorService, GetAssertionExtensions, GetAssertionOptions,
-        HmacSecretExtension, MakeCredentialsExtensions, MakeCredentialsOptions, RegisterArgs,
-        SignArgs,
+        AuthenticatorService, GetAssertionExtensions, HmacSecretExtension,
+        MakeCredentialsExtensions, RegisterArgs, SignArgs,
     },
     ctap2::server::{
-        PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, Transport, User,
+        PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty,
+        ResidentKeyRequirement, Transport, User, UserVerificationRequirement,
     },
     statecallback::StateCallback,
     COSEAlgorithm, Pin, RegisterResult, SignResult, StatusPinUv, StatusUpdate,
@@ -50,8 +50,8 @@ fn main() {
         return;
     }
 
-    let mut manager = AuthenticatorService::new()
-        .expect("The auth service should initialize safely");
+    let mut manager =
+        AuthenticatorService::new().expect("The auth service should initialize safely");
 
     if !matches.opt_present("no-u2f-usb-hid") {
         manager.add_u2f_usb_hid_platform_transports();
@@ -80,9 +80,6 @@ fn main() {
     let mut challenge = Sha256::new();
     challenge.update(challenge_str.as_bytes());
     let chall_bytes: [u8; 32] = challenge.finalize().into();
-
-    // TODO(MS): Needs to be added to RegisterArgsCtap2
-    // let flags = RegisterFlags::empty();
 
     let (status_tx, status_rx) = channel::<StatusUpdate>();
     thread::spawn(move || loop {
@@ -156,7 +153,7 @@ fn main() {
         display_name: None,
     };
     let origin = "https://example.com".to_string();
-    let ctap_args = RegisterArgs{
+    let ctap_args = RegisterArgs {
         client_data_hash: chall_bytes,
         relying_party: RelyingParty {
             id: "example.com".to_string(),
@@ -181,10 +178,8 @@ fn main() {
             ],
             transports: vec![Transport::USB, Transport::NFC],
         }],
-        options: MakeCredentialsOptions {
-            resident_key: None,
-            user_verification: None,
-        },
+        user_verification_req: UserVerificationRequirement::Preferred,
+        resident_key_req: ResidentKeyRequirement::Discouraged,
         extensions: MakeCredentialsExtensions {
             hmac_secret: if matches.opt_present("hmac_secret") {
                 Some(true)
@@ -204,8 +199,7 @@ fn main() {
             register_tx.send(rv).unwrap();
         }));
 
-        if let Err(e) = manager.register(timeout_ms, ctap_args, status_tx.clone(), callback)
-        {
+        if let Err(e) = manager.register(timeout_ms, ctap_args, status_tx.clone(), callback) {
             panic!("Couldn't register: {:?}", e);
         };
 
@@ -245,7 +239,8 @@ fn main() {
         origin,
         relying_party_id: "example.com".to_string(),
         allow_list,
-        options: GetAssertionOptions::default(),
+        user_verification_req: UserVerificationRequirement::Preferred,
+        user_presence_req: true,
         extensions: GetAssertionExtensions {
             hmac_secret: if matches.opt_present("hmac_secret") {
                 Some(HmacSecretExtension::new(

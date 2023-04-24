@@ -218,7 +218,6 @@ pub struct GetAssertion {
 
     // This is used to implement the FIDO AppID extension.
     pub(crate) alternate_rp_id: Option<String>,
-    pub(crate) use_ctap1_fallback: bool,
 }
 
 impl GetAssertion {
@@ -230,9 +229,8 @@ impl GetAssertion {
         extensions: GetAssertionExtensions,
         pin: Option<Pin>,
         alternate_rp_id: Option<String>,
-        use_ctap1_fallback: bool,
-    ) -> Result<Self, HIDError> {
-        Ok(Self {
+    ) -> Self {
+        Self {
             client_data_hash,
             rp,
             allow_list,
@@ -241,8 +239,7 @@ impl GetAssertion {
             pin,
             pin_uv_auth_param: None,
             alternate_rp_id,
-            use_ctap1_fallback,
-        })
+        }
     }
 }
 
@@ -730,9 +727,7 @@ pub mod test {
             Default::default(),
             None,
             None,
-            false,
-        )
-        .expect("Failed to create GetAssertion");
+        );
         let mut device = Device::new("commands/get_assertion").unwrap();
         let mut cid = [0u8; 4];
         thread_rng().fill_bytes(&mut cid);
@@ -933,9 +928,7 @@ pub mod test {
             Default::default(),
             None,
             None,
-            false,
-        )
-        .expect("Failed to create GetAssertion");
+        );
         let mut device = Device::new("commands/get_assertion").unwrap(); // not really used (all functions ignore it)
                                                                          // channel id
         let mut cid = [0u8; 4];
@@ -1022,9 +1015,7 @@ pub mod test {
             Default::default(),
             None,
             None,
-            false,
-        )
-        .expect("Failed to create GetAssertion");
+        );
 
         let mut device = Device::new("commands/get_assertion").unwrap(); // not really used (all functions ignore it)
                                                                          // channel id

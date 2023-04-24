@@ -174,7 +174,6 @@ pub struct MakeCredentials {
     pub(crate) pin: Option<Pin>,
     pub(crate) pin_uv_auth_param: Option<PinUvAuthParam>,
     pub(crate) enterprise_attestation: Option<u64>,
-    pub(crate) use_ctap1_fallback: bool,
 }
 
 impl MakeCredentials {
@@ -188,7 +187,6 @@ impl MakeCredentials {
         options: MakeCredentialsOptions,
         extensions: MakeCredentialsExtensions,
         pin: Option<Pin>,
-        use_ctap1_fallback: bool,
     ) -> Self {
         Self {
             client_data_hash,
@@ -201,7 +199,6 @@ impl MakeCredentials {
             pin,
             pin_uv_auth_param: None,
             enterprise_attestation: None,
-            use_ctap1_fallback,
         }
     }
 }
@@ -477,8 +474,7 @@ pub(crate) fn dummy_make_credentials_cmd() -> Result<MakeCredentials, HIDError> 
             cross_origin: false,
             token_binding: None,
         }
-        .hash()
-        .expect("failed to serialize client data"),
+        .hash()?,
         RelyingPartyWrapper::Data(RelyingParty {
             id: String::from("make.me.blink"),
             ..Default::default()
@@ -495,7 +491,6 @@ pub(crate) fn dummy_make_credentials_cmd() -> Result<MakeCredentials, HIDError> 
         MakeCredentialsOptions::default(),
         MakeCredentialsExtensions::default(),
         None,
-        false,
     );
     // Using a zero-length pinAuth will trigger the device to blink.
     // For CTAP1, this gets ignored anyways and we do a 'normal' register
@@ -653,7 +648,6 @@ pub mod test {
             },
             Default::default(),
             None,
-            false,
         );
 
         let mut device = Device::new("commands/make_credentials").unwrap(); // not really used (all functions ignore it)
@@ -712,7 +706,6 @@ pub mod test {
             },
             Default::default(),
             None,
-            false,
         );
 
         let mut device = Device::new("commands/make_credentials").unwrap(); // not really used (all functions ignore it)

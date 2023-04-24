@@ -3,14 +3,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use crate::ctap2::commands::client_pin::Pin;
-pub use crate::ctap2::commands::get_assertion::{
-    GetAssertionExtensions, GetAssertionOptions, HmacSecretExtension,
-};
-pub use crate::ctap2::commands::make_credentials::{
-    MakeCredentialsExtensions, MakeCredentialsOptions,
-};
+pub use crate::ctap2::commands::get_assertion::{GetAssertionExtensions, HmacSecretExtension};
+pub use crate::ctap2::commands::make_credentials::MakeCredentialsExtensions;
 use crate::ctap2::server::{
-    PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty, User,
+    PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty,
+    ResidentKeyRequirement, User, UserVerificationRequirement,
 };
 use crate::errors::*;
 use crate::manager::Manager;
@@ -25,7 +22,8 @@ pub struct RegisterArgs {
     pub user: User,
     pub pub_cred_params: Vec<PublicKeyCredentialParameters>,
     pub exclude_list: Vec<PublicKeyCredentialDescriptor>,
-    pub options: MakeCredentialsOptions,
+    pub user_verification_req: UserVerificationRequirement,
+    pub resident_key_req: ResidentKeyRequirement,
     pub extensions: MakeCredentialsExtensions,
     pub pin: Option<Pin>,
     pub use_ctap1_fallback: bool,
@@ -37,7 +35,8 @@ pub struct SignArgs {
     pub origin: String,
     pub relying_party_id: String,
     pub allow_list: Vec<PublicKeyCredentialDescriptor>,
-    pub options: GetAssertionOptions,
+    pub user_verification_req: UserVerificationRequirement,
+    pub user_presence_req: bool,
     pub extensions: GetAssertionExtensions,
     pub pin: Option<Pin>,
     pub alternate_rp_id: Option<String>,
@@ -298,7 +297,9 @@ impl AuthenticatorService {
 mod tests {
     use super::{AuthenticatorService, AuthenticatorTransport, Pin, RegisterArgs, SignArgs};
     use crate::consts::{Capability, PARAMETER_SIZE};
-    use crate::ctap2::server::{RelyingParty, User};
+    use crate::ctap2::server::{
+        RelyingParty, ResidentKeyRequirement, User, UserVerificationRequirement,
+    };
     use crate::statecallback::StateCallback;
     use crate::{RegisterResult, SignResult, StatusUpdate};
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -432,7 +433,8 @@ mod tests {
                     },
                     pub_cred_params: vec![],
                     exclude_list: vec![],
-                    options: Default::default(),
+                    user_verification_req: UserVerificationRequirement::Preferred,
+                    resident_key_req: ResidentKeyRequirement::Preferred,
                     extensions: Default::default(),
                     pin: None,
                     use_ctap1_fallback: false,
@@ -453,7 +455,8 @@ mod tests {
                     origin: "example.com".to_string(),
                     relying_party_id: "example.com".to_string(),
                     allow_list: vec![],
-                    options: Default::default(),
+                    user_verification_req: UserVerificationRequirement::Preferred,
+                    user_presence_req: true,
                     extensions: Default::default(),
                     pin: None,
                     alternate_rp_id: None,
@@ -511,7 +514,8 @@ mod tests {
                     },
                     pub_cred_params: vec![],
                     exclude_list: vec![],
-                    options: Default::default(),
+                    user_verification_req: UserVerificationRequirement::Preferred,
+                    resident_key_req: ResidentKeyRequirement::Preferred,
                     extensions: Default::default(),
                     pin: None,
                     use_ctap1_fallback: false,
@@ -555,7 +559,8 @@ mod tests {
                     origin: "example.com".to_string(),
                     relying_party_id: "example.com".to_string(),
                     allow_list: vec![],
-                    options: Default::default(),
+                    user_verification_req: UserVerificationRequirement::Preferred,
+                    user_presence_req: true,
                     extensions: Default::default(),
                     pin: None,
                     alternate_rp_id: None,
@@ -609,7 +614,8 @@ mod tests {
                     },
                     pub_cred_params: vec![],
                     exclude_list: vec![],
-                    options: Default::default(),
+                    user_verification_req: UserVerificationRequirement::Preferred,
+                    resident_key_req: ResidentKeyRequirement::Preferred,
                     extensions: Default::default(),
                     pin: None,
                     use_ctap1_fallback: false,
