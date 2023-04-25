@@ -702,7 +702,7 @@ impl StateMachine {
                     }
                     if args.allow_list.is_empty() {
                         callback.call(Err(AuthenticatorError::UnsupportedOption(
-                            UnsupportedOption::AllowList,
+                            UnsupportedOption::EmptyAllowList,
                         )));
                         return;
                     }
