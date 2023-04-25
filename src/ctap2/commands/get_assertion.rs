@@ -274,10 +274,6 @@ impl PinUvAuthCommand for GetAssertion {
         self.options.user_verification = uv;
     }
 
-    fn get_uv_option(&mut self) -> Option<bool> {
-        self.options.user_verification
-    }
-
     fn get_rp_id(&self) -> Option<&String> {
         match &self.rp {
             // CTAP1 case: We only have the hash, not the entire RpID
