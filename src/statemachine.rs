@@ -204,6 +204,21 @@ impl StateMachine {
         skip_uv: bool,
         uv_req: UserVerificationRequirement,
     ) -> Result<PinUvAuthResult, AuthenticatorError> {
+        // CTAP 2.1 is very specific that the request should either include pinUvAuthParam
+        // OR uv=true, but not both at the same time. We now have to decide which (if either)
+        // to send. We may omit both values. Will never send an explicit uv=false, because
+        //  a) this is the default, and
+        //  b) some CTAP 2.0 authenticators return UnsupportedOption when uv=false.
+
+        // We ensure both pinUvAuthParam and uv are not set to start.
+        cmd.set_pin_uv_auth_param(None)?;
+        cmd.set_uv_option(None);
+
+        // CTAP1/U2F-only devices do not support user verification, so we skip it
+        if !dev.supports_ctap2() {
+            return Ok(PinUvAuthResult::DeviceIsCtap1);
+        }
+
         let info = dev
             .get_authenticator_info()
             .ok_or(AuthenticatorError::HIDError(HIDError::DeviceNotInitialized))?;
@@ -226,9 +241,14 @@ impl StateMachine {
         }
 
         // Device does not support any auth-method
-        if !pin_configured && !supports_uv {
-            // We'll send it to the device anyways, and let it error out (or magically work)
+        if (skip_uv || !supports_uv) && !supports_pin {
             return Ok(PinUvAuthResult::NoAuthTypeSupported);
+        }
+
+        // Device supports PINs, but a PIN is not configured. Signal that we
+        // can complete the operation if the user sets a PIN first.
+        if (skip_uv || !supports_uv) && !pin_configured {
+            return Err(AuthenticatorError::PinError(PinError::PinNotSet));
         }
 
         let (res, pin_auth_token) = if info.options.pin_uv_auth_token == Some(true) {
@@ -240,8 +260,12 @@ impl StateMachine {
                     PinUvAuthResult::SuccessGetPinUvAuthTokenUsingUvWithPermissions,
                     pin_auth_token,
                 )
-            } else if supports_pin && pin_configured {
+            } else {
                 // CTAP 2.1 - PIN
+                // We did not take the `!skip_uv && supports_uv` branch, so we have
+                // `(skip_uv || !supports_uv)`. Moreover we did not exit early in the
+                // `(skip_uv || !supports_uv) && !pin_configured` case. So we have
+                // `pin_configured`.
                 let pin_auth_token = dev.get_pin_uv_auth_token_using_pin_with_permissions(
                     cmd.pin(),
                     permission,
@@ -251,8 +275,6 @@ impl StateMachine {
                     PinUvAuthResult::SuccessGetPinUvAuthTokenUsingPinWithPermissions,
                     pin_auth_token,
                 )
-            } else {
-                return Ok(PinUvAuthResult::NoAuthTypeSupported);
             }
         } else {
             // CTAP 2.0 fallback
@@ -265,6 +287,9 @@ impl StateMachine {
                 if info.supports_hmac_secret() {
                     let _shared_secret = dev.establish_shared_secret()?;
                 }
+                // CTAP 2.1, Section 6.1.1, Step 1.1.2.1.2. This is the only
+                // case where we will send an explicit uv option.
+                cmd.set_uv_option(Some(true));
                 return Ok(PinUvAuthResult::UsingInternalUv);
             }
 
@@ -274,10 +299,6 @@ impl StateMachine {
 
         let pin_auth_token = pin_auth_token.map_err(|e| repackage_pin_errors(dev, e))?;
         cmd.set_pin_uv_auth_param(Some(pin_auth_token))?;
-        // CTAP 2.0 spec is a bit vague here, but CTAP 2.1 is very specific, that the request
-        // should either include pinAuth OR uv=true, but not both at the same time.
-        // Do not set user_verification, if pinAuth is provided
-        cmd.set_uv_option(None);
         Ok(res)
     }
 
@@ -299,14 +320,6 @@ impl StateMachine {
         callback: &StateCallback<crate::Result<U>>,
         alive: &dyn Fn() -> bool,
     ) -> Result<PinUvAuthResult, ()> {
-        // Starting from a blank slate.
-        cmd.set_pin_uv_auth_param(None).map_err(|_| ())?;
-
-        // CTAP1/U2F-only devices do not support PinUvAuth, so we skip it
-        if !dev.supports_ctap2() {
-            return Ok(PinUvAuthResult::DeviceIsCtap1);
-        }
-
         while alive() {
             debug!("-----------------------------------------------------------------");
             debug!("Getting pinUvAuthParam");

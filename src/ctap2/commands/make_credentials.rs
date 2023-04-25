@@ -267,21 +267,7 @@ impl PinUvAuthCommand for MakeCredentials {
         // but that is only relevant, if RP also discourages UV.
         let can_make_cred_without_uv = make_cred_uv_not_required && uv_discouraged;
 
-        if always_uv || (device_protected && !can_make_cred_without_uv) {
-            // If the token is protected, we have to require UV anyways
-            self.set_uv_option(Some(true));
-            false
-        } else {
-            // "[..] the Relying Party wants to create a non-discoverable credential and not require user verification
-            // (e.g., by setting options.authenticatorSelection.userVerification to "discouraged" in the WebAuthn API),
-            // the platform invokes the authenticatorMakeCredential operation using the marshalled input parameters along
-            // with the "uv" option key set to false and terminate these steps."
-            // Note: This is basically a no-op right now, since we use `get_uv_option() == Some(false)`, to determine if
-            //       the RP is discouraging UV. But we may change that part of the API in the future, so better to be
-            //       explicit here.
-            self.set_uv_option(Some(false));
-            true
-        }
+        !always_uv && (!device_protected || can_make_cred_without_uv)
     }
 }
 
