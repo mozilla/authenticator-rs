@@ -294,20 +294,10 @@ impl PinUvAuthCommand for GetAssertion {
         let supports_uv = info.options.user_verification == Some(true);
         let pin_configured = info.options.client_pin == Some(true);
         let device_protected = supports_uv || pin_configured;
-        let uv_preferred_or_required = uv_req != UserVerificationRequirement::Discouraged;
+        let uv_discouraged = uv_req == UserVerificationRequirement::Discouraged;
         let always_uv = info.options.always_uv == Some(true);
 
-        if always_uv || (device_protected && uv_preferred_or_required) {
-            // If the token is protected AND the RP doesn't specifically discourage UV, we have to use it
-            self.set_uv_option(Some(true));
-            false
-        } else {
-            // "[..] the Relying Party does not wish to require user verification (e.g., by setting options.userVerification
-            // to "discouraged" in the WebAuthn API), the platform invokes the authenticatorGetAssertion operation using
-            // the marshalled input parameters along with an absent "uv" option key."
-            self.set_uv_option(None);
-            true
-        }
+        !always_uv && (!device_protected || uv_discouraged)
     }
 }
 
