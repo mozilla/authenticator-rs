@@ -82,6 +82,7 @@ impl StateMachine {
     fn init_and_select(
         info: DeviceBuildParameters,
         selector: &Sender<DeviceSelectorEvent>,
+        status: &Sender<crate::StatusUpdate>,
         ctap2_only: bool,
         keep_alive: &dyn Fn() -> bool,
     ) -> Option<Device> {
@@ -108,22 +109,16 @@ impl StateMachine {
             return None;
         }
 
-        let write_only_clone = match dev.clone_device_as_write_only() {
-            Ok(x) => x,
-            Err(_) => {
-                // There is probably something seriously wrong here, if this happens.
-                // So `NotAToken()` is probably too weak a response here.
-                warn!("error while cloning device: {:?}", dev.id());
-                selector
-                    .send(DeviceSelectorEvent::NotAToken(dev.id()))
-                    .ok()?;
-                return None;
-            }
-        };
         let (tx, rx) = channel();
         selector
-            .send(DeviceSelectorEvent::ImAToken((write_only_clone, tx)))
+            .send(DeviceSelectorEvent::ImAToken((dev.id(), tx)))
             .ok()?;
+        send_status(
+            status,
+            crate::StatusUpdate::DeviceAvailable {
+                dev_info: dev.get_device_info(),
+            },
+        );
 
         // We can be cancelled from the user (through keep_alive()) or from the device selector
         // (through a DeviceCommand::Cancel on rx).  We'll combine those signals into a single
@@ -139,6 +134,11 @@ impl StateMachine {
                     selector
                         .send(DeviceSelectorEvent::SelectedToken(dev.id()))
                         .ok()?;
+
+                    send_status(
+                        status,
+                        crate::StatusUpdate::DeviceSelected(dev.get_device_info()),
+                    );
                 }
                 BlinkResult::Cancelled => {
                     info!("Device {:?} was not selected", dev.id());
@@ -151,16 +151,27 @@ impl StateMachine {
             }
             Ok(DeviceCommand::Removed) => {
                 info!("Device {:?} was removed", dev.id());
+                send_status(
+                    status,
+                    crate::StatusUpdate::DeviceUnavailable {
+                        dev_info: dev.get_device_info(),
+                    },
+                );
                 return None;
             }
             Ok(DeviceCommand::Continue) => {
                 // Just continue
+                send_status(
+                    status,
+                    crate::StatusUpdate::DeviceSelected(dev.get_device_info()),
+                );
             }
             Err(_) => {
                 warn!("Error when trying to receive messages from DeviceSelector! Exiting.");
                 return None;
             }
         }
+        send_status(status, crate::StatusUpdate::SelectDeviceNotice);
         Some(dev)
     }
 
@@ -454,7 +465,7 @@ impl StateMachine {
             cbc.clone(),
             status,
             move |info, selector, status, alive| {
-                let mut dev = match Self::init_and_select(info, &selector, false, alive) {
+                let mut dev = match Self::init_and_select(info, &selector, &status, false, alive) {
                     None => {
                         return;
                     }
@@ -678,7 +689,7 @@ impl StateMachine {
             callback.clone(),
             status,
             move |info, selector, status, alive| {
-                let mut dev = match Self::init_and_select(info, &selector, false, alive) {
+                let mut dev = match Self::init_and_select(info, &selector, &status, false, alive) {
                     None => {
                         return;
                     }
@@ -915,7 +926,7 @@ impl StateMachine {
             callback.clone(),
             status,
             move |info, selector, status, alive| {
-                let mut dev = match Self::init_and_select(info, &selector, true, alive) {
+                let mut dev = match Self::init_and_select(info, &selector, &status, true, alive) {
                     None => {
                         return;
                     }
@@ -1038,7 +1049,7 @@ impl StateMachine {
             callback.clone(),
             status,
             move |info, selector, status, alive| {
-                let mut dev = match Self::init_and_select(info, &selector, true, alive) {
+                let mut dev = match Self::init_and_select(info, &selector, &status, true, alive) {
                     None => {
                         return;
                     }
