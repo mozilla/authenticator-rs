@@ -240,8 +240,17 @@ impl StateMachine {
             return Ok(PinUvAuthResult::NoAuthRequired);
         }
 
-        // Device does not support any auth-method
+        // Device does not support any (remaining) auth-method
         if (skip_uv || !supports_uv) && !supports_pin {
+            if supports_uv && uv_req == UserVerificationRequirement::Required {
+                // We should always set the uv option in the Required case, but the CTAP 2.1 spec
+                // says 'Platforms MUST NOT include the "uv" option key if the authenticator does
+                // not support built-in user verification.' This is to work around some CTAP 2.0
+                // authenticators which incorrectly error out with CTAP2_ERR_UNSUPPORTED_OPTION
+                // when the "uv" option is set. The RP that requested UV will (hopefully) reject our
+                // response in the !supports_uv case.
+                cmd.set_uv_option(Some(true));
+            }
             return Ok(PinUvAuthResult::NoAuthTypeSupported);
         }
 
@@ -287,8 +296,7 @@ impl StateMachine {
                 if info.supports_hmac_secret() {
                     let _shared_secret = dev.establish_shared_secret()?;
                 }
-                // CTAP 2.1, Section 6.1.1, Step 1.1.2.1.2. This is the only
-                // case where we will send an explicit uv option.
+                // CTAP 2.1, Section 6.1.1, Step 1.1.2.1.2.
                 cmd.set_uv_option(Some(true));
                 return Ok(PinUvAuthResult::UsingInternalUv);
             }
@@ -708,7 +716,7 @@ impl StateMachine {
                     }
                 }
 
-                let mut getassertion = GetAssertion::new(
+                let mut get_assertion = GetAssertion::new(
                     ClientDataHash(args.client_data_hash),
                     RelyingPartyWrapper::Data(RelyingParty {
                         id: args.relying_party_id,
@@ -728,7 +736,7 @@ impl StateMachine {
                 let mut skip_uv = false;
                 while alive() {
                     let pin_uv_auth_result = match Self::determine_puap_if_needed(
-                        &mut getassertion,
+                        &mut get_assertion,
                         &mut dev,
                         skip_uv,
                         PinUvAuthTokenPermission::GetAssertion,
@@ -744,7 +752,7 @@ impl StateMachine {
                     };
 
                     // Third, use the shared secret in the extensions, if requested
-                    if let Some(extension) = getassertion.extensions.hmac_secret.as_mut() {
+                    if let Some(extension) = get_assertion.extensions.hmac_secret.as_mut() {
                         if let Some(secret) = dev.get_shared_secret() {
                             match extension.calculate(secret) {
                                 Ok(x) => x,
@@ -757,20 +765,20 @@ impl StateMachine {
                     }
 
                     debug!("------------------------------------------------------------------");
-                    debug!("{getassertion:?} using {pin_uv_auth_result:?}");
+                    debug!("{get_assertion:?} using {pin_uv_auth_result:?}");
                     debug!("------------------------------------------------------------------");
 
-                    let mut resp = dev.send_msg_cancellable(&getassertion, alive);
+                    let mut resp = dev.send_msg_cancellable(&get_assertion, alive);
                     if resp.is_err() {
                         // Retry with a different RP ID if one was supplied. This is intended to be
                         // used with the AppID provided in the WebAuthn FIDO AppID extension.
-                        if let Some(alternate_rp_id) = getassertion.alternate_rp_id {
-                            getassertion.rp = RelyingPartyWrapper::Data(RelyingParty {
+                        if let Some(alternate_rp_id) = get_assertion.alternate_rp_id {
+                            get_assertion.rp = RelyingPartyWrapper::Data(RelyingParty {
                                 id: alternate_rp_id,
                                 ..Default::default()
                             });
-                            getassertion.alternate_rp_id = None;
-                            resp = dev.send_msg_cancellable(&getassertion, alive);
+                            get_assertion.alternate_rp_id = None;
+                            resp = dev.send_msg_cancellable(&get_assertion, alive);
                         }
                     }
                     if resp.is_ok() {
