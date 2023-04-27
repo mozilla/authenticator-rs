@@ -127,24 +127,30 @@ impl StateMachine {
 
         // Blocking recv. DeviceSelector will tell us what to do
         match rx.recv() {
-            Ok(DeviceCommand::Blink) => match dev.block_and_blink(&keep_blinking) {
-                BlinkResult::DeviceSelected => {
-                    // User selected us. Let DeviceSelector know, so it can cancel all other
-                    // outstanding open blink-requests.
-                    selector
-                        .send(DeviceSelectorEvent::SelectedToken(dev.id()))
-                        .ok()?;
+            Ok(DeviceCommand::Blink) => {
+                // Inform the user that there are multiple devices available.
+                // NOTE: We'll send this once per device, so the recipient should be prepared
+                // to receive this message multiple times.
+                send_status(status, crate::StatusUpdate::SelectDeviceNotice);
+                match dev.block_and_blink(&keep_blinking) {
+                    BlinkResult::DeviceSelected => {
+                        // User selected us. Let DeviceSelector know, so it can cancel all other
+                        // outstanding open blink-requests.
+                        selector
+                            .send(DeviceSelectorEvent::SelectedToken(dev.id()))
+                            .ok()?;
 
-                    send_status(
-                        status,
-                        crate::StatusUpdate::DeviceSelected(dev.get_device_info()),
-                    );
+                        send_status(
+                            status,
+                            crate::StatusUpdate::DeviceSelected(dev.get_device_info()),
+                        );
+                    }
+                    BlinkResult::Cancelled => {
+                        info!("Device {:?} was not selected", dev.id());
+                        return None;
+                    }
                 }
-                BlinkResult::Cancelled => {
-                    info!("Device {:?} was not selected", dev.id());
-                    return None;
-                }
-            },
+            }
             Ok(DeviceCommand::Cancel) => {
                 info!("Device {:?} was not selected", dev.id());
                 return None;
@@ -171,7 +177,6 @@ impl StateMachine {
                 return None;
             }
         }
-        send_status(status, crate::StatusUpdate::SelectDeviceNotice);
         Some(dev)
     }
 
@@ -1332,7 +1337,7 @@ impl StateMachine {
             callback.clone(),
             status,
             move |info, selector, status, alive| {
-                let mut dev = match Self::init_and_select(info, &selector, true, alive) {
+                let mut dev = match Self::init_and_select(info, &selector, &status, true, alive) {
                     None => {
                         return;
                     }
