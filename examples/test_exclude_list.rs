@@ -274,7 +274,8 @@ fn main() {
             Err(AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
                 StatusCode::NoCredentials,
                 None,
-            )))) => {
+            ))))
+            | Err(AuthenticatorError::UnsupportedOption(UnsupportedOption::EmptyAllowList)) => {
                 println!("Got an 'no credentials' error, as expected with an empty allow-list.");
                 println!("Extending the list to contain one valid handle.");
                 let registered_handle = registered_key_handle.as_ref().unwrap().clone();
