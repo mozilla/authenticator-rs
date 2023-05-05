@@ -624,6 +624,13 @@ impl StateMachine {
                             skip_uv = true;
                             continue;
                         }
+                        Err(HIDError::Command(CommandError::StatusCode(
+                            StatusCode::CredentialExcluded,
+                            _,
+                        ))) => {
+                            callback.call(Err(AuthenticatorError::CredentialExcluded));
+                            break;
+                        }
                         Err(e) => {
                             warn!("error happened: {e}");
                             callback.call(Err(AuthenticatorError::HIDError(e)));

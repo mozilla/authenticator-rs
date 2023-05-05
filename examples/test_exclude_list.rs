@@ -4,12 +4,11 @@
 
 use authenticator::{
     authenticatorservice::{AuthenticatorService, RegisterArgs},
-    ctap2::commands::StatusCode,
     ctap2::server::{
         PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty,
         ResidentKeyRequirement, Transport, User, UserVerificationRequirement,
     },
-    errors::{AuthenticatorError, CommandError, HIDError},
+    errors::AuthenticatorError,
     statecallback::StateCallback,
     COSEAlgorithm, Pin, RegisterResult, StatusPinUv, StatusUpdate,
 };
@@ -201,10 +200,7 @@ fn main() {
                 }];
                 continue;
             }
-            Err(AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
-                StatusCode::CredentialExcluded,
-                None,
-            )))) => {
+            Err(AuthenticatorError::CredentialExcluded) => {
                 println!("Got an 'already registered' error. Quitting.");
                 break;
             }
