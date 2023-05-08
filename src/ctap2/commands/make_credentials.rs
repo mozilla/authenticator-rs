@@ -12,18 +12,14 @@ use crate::ctap2::attestation::{
     AAGuid, AttestationObject, AttestationStatement, AttestationStatementFidoU2F,
     AttestedCredentialData, AuthenticatorData, AuthenticatorDataFlags,
 };
-use crate::ctap2::client_data::{Challenge, ClientDataHash, CollectedClientData, WebauthnType};
+use crate::ctap2::client_data::ClientDataHash;
 use crate::ctap2::commands::client_pin::Pin;
-use crate::ctap2::preflight::PreFlightable;
 use crate::ctap2::server::{
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty,
     RelyingPartyWrapper, RpIdHash, User, UserVerificationRequirement,
 };
 use crate::errors::AuthenticatorError;
-use crate::transport::{
-    errors::{ApduErrorStatus, HIDError},
-    FidoDevice,
-};
+use crate::transport::errors::{ApduErrorStatus, HIDError};
 use crate::u2ftypes::{CTAP1RequestAPDU, U2FDevice};
 use nom::{
     bytes::complete::{tag, take},
@@ -271,41 +267,6 @@ impl PinUvAuthCommand for MakeCredentials {
     }
 }
 
-impl PreFlightable for MakeCredentials {
-    fn get_client_data_hash(&self) -> &ClientDataHash {
-        &self.client_data_hash
-    }
-
-    fn get_credential_id_list(&self) -> &[PublicKeyCredentialDescriptor] {
-        &self.exclude_list
-    }
-
-    fn set_credential_id_list(&mut self, list: Vec<PublicKeyCredentialDescriptor>) {
-        self.exclude_list = list;
-    }
-
-    fn handle_ctap1_pre_flight_key<Dev: FidoDevice>(
-        &mut self,
-        dev: &mut Dev,
-        key_handle: Option<PublicKeyCredentialDescriptor>,
-    ) -> Result<(), AuthenticatorError> {
-        // That handle was already registered with the token
-        if key_handle.is_some() {
-            // Now we need to send a dummy registration request, to make the token blink
-            // Spec says "dummy appid and invalid challenge". We use the same, as we do for
-            // making the token blink upon device selection.
-            let msg = dummy_make_credentials_cmd()?;
-            let _ = dev.send_ctap1(&msg); // Ignore answer, return "CredentialExcluded"
-            return Err(HIDError::Command(CommandError::StatusCode(
-                StatusCode::CredentialExcluded,
-                None,
-            ))
-            .into());
-        }
-        Ok(())
-    }
-}
-
 impl Serialize for MakeCredentials {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -356,7 +317,7 @@ impl Serialize for MakeCredentials {
         }
         if let Some(pin_uv_auth_param) = &self.pin_uv_auth_param {
             map.serialize_entry(&0x08, &pin_uv_auth_param)?;
-            map.serialize_entry(&0x09, &pin_uv_auth_param.pin_auth_token.pin_protocol.id())?;
+            map.serialize_entry(&0x09, &pin_uv_auth_param.pin_protocol.id())?;
         }
         if let Some(enterprise_attestation) = self.enterprise_attestation {
             map.serialize_entry(&0x0a, &enterprise_attestation)?;
@@ -446,16 +407,20 @@ impl RequestCtap2 for MakeCredentials {
     }
 }
 
-pub(crate) fn dummy_make_credentials_cmd() -> Result<MakeCredentials, HIDError> {
+pub(crate) fn dummy_make_credentials_cmd() -> MakeCredentials {
     let mut req = MakeCredentials::new(
-        CollectedClientData {
-            webauthn_type: WebauthnType::Create,
-            challenge: Challenge::new(vec![0, 1, 2, 3, 4]),
-            origin: String::new(),
-            cross_origin: false,
-            token_binding: None,
-        }
-        .hash()?,
+        // Hardcoded hash of:
+        // CollectedClientData {
+        //     webauthn_type: WebauthnType::Create,
+        //     challenge: Challenge::new(vec![0, 1, 2, 3, 4]),
+        //     origin: String::new(),
+        //     cross_origin: false,
+        //     token_binding: None,
+        // }
+        ClientDataHash([
+            208, 206, 230, 252, 125, 191, 89, 154, 145, 157, 184, 251, 149, 19, 17, 38, 159, 14,
+            183, 129, 247, 132, 28, 108, 192, 84, 74, 217, 218, 52, 21, 75,
+        ]),
         RelyingPartyWrapper::Data(RelyingParty {
             id: String::from("make.me.blink"),
             ..Default::default()
@@ -477,7 +442,7 @@ pub(crate) fn dummy_make_credentials_cmd() -> Result<MakeCredentials, HIDError> 
     // For CTAP1, this gets ignored anyways and we do a 'normal' register
     // command, which also just blinks.
     req.pin_uv_auth_param = Some(PinUvAuthParam::create_empty());
-    Ok(req)
+    req
 }
 
 #[cfg(test)]

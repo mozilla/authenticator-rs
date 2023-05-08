@@ -89,7 +89,7 @@ pub trait RequestCtap2: fmt::Debug {
         Dev: FidoDevice + Read + Write + fmt::Debug;
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Clone)]
 pub(crate) enum PinUvAuthResult {
     /// Request is CTAP1 and does not need PinUvAuth
     RequestIsCtap1,
@@ -102,11 +102,30 @@ pub(crate) enum PinUvAuthResult {
     /// Device is CTAP2.0 and has internal UV capability
     UsingInternalUv,
     /// Successfully established PinUvAuthToken via GetPinToken (CTAP2.0)
-    SuccessGetPinToken,
+    SuccessGetPinToken(PinUvAuthToken),
     /// Successfully established PinUvAuthToken via UV (CTAP2.1)
-    SuccessGetPinUvAuthTokenUsingUvWithPermissions,
+    SuccessGetPinUvAuthTokenUsingUvWithPermissions(PinUvAuthToken),
     /// Successfully established PinUvAuthToken via Pin (CTAP2.1)
-    SuccessGetPinUvAuthTokenUsingPinWithPermissions,
+    SuccessGetPinUvAuthTokenUsingPinWithPermissions(PinUvAuthToken),
+}
+
+impl PinUvAuthResult {
+    pub(crate) fn get_pin_uv_auth_token(&self) -> Option<PinUvAuthToken> {
+        match self {
+            PinUvAuthResult::RequestIsCtap1
+            | PinUvAuthResult::DeviceIsCtap1
+            | PinUvAuthResult::NoAuthTypeSupported
+            | PinUvAuthResult::NoAuthRequired
+            | PinUvAuthResult::UsingInternalUv => None,
+            PinUvAuthResult::SuccessGetPinToken(token) => Some(token.clone()),
+            PinUvAuthResult::SuccessGetPinUvAuthTokenUsingUvWithPermissions(token) => {
+                Some(token.clone())
+            }
+            PinUvAuthResult::SuccessGetPinUvAuthTokenUsingPinWithPermissions(token) => {
+                Some(token.clone())
+            }
+        }
+    }
 }
 
 /// Helper-trait to determine pin_uv_auth_param from PIN or UV.

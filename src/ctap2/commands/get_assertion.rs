@@ -3,14 +3,16 @@ use super::{
     Command, CommandError, PinUvAuthCommand, Request, RequestCtap1, RequestCtap2, Retryable,
     StatusCode,
 };
-use crate::consts::{PARAMETER_SIZE, U2F_AUTHENTICATE, U2F_REQUEST_USER_PRESENCE};
+use crate::consts::{
+    PARAMETER_SIZE, U2F_AUTHENTICATE, U2F_DONT_ENFORCE_USER_PRESENCE_AND_SIGN,
+    U2F_REQUEST_USER_PRESENCE,
+};
 use crate::crypto::{COSEKey, CryptoError, PinUvAuthParam, PinUvAuthToken, SharedSecret};
 use crate::ctap2::attestation::{AuthenticatorData, AuthenticatorDataFlags};
 use crate::ctap2::client_data::ClientDataHash;
 use crate::ctap2::commands::client_pin::Pin;
 use crate::ctap2::commands::get_next_assertion::GetNextAssertion;
 use crate::ctap2::commands::make_credentials::UserVerification;
-use crate::ctap2::preflight::PreFlightable;
 use crate::ctap2::server::{
     PublicKeyCredentialDescriptor, RelyingPartyWrapper, RpIdHash, User, UserVerificationRequirement,
 };
@@ -32,49 +34,6 @@ use serde_bytes::ByteBuf;
 use serde_cbor::{de::from_slice, ser, Value};
 use std::fmt;
 use std::io;
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct GetAssertionResult(pub AssertionObject);
-
-impl GetAssertionResult {
-    pub fn from_ctap1(
-        input: &[u8],
-        rp_id_hash: &RpIdHash,
-        key_handle: &PublicKeyCredentialDescriptor,
-    ) -> Result<GetAssertionResult, CommandError> {
-        let parse_authentication = |input| {
-            // Parsing an u8, then a u32, and the rest is the signature
-            let (rest, (user_presence, counter)) = tuple((be_u8, be_u32))(input)?;
-            let signature = Vec::from(rest);
-            Ok((user_presence, counter, signature))
-        };
-        let (user_presence, counter, signature) =
-            parse_authentication(input).map_err(|e: nom::Err<VerboseError<_>>| {
-                error!("error while parsing authentication: {:?}", e);
-                CommandError::Deserializing(DesError::custom("unable to parse authentication"))
-            })?;
-
-        let mut flags = AuthenticatorDataFlags::empty();
-        if user_presence == 1 {
-            flags |= AuthenticatorDataFlags::USER_PRESENT;
-        }
-        let auth_data = AuthenticatorData {
-            rp_id_hash: rp_id_hash.clone(),
-            flags,
-            counter,
-            credential_data: None,
-            extensions: Default::default(),
-        };
-        let assertion = Assertion {
-            credentials: Some(key_handle.clone()),
-            signature,
-            user: None,
-            auth_data,
-        };
-
-        Ok(GetAssertionResult(AssertionObject(vec![assertion])))
-    }
-}
 
 #[derive(Clone, Copy, Debug, Serialize)]
 #[cfg_attr(test, derive(Deserialize))]
@@ -300,40 +259,6 @@ impl PinUvAuthCommand for GetAssertion {
     }
 }
 
-impl PreFlightable for GetAssertion {
-    fn get_client_data_hash(&self) -> &ClientDataHash {
-        &self.client_data_hash
-    }
-
-    fn get_credential_id_list(&self) -> &[PublicKeyCredentialDescriptor] {
-        &self.allow_list
-    }
-
-    fn set_credential_id_list(&mut self, list: Vec<PublicKeyCredentialDescriptor>) {
-        self.allow_list = list;
-    }
-
-    fn handle_ctap1_pre_flight_key<Dev: FidoDevice>(
-        &mut self,
-        _dev: &mut Dev,
-        key_handle: Option<PublicKeyCredentialDescriptor>,
-    ) -> Result<(), AuthenticatorError> {
-        match key_handle {
-            Some(key_handle) => {
-                self.allow_list = vec![key_handle];
-                Ok(())
-            }
-            None => {
-                self.allow_list.clear();
-                Err(
-                    HIDError::Command(CommandError::StatusCode(StatusCode::NoCredentials, None))
-                        .into(),
-                )
-            }
-        }
-    }
-}
-
 impl Serialize for GetAssertion {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -379,7 +304,7 @@ impl Serialize for GetAssertion {
         }
         if let Some(pin_uv_auth_param) = &self.pin_uv_auth_param {
             map.serialize_entry(&6, &pin_uv_auth_param)?;
-            map.serialize_entry(&7, &pin_uv_auth_param.pin_auth_token.pin_protocol.id())?;
+            map.serialize_entry(&7, &pin_uv_auth_param.pin_protocol.id())?;
         }
         map.end()
     }
@@ -408,10 +333,10 @@ impl RequestCtap1 for GetAssertion {
 
         debug!("sending key_handle = {:?}", key_handle);
 
-        let flags = if self.options.user_presence.unwrap_or(false) {
+        let flags = if self.options.user_presence.unwrap_or(true) {
             U2F_REQUEST_USER_PRESENCE
         } else {
-            0
+            U2F_DONT_ENFORCE_USER_PRESENCE_AND_SIGN
         };
         let mut auth_data =
             Vec::with_capacity(2 * PARAMETER_SIZE + 1 /* key_handle_len */ + key_handle.id.len());
@@ -489,7 +414,7 @@ impl RequestCtap2 for GetAssertion {
                     assertions.push(new_cred.into());
                 }
 
-                Ok(GetAssertionResult(AssertionObject(assertions)))
+                Ok(GetAssertionResult(assertions))
             } else {
                 let data: Value = from_slice(&input[1..]).map_err(CommandError::Deserializing)?;
                 Err(CommandError::StatusCode(status, Some(data)).into())
@@ -522,11 +447,48 @@ impl From<GetAssertionResponse> for Assertion {
     }
 }
 
-// TODO(baloo): Move this to src/ctap2/mod.rs?
 #[derive(Debug, PartialEq, Eq)]
-pub struct AssertionObject(pub Vec<Assertion>);
+pub struct GetAssertionResult(pub Vec<Assertion>);
 
-impl AssertionObject {
+impl GetAssertionResult {
+    pub fn from_ctap1(
+        input: &[u8],
+        rp_id_hash: &RpIdHash,
+        key_handle: &PublicKeyCredentialDescriptor,
+    ) -> Result<GetAssertionResult, CommandError> {
+        let parse_authentication = |input| {
+            // Parsing an u8, then a u32, and the rest is the signature
+            let (rest, (user_presence, counter)) = tuple((be_u8, be_u32))(input)?;
+            let signature = Vec::from(rest);
+            Ok((user_presence, counter, signature))
+        };
+        let (user_presence, counter, signature) =
+            parse_authentication(input).map_err(|e: nom::Err<VerboseError<_>>| {
+                error!("error while parsing authentication: {:?}", e);
+                CommandError::Deserializing(DesError::custom("unable to parse authentication"))
+            })?;
+
+        let mut flags = AuthenticatorDataFlags::empty();
+        if user_presence == 1 {
+            flags |= AuthenticatorDataFlags::USER_PRESENT;
+        }
+        let auth_data = AuthenticatorData {
+            rp_id_hash: rp_id_hash.clone(),
+            flags,
+            counter,
+            credential_data: None,
+            extensions: Default::default(),
+        };
+        let assertion = Assertion {
+            credentials: Some(key_handle.clone()),
+            signature,
+            user: None,
+            auth_data,
+        };
+
+        Ok(GetAssertionResult(vec![assertion]))
+    }
+
     pub fn u2f_sign_data(&self) -> Vec<u8> {
         if let Some(first) = self.0.first() {
             let mut res = Vec::new();
@@ -640,17 +602,17 @@ pub mod test {
     };
     use crate::ctap2::attestation::{AAGuid, AuthenticatorData, AuthenticatorDataFlags};
     use crate::ctap2::client_data::{Challenge, CollectedClientData, TokenBinding, WebauthnType};
-    use crate::ctap2::commands::get_assertion::AssertionObject;
     use crate::ctap2::commands::get_info::tests::AAGUID_RAW;
     use crate::ctap2::commands::get_info::{
         AuthenticatorInfo, AuthenticatorOptions, AuthenticatorVersion,
     };
     use crate::ctap2::commands::RequestCtap1;
-    use crate::ctap2::preflight::PreFlightable;
+    use crate::ctap2::preflight::{
+        do_credential_list_filtering_ctap1, do_credential_list_filtering_ctap2,
+    };
     use crate::ctap2::server::{
         PublicKeyCredentialDescriptor, RelyingParty, RelyingPartyWrapper, RpIdHash, Transport, User,
     };
-    use crate::errors::AuthenticatorError;
     use crate::transport::device_selector::Device;
     use crate::transport::hid::HIDDevice;
     use crate::transport::FidoDevice;
@@ -814,7 +776,7 @@ pub mod test {
             auth_data: expected_auth_data,
         };
 
-        let expected = GetAssertionResult(AssertionObject(vec![expected_assertion]));
+        let expected = GetAssertionResult(vec![expected_assertion]);
         let response = device.send_cbor(&assertion).unwrap();
         assert_eq!(response, expected);
     }
@@ -906,11 +868,18 @@ pub mod test {
             U2F_CHECK_IS_REGISTERED,
             SW_CONDITIONS_NOT_SATISFIED,
         );
-        assert_matches!(assertion.do_pre_flight(&mut device), Ok(()));
+        let key_handle = do_credential_list_filtering_ctap1(
+            &mut device,
+            &assertion.allow_list,
+            &assertion.rp,
+            &assertion.client_data_hash,
+        )
+        .expect("Did not find a key_handle, even though it should have");
+        assertion.allow_list = vec![key_handle];
         let (ctap1_request, key_handle) = assertion.ctap1_format().unwrap();
+        assert_eq!(key_handle, allowed_key);
         // Check if the request is going to be correct
         assert_eq!(ctap1_request, GET_ASSERTION_SAMPLE_REQUEST_CTAP1);
-        assert_eq!(key_handle, allowed_key);
 
         // Now do it again, but parse the actual response
         // Pre-flighting is not done automatically
@@ -940,7 +909,7 @@ pub mod test {
             auth_data: expected_auth_data,
         };
 
-        let expected = GetAssertionResult(AssertionObject(vec![expected_assertion]));
+        let expected = GetAssertionResult(vec![expected_assertion]);
 
         assert_eq!(response, expected);
     }
@@ -984,11 +953,15 @@ pub mod test {
         device.set_cid(cid);
 
         assert_matches!(
-            assertion.do_pre_flight(&mut device),
-            Err(AuthenticatorError::HIDError(HIDError::Command(
-                CommandError::StatusCode(StatusCode::NoCredentials, ..)
-            )))
+            do_credential_list_filtering_ctap1(
+                &mut device,
+                &assertion.allow_list,
+                &assertion.rp,
+                &assertion.client_data_hash,
+            ),
+            None
         );
+        assertion.allow_list = vec![];
         // It should also fail when trying to format
         assert_matches!(
             assertion.ctap1_format(),
@@ -1003,10 +976,13 @@ pub mod test {
             assertion.allow_list = allow_list;
 
             assert_matches!(
-                assertion.do_pre_flight(&mut device),
-                Err(AuthenticatorError::HIDError(HIDError::Command(
-                    CommandError::StatusCode(StatusCode::NoCredentials, ..)
-                )))
+                do_credential_list_filtering_ctap1(
+                    &mut device,
+                    &assertion.allow_list,
+                    &assertion.rp,
+                    &assertion.client_data_hash,
+                ),
+                None
             );
         }
 
@@ -1035,13 +1011,18 @@ pub mod test {
             U2F_CHECK_IS_REGISTERED,
             SW_CONDITIONS_NOT_SATISFIED,
         );
-        assertion
-            .do_pre_flight(&mut device)
-            .expect("Expected pre-flight to succeed.");
+        let key_handle = do_credential_list_filtering_ctap1(
+            &mut device,
+            &assertion.allow_list,
+            &assertion.rp,
+            &assertion.client_data_hash,
+        )
+        .expect("Did not find a key_handle, even though it should have");
+        assertion.allow_list = vec![key_handle];
         let (ctap1_request, key_handle) = assertion.ctap1_format().unwrap();
+        assert_eq!(key_handle, ok_key_handle);
         // Check if the request is going to be correct
         assert_eq!(ctap1_request, GET_ASSERTION_SAMPLE_REQUEST_CTAP1);
-        assert_eq!(key_handle, ok_key_handle);
 
         // Now do it again, but parse the actual response
         // Pre-flighting is not done automatically
@@ -1071,7 +1052,7 @@ pub mod test {
             auth_data: expected_auth_data,
         };
 
-        let expected = GetAssertionResult(AssertionObject(vec![expected_assertion]));
+        let expected = GetAssertionResult(vec![expected_assertion]);
 
         assert_eq!(response, expected);
     }
@@ -1085,7 +1066,7 @@ pub mod test {
             cross_origin: false,
             token_binding: Some(TokenBinding::Present(String::from("AAECAw"))),
         };
-        let mut assertion = GetAssertion::new(
+        let assertion = GetAssertion::new(
             client_data.hash().expect("failed to serialize client data"),
             RelyingPartyWrapper::Data(RelyingParty {
                 id: String::from("example.com"),
@@ -1320,7 +1301,15 @@ pub mod test {
         msg.extend(&GET_ASSERTION_SAMPLE_RESPONSE_CTAP2[293..]);
         device.add_read(&msg, 0);
 
-        assert_matches!(assertion.do_pre_flight(&mut device), Ok(()));
+        assert_matches!(
+            do_credential_list_filtering_ctap2(
+                &mut device,
+                &assertion.allow_list,
+                &assertion.rp,
+                None,
+            ),
+            Ok(..)
+        );
     }
 
     // Manually assembled according to https://www.w3.org/TR/webauthn-2/#clientdatajson-serialization
