@@ -238,6 +238,7 @@ fn main() {
         user_presence_req: true,
     };
 
+    let mut no_cred_errors_done = false;
     loop {
         let (sign_tx, sign_rx) = channel();
         let callback = StateCallback::new(Box::new(move |rv| {
@@ -254,6 +255,9 @@ fn main() {
         match sign_result {
             Ok(SignResult::CTAP1(..)) => panic!("Requested CTAP2, but got CTAP1 results!"),
             Ok(SignResult::CTAP2(..)) => {
+                if !no_cred_errors_done {
+                    panic!("Should have errored out with NoCredentials, but it succeeded.");
+                }
                 println!("Successfully signed!");
                 if ctap_args.allow_list.len() > 1 {
                     println!("Quitting.");
@@ -276,10 +280,28 @@ fn main() {
                 None,
             ))))
             | Err(AuthenticatorError::UnsupportedOption(UnsupportedOption::EmptyAllowList)) => {
-                println!("Got an 'no credentials' error, as expected with an empty allow-list.");
-                println!("Extending the list to contain one valid handle.");
-                let registered_handle = registered_key_handle.as_ref().unwrap().clone();
-                ctap_args.allow_list = vec![registered_handle];
+                if ctap_args.allow_list.is_empty() {
+                    // Try again with a list of false creds. We should end up here again.
+                    println!(
+                        "Got an 'no credentials' error, as expected with an empty allow-list."
+                    );
+                    println!("Extending the list to contain only fake handles.");
+                    ctap_args.allow_list = vec![];
+                    for ii in 0..10 {
+                        ctap_args.allow_list.push(PublicKeyCredentialDescriptor {
+                            id: vec![ii; 50],
+                            transports: vec![Transport::USB],
+                        });
+                    }
+                } else {
+                    println!(
+                        "Got an 'no credentials' error, as expected with an all-fake allow-list."
+                    );
+                    println!("Extending the list to contain one valid handle.");
+                    let registered_handle = registered_key_handle.as_ref().unwrap().clone();
+                    ctap_args.allow_list = vec![registered_handle];
+                    no_cred_errors_done = true;
+                }
                 continue;
             }
             Err(e) => panic!("Registration failed: {:?}", e),

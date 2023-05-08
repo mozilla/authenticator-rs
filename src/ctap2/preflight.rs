@@ -3,6 +3,7 @@ use super::commands::get_assertion::{GetAssertion, GetAssertionOptions};
 use super::commands::{CommandError, PinUvAuthCommand, RequestCtap1, Retryable, StatusCode};
 use crate::authenticatorservice::GetAssertionExtensions;
 use crate::consts::{PARAMETER_SIZE, U2F_AUTHENTICATE, U2F_CHECK_IS_REGISTERED};
+use crate::crypto::PinUvAuthToken;
 use crate::ctap2::server::{PublicKeyCredentialDescriptor, RelyingPartyWrapper};
 use crate::errors::AuthenticatorError;
 use crate::transport::errors::{ApduErrorStatus, HIDError};
@@ -27,9 +28,12 @@ impl<'assertion> RequestCtap1 for CheckKeyHandle<'assertion> {
     type AdditionalInfo = ();
 
     fn ctap1_format(&self) -> Result<(Vec<u8>, Self::AdditionalInfo), HIDError> {
+        // In theory, we only need to do this for up=true, for up=false, we could
+        // use U2F_DONT_ENFORCE_USER_PRESENCE_AND_SIGN instead and use the answer directly.
+        // But that would involve another major refactoring to implement, and so we accept
+        // that we will send the final request twice to the authenticator. Once with
+        // U2F_CHECK_IS_REGISTERED followed by U2F_DONT_ENFORCE_USER_PRESENCE_AND_SIGN.
         let flags = U2F_CHECK_IS_REGISTERED;
-        // TODO(MS): Need to check "up" here. If up==false, set to 0x08? Or not? Spec is
-        // ambiguous
         let mut auth_data = Vec::with_capacity(2 * PARAMETER_SIZE + 1 + self.key_handle.len());
 
         auth_data.extend_from_slice(self.client_data_hash);
@@ -63,149 +67,130 @@ impl<'assertion> RequestCtap1 for CheckKeyHandle<'assertion> {
     }
 }
 
-pub(crate) trait PreFlightable: PinUvAuthCommand {
-    fn get_client_data_hash(&self) -> &ClientDataHash;
-    fn get_credential_id_list(&self) -> &[PublicKeyCredentialDescriptor];
-    fn set_credential_id_list(&mut self, list: Vec<PublicKeyCredentialDescriptor>);
-    /// "pre-flight": In order to determine whether authenticatorMakeCredential's excludeList or
-    /// authenticatorGetAssertion's allowList contain credential IDs that are already
-    /// present on an authenticator, a platform typically invokes authenticatorGetAssertion
-    /// with the "up" option key set to false and optionally pinUvAuthParam one or more times.
-    fn do_pre_flight<Dev: FidoDevice>(&mut self, dev: &mut Dev) -> Result<(), AuthenticatorError> {
-        debug!("------------------------------------------------------------------");
-        debug!("Doing pre-flight");
-        debug!("------------------------------------------------------------------");
-
-        match dev.get_authenticator_info() {
-            Some(info) => {
-                if let Some(max_key_length) = info.max_credential_id_length {
-                    // The device only supports keys up to a certain length.
-                    // Filter out all keys that are longer, because they can't be
-                    // from this device anyways.
-                    if max_key_length > 0 {
-                        let mut list = self.get_credential_id_list().to_vec();
-                        list.retain(|k| k.id.len() <= max_key_length);
-                        self.set_credential_id_list(list);
-                    }
-                }
-                // Step 1.1: Find out how long the exclude_list/allow_list is allowed to be
-                //           If the token doesn't tell us, we assume a length of 1
-                // TODO(MS): Chromium also checks the max_credential_id_length, and if that is 0 also
-                //           falls back to max_list_len = 1, but doesn't give an explanation as to why.
-                self.do_pre_flight_ctap2(info.max_credential_count_in_list.unwrap_or(1), dev)
-            }
-            None => self.do_pre_flight_ctap1(dev),
-        }
-    }
-
-    fn handle_ctap1_pre_flight_key<Dev: FidoDevice>(
-        &mut self,
-        dev: &mut Dev,
-        key_handle: Option<PublicKeyCredentialDescriptor>,
-    ) -> Result<(), AuthenticatorError>;
-
-    fn do_pre_flight_ctap1<Dev: FidoDevice>(
-        &mut self,
-        dev: &mut Dev,
-    ) -> Result<(), AuthenticatorError> {
-        let key_handle = self
-            .get_credential_id_list()
-            .iter()
-            // key-handles in CTAP1 are limited to 255 bytes, but are not limited in CTAP2.
-            // Filter out key-handles that are too long (can happen if this is a CTAP2-request,
-            // but the token only speaks CTAP1).
-            .filter(|key_handle| key_handle.id.len() < 256)
-            .find_map(|key_handle| {
-                let check_command = CheckKeyHandle {
-                    key_handle: key_handle.id.as_ref(),
-                    client_data_hash: self.get_client_data_hash().as_ref(),
-                    rp: self.get_rp(),
-                };
-                let res = dev.send_ctap1(&check_command);
-                match res {
-                    Ok(_) => Some(key_handle.clone()),
-                    _ => None,
-                }
-            });
-        self.handle_ctap1_pre_flight_key(dev, key_handle)
-    }
-
-    fn do_pre_flight_ctap2<Dev: FidoDevice>(
-        &mut self,
-        chunk_size: usize,
-        dev: &mut Dev,
-    ) -> Result<(), AuthenticatorError> {
-        // If there is max. one entry, we can skip all of this
-        if self.get_credential_id_list().len() <= 1 {
-            return Ok(());
-        }
-
-        let original_list = self.get_credential_id_list().to_vec();
-        let chunked_list = original_list.chunks(chunk_size);
-        // Step 1.2: Return early, if we only have one chunk anyways
-        if chunked_list.len() <= 1 {
-            return Ok(());
-        }
-
-        // Step 2: If we have more than one chunk: Loop over all, doing GetAssertion
-        //         and if one of them comes back with a success, use only that chunk.
-        self.set_credential_id_list(vec![]);
-        for chunk in chunked_list {
-            let mut silent_assert = GetAssertion::new(
-                ClientDataHash(Sha256::digest("").into()),
-                self.get_rp().clone(),
-                chunk.to_vec(),
-                GetAssertionOptions {
-                    user_verification: if self.get_pin_uv_auth_param().is_some() {
-                        None
-                    } else {
-                        Some(false)
-                    },
-                    user_presence: Some(false),
-                },
-                GetAssertionExtensions::default(),
-                None,
-                None,
-            );
-            silent_assert.set_pin_uv_auth_param(
-                self.get_pin_uv_auth_param()
-                    .map(|p| p.pin_auth_token.clone()),
-            )?;
-            let res = dev.send_msg(&silent_assert); // TODO(MS): Cancellable!
+/// "pre-flight": In order to determine whether authenticatorMakeCredential's excludeList or
+/// authenticatorGetAssertion's allowList contain credential IDs that are already
+/// present on an authenticator, a platform typically invokes authenticatorGetAssertion
+/// with the "up" option key set to false and optionally pinUvAuthParam one or more times.
+/// For CTAP1, the resulting list will always be of length 1.
+pub(crate) fn do_credential_list_filtering_ctap1<Dev: FidoDevice>(
+    dev: &mut Dev,
+    cred_list: &[PublicKeyCredentialDescriptor],
+    rp: &RelyingPartyWrapper,
+    client_data_hash: &ClientDataHash,
+) -> Option<PublicKeyCredentialDescriptor> {
+    let key_handle = cred_list
+        .iter()
+        // key-handles in CTAP1 are limited to 255 bytes, but are not limited in CTAP2.
+        // Filter out key-handles that are too long (can happen if this is a CTAP2-request,
+        // but the token only speaks CTAP1).
+        .filter(|key_handle| key_handle.id.len() < 256)
+        .find_map(|key_handle| {
+            let check_command = CheckKeyHandle {
+                key_handle: key_handle.id.as_ref(),
+                client_data_hash: client_data_hash.as_ref(),
+                rp,
+            };
+            let res = dev.send_ctap1(&check_command);
             match res {
-                Ok(..) => {
-                    // This chunk contains a key_handle that is already known to the device.
-                    // Replace credential_id_list with current chunk.
-                    self.set_credential_id_list(chunk.to_vec());
-                    break;
-                }
-                Err(HIDError::Command(CommandError::StatusCode(StatusCode::NoCredentials, _))) => {
-                    // No-op: Go to next chunk.
-                }
-                Err(e) => {
-                    // Some unexpected error
-                    return Err(e.into());
-                }
+                Ok(_) => Some(key_handle.clone()),
+                _ => None,
             }
-        }
+        });
+    key_handle
+}
 
-        // Step 3: Now ExcludeList/AllowList is either empty or has one batch with a 'known' credential.
-        //         Send it as a normal Request and expect a "CredentialExcluded"-error in case of
-        //         MakeCredential or a Success in case of GetAssertion
-        Ok(())
+/// "pre-flight": In order to determine whether authenticatorMakeCredential's excludeList or
+/// authenticatorGetAssertion's allowList contain credential IDs that are already
+/// present on an authenticator, a platform typically invokes authenticatorGetAssertion
+/// with the "up" option key set to false and optionally pinUvAuthParam one or more times.
+pub(crate) fn do_credential_list_filtering_ctap2<Dev: FidoDevice>(
+    dev: &mut Dev,
+    cred_list: &[PublicKeyCredentialDescriptor],
+    rp: &RelyingPartyWrapper,
+    pin_uv_auth_token: Option<PinUvAuthToken>,
+) -> Result<Vec<PublicKeyCredentialDescriptor>, AuthenticatorError> {
+    let info = dev
+        .get_authenticator_info()
+        .ok_or(HIDError::DeviceNotInitialized)?;
+    let mut cred_list = cred_list.to_vec();
+    // Step 1.0: Find out how long the exclude_list/allow_list is allowed to be
+    //           If the token doesn't tell us, we assume a length of 1
+    let mut chunk_size = match info.max_credential_count_in_list {
+        // Length 0 is not allowed by the spec, so we assume the device can't be trusted, which means
+        // falling back to a chunk size of 1 as the bare minimum.
+        None | Some(0) => 1,
+        Some(x) => x,
+    };
+
+    // Step 1.1: The device only supports keys up to a certain length.
+    //           Filter out all keys that are longer, because they can't be
+    //           from this device anyways.
+    match info.max_credential_id_length {
+        None => { /* no-op */ }
+        // Length 0 is not allowed by the spec, so we assume the device can't be trusted, which means
+        // falling back to a chunk size of 1 as the bare minimum.
+        Some(0) => {
+            chunk_size = 1;
+        }
+        Some(max_key_length) => {
+            cred_list.retain(|k| k.id.len() <= max_key_length);
+        }
     }
 
-    fn needs_pre_flight<Dev: FidoDevice>(&mut self, dev: &Dev) -> bool {
-        match dev.get_authenticator_info() {
-            Some(info) => {
-                // Step 1.1: Find out how long the exclude_list/allow_list is allowed to be
-                //           If the token doesn't tell us, we assume a length of 1
-                // TODO(MS): Chromium also checks the max_credential_id_length, and if that is 0 also
-                //           falls back to max_list_len = 1, but doesn't give an explanation as to why.
-                let max_len = info.max_credential_count_in_list.unwrap_or(1);
-                self.get_credential_id_list().len() > max_len
+    // Step 1.2: Return early, if we only have one chunk anyways
+    if cred_list.len() <= chunk_size {
+        return Ok(cred_list);
+    }
+
+    let chunked_list = cred_list.chunks(chunk_size);
+
+    // Step 2: If we have more than one chunk: Loop over all, doing GetAssertion
+    //         and if one of them comes back with a success, use only that chunk.
+    let mut final_list = Vec::new();
+    for chunk in chunked_list {
+        let mut silent_assert = GetAssertion::new(
+            ClientDataHash(Sha256::digest("").into()),
+            rp.clone(),
+            chunk.to_vec(),
+            GetAssertionOptions {
+                user_verification: if pin_uv_auth_token.is_some() {
+                    None
+                } else {
+                    Some(false)
+                },
+                user_presence: Some(false),
+            },
+            GetAssertionExtensions::default(),
+            None,
+            None,
+        );
+        silent_assert.set_pin_uv_auth_param(pin_uv_auth_token.clone())?;
+        let res = dev.send_msg(&silent_assert);
+        match res {
+            Ok(response) => {
+                // This chunk contains a key_handle that is already known to the device.
+                // Filter out all credentials the device returned. Those are valid.
+                let credential_ids = response
+                    .0
+                    .iter()
+                    .filter_map(|a| a.credentials.clone())
+                    .collect();
+                // Replace credential_id_list with the valid credentials
+                final_list = credential_ids;
+                break;
             }
-            None => false,
+            Err(HIDError::Command(CommandError::StatusCode(StatusCode::NoCredentials, _))) => {
+                // No-op: Go to next chunk.
+            }
+            Err(e) => {
+                // Some unexpected error
+                return Err(e.into());
+            }
         }
     }
+
+    // Step 3: Now ExcludeList/AllowList is either empty or has one batch with a 'known' credential.
+    //         Send it as a normal Request and expect a "CredentialExcluded"-error in case of
+    //         MakeCredential or a Success in case of GetAssertion
+    Ok(final_list)
 }

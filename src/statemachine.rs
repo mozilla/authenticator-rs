@@ -13,13 +13,15 @@ use crate::ctap2::commands::get_assertion::{
     GetAssertion, GetAssertionOptions, GetAssertionResult,
 };
 use crate::ctap2::commands::make_credentials::{
-    MakeCredentials, MakeCredentialsOptions, MakeCredentialsResult,
+    dummy_make_credentials_cmd, MakeCredentials, MakeCredentialsOptions, MakeCredentialsResult,
 };
 use crate::ctap2::commands::reset::Reset;
 use crate::ctap2::commands::{
     repackage_pin_errors, CommandError, PinUvAuthCommand, PinUvAuthResult, Request, StatusCode,
 };
-use crate::ctap2::preflight::PreFlightable;
+use crate::ctap2::preflight::{
+    do_credential_list_filtering_ctap1, do_credential_list_filtering_ctap2,
+};
 use crate::ctap2::server::{
     PublicKeyCredentialDescriptor, RelyingParty, RelyingPartyWrapper, ResidentKeyRequirement,
     RpIdHash, UserVerificationRequirement,
@@ -68,6 +70,18 @@ where
     }
 
     (&app_ids[0], vec![])
+}
+
+macro_rules! unwrap_result {
+    ($item: expr, $callback: expr) => {
+        match $item {
+            Ok(r) => r,
+            Err(e) => {
+                $callback.call(Err(e.into()));
+                return;
+            }
+        }
+    };
 }
 
 #[derive(Default)]
@@ -277,29 +291,32 @@ impl StateMachine {
             return Err(AuthenticatorError::PinError(PinError::PinNotSet));
         }
 
-        let (res, pin_auth_token) = if info.options.pin_uv_auth_token == Some(true) {
+        if info.options.pin_uv_auth_token == Some(true) {
             if !skip_uv && supports_uv {
                 // CTAP 2.1 - UV
                 let pin_auth_token = dev
-                    .get_pin_uv_auth_token_using_uv_with_permissions(permission, cmd.get_rp().id());
-                (
-                    PinUvAuthResult::SuccessGetPinUvAuthTokenUsingUvWithPermissions,
-                    pin_auth_token,
-                )
+                    .get_pin_uv_auth_token_using_uv_with_permissions(permission, cmd.get_rp().id())
+                    .map_err(|e| repackage_pin_errors(dev, e))?;
+                cmd.set_pin_uv_auth_param(Some(pin_auth_token.clone()))?;
+                Ok(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingUvWithPermissions(pin_auth_token))
             } else {
                 // CTAP 2.1 - PIN
                 // We did not take the `!skip_uv && supports_uv` branch, so we have
                 // `(skip_uv || !supports_uv)`. Moreover we did not exit early in the
                 // `(skip_uv || !supports_uv) && !pin_configured` case. So we have
                 // `pin_configured`.
-                let pin_auth_token = dev.get_pin_uv_auth_token_using_pin_with_permissions(
-                    cmd.pin(),
-                    permission,
-                    cmd.get_rp().id(),
-                );
-                (
-                    PinUvAuthResult::SuccessGetPinUvAuthTokenUsingPinWithPermissions,
-                    pin_auth_token,
+                let pin_auth_token = dev
+                    .get_pin_uv_auth_token_using_pin_with_permissions(
+                        cmd.pin(),
+                        permission,
+                        cmd.get_rp().id(),
+                    )
+                    .map_err(|e| repackage_pin_errors(dev, e))?;
+                cmd.set_pin_uv_auth_param(Some(pin_auth_token.clone()))?;
+                Ok(
+                    PinUvAuthResult::SuccessGetPinUvAuthTokenUsingPinWithPermissions(
+                        pin_auth_token,
+                    ),
                 )
             }
         } else {
@@ -318,13 +335,12 @@ impl StateMachine {
                 return Ok(PinUvAuthResult::UsingInternalUv);
             }
 
-            let pin_auth_token = dev.get_pin_token(cmd.pin());
-            (PinUvAuthResult::SuccessGetPinToken, pin_auth_token)
-        };
-
-        let pin_auth_token = pin_auth_token.map_err(|e| repackage_pin_errors(dev, e))?;
-        cmd.set_pin_uv_auth_param(Some(pin_auth_token))?;
-        Ok(res)
+            let pin_auth_token = dev
+                .get_pin_token(cmd.pin())
+                .map_err(|e| repackage_pin_errors(dev, e))?;
+            cmd.set_pin_uv_auth_param(Some(pin_auth_token.clone()))?;
+            Ok(PinUvAuthResult::SuccessGetPinToken(pin_auth_token))
+        }
     }
 
     /// PUAP, as per spec: PinUvAuthParam
@@ -547,10 +563,10 @@ impl StateMachine {
 
                 let mut skip_uv = false;
                 while alive() {
-                    let mut permissions = PinUvAuthTokenPermission::MakeCredential;
-                    if makecred.needs_pre_flight(&dev) {
-                        permissions |= PinUvAuthTokenPermission::GetAssertion;
-                    }
+                    // Requesting both because pre-flighting (credential list filtering)
+                    // can potentially send GetAssertion-commands
+                    let permissions = PinUvAuthTokenPermission::MakeCredential
+                        | PinUvAuthTokenPermission::GetAssertion;
 
                     let pin_uv_auth_result = match Self::determine_puap_if_needed(
                         &mut makecred,
@@ -568,12 +584,37 @@ impl StateMachine {
                         }
                     };
 
-                    match makecred.do_pre_flight(&mut dev) {
-                        Ok(()) => { /* Continue with the request */ }
-                        Err(e) => {
-                            warn!("error happened: {e}");
-                            callback.call(Err(e));
-                            break;
+                    // Do "pre-flight": Filter the exclude-list
+                    if dev.get_authenticator_info().is_some() {
+                        makecred.exclude_list = unwrap_result!(
+                            do_credential_list_filtering_ctap2(
+                                &mut dev,
+                                &makecred.exclude_list,
+                                &makecred.rp,
+                                pin_uv_auth_result.get_pin_uv_auth_token(),
+                            ),
+                            callback
+                        );
+                    } else {
+                        let key_handle = do_credential_list_filtering_ctap1(
+                            &mut dev,
+                            &makecred.exclude_list,
+                            &makecred.rp,
+                            &makecred.client_data_hash,
+                        );
+                        // That handle was already registered with the token
+                        if key_handle.is_some() {
+                            // Now we need to send a dummy registration request, to make the token blink
+                            // Spec says "dummy appid and invalid challenge". We use the same, as we do for
+                            // making the token blink upon device selection.
+                            let msg = dummy_make_credentials_cmd();
+                            let _ = dev.send_msg_cancellable(&msg, alive); // Ignore answer, return "CredentialExcluded"
+                            callback.call(Err(HIDError::Command(CommandError::StatusCode(
+                                StatusCode::CredentialExcluded,
+                                None,
+                            ))
+                            .into()));
+                            return;
                         }
                     }
 
@@ -610,7 +651,7 @@ impl StateMachine {
                         Err(HIDError::Command(CommandError::StatusCode(
                             StatusCode::PinAuthInvalid,
                             _,
-                        ))) if pin_uv_auth_result == PinUvAuthResult::UsingInternalUv => {
+                        ))) if matches!(pin_uv_auth_result, PinUvAuthResult::UsingInternalUv) => {
                             // This should only happen for CTAP2.0 tokens that use internal UV and
                             // failed (e.g. wrong fingerprint used), while doing MakeCredentials
                             send_status(
@@ -622,7 +663,7 @@ impl StateMachine {
                         Err(HIDError::Command(CommandError::StatusCode(
                             StatusCode::PinRequired,
                             _,
-                        ))) if pin_uv_auth_result == PinUvAuthResult::UsingInternalUv => {
+                        ))) if matches!(pin_uv_auth_result, PinUvAuthResult::UsingInternalUv) => {
                             // This should only happen for CTAP2.0 tokens that use internal UV and failed
                             // repeatedly, so that we have to fall back to PINs
                             skip_uv = true;
@@ -631,8 +672,10 @@ impl StateMachine {
                         Err(HIDError::Command(CommandError::StatusCode(
                             StatusCode::UvBlocked,
                             _,
-                        ))) if pin_uv_auth_result
-                            == PinUvAuthResult::SuccessGetPinUvAuthTokenUsingUvWithPermissions =>
+                        ))) if matches!(
+                            pin_uv_auth_result,
+                            PinUvAuthResult::SuccessGetPinUvAuthTokenUsingUvWithPermissions(..)
+                        ) =>
                         {
                             // This should only happen for CTAP2.1 tokens that use internal UV and failed
                             // repeatedly, so that we have to fall back to PINs
@@ -802,13 +845,46 @@ impl StateMachine {
                         }
                     }
 
-                    match get_assertion.do_pre_flight(&mut dev) {
-                        Ok(()) => { /* Continue with the request */ }
-                        Err(e) => {
-                            warn!("error happened: {e}");
-                            callback.call(Err(e));
-                            break;
+                    // Do "pre-flight": Filter the allow-list
+                    let original_allow_list_was_empty = get_assertion.allow_list.is_empty();
+                    if dev.get_authenticator_info().is_some() {
+                        get_assertion.allow_list = unwrap_result!(
+                            do_credential_list_filtering_ctap2(
+                                &mut dev,
+                                &get_assertion.allow_list,
+                                &get_assertion.rp,
+                                pin_uv_auth_result.get_pin_uv_auth_token(),
+                            ),
+                            callback
+                        );
+                    } else {
+                        let key_handle = do_credential_list_filtering_ctap1(
+                            &mut dev,
+                            &get_assertion.allow_list,
+                            &get_assertion.rp,
+                            &get_assertion.client_data_hash,
+                        );
+                        match key_handle {
+                            Some(key_handle) => {
+                                get_assertion.allow_list = vec![key_handle];
+                            }
+                            None => {
+                                get_assertion.allow_list.clear();
+                            }
                         }
+                    }
+
+                    // If the incoming list was not empty, but the filtered list is, we have to error out
+                    if !original_allow_list_was_empty && get_assertion.allow_list.is_empty() {
+                        // We have to collect a user interaction
+                        let msg = dummy_make_credentials_cmd();
+                        let _ = dev.send_msg_cancellable(&msg, alive); // Ignore answer, return "NoCredentials"
+                        callback.call(Err(HIDError::Command(CommandError::StatusCode(
+                            StatusCode::NoCredentials,
+                            None,
+                        ))
+                        .into()));
+                        return;
                     }
 
                     debug!("------------------------------------------------------------------");
@@ -842,8 +918,8 @@ impl StateMachine {
                         let _ = selector.send(DeviceSelectorEvent::SelectedToken(dev.id()));
                     }
                     match resp {
-                        Ok(GetAssertionResult(assertion)) => {
-                            callback.call(Ok(SignResult::CTAP2(assertion)));
+                        Ok(assertions) => {
+                            callback.call(Ok(SignResult::CTAP2(assertions)));
                             break;
                         }
                         Err(HIDError::Command(CommandError::StatusCode(
@@ -857,7 +933,7 @@ impl StateMachine {
                         Err(HIDError::Command(CommandError::StatusCode(
                             StatusCode::OperationDenied,
                             _,
-                        ))) if pin_uv_auth_result == PinUvAuthResult::UsingInternalUv => {
+                        ))) if matches!(pin_uv_auth_result, PinUvAuthResult::UsingInternalUv) => {
                             // This should only happen for CTAP2.0 tokens that use internal UV and failed
                             // (e.g. wrong fingerprint used), while doing GetAssertion
                             // Yes, this is a different error code than for MakeCredential.
@@ -870,7 +946,7 @@ impl StateMachine {
                         Err(HIDError::Command(CommandError::StatusCode(
                             StatusCode::PinRequired,
                             _,
-                        ))) if pin_uv_auth_result == PinUvAuthResult::UsingInternalUv => {
+                        ))) if matches!(pin_uv_auth_result, PinUvAuthResult::UsingInternalUv) => {
                             // This should only happen for CTAP2.0 tokens that use internal UV and failed
                             // repeatedly, so that we have to fall back to PINs
                             skip_uv = true;
@@ -879,8 +955,10 @@ impl StateMachine {
                         Err(HIDError::Command(CommandError::StatusCode(
                             StatusCode::UvBlocked,
                             _,
-                        ))) if pin_uv_auth_result
-                            == PinUvAuthResult::SuccessGetPinUvAuthTokenUsingUvWithPermissions =>
+                        ))) if matches!(
+                            pin_uv_auth_result,
+                            PinUvAuthResult::SuccessGetPinUvAuthTokenUsingUvWithPermissions(..)
+                        ) =>
                         {
                             // This should only happen for CTAP2.1 tokens that use internal UV and failed
                             // repeatedly, so that we have to fall back to PINs
@@ -1313,7 +1391,7 @@ impl StateMachine {
                                     &rp_id_hash,
                                     &pkcd,
                                 ) {
-                                    Ok(GetAssertionResult(assertion)) => assertion,
+                                    Ok(assertions) => assertions,
                                     Err(_) => {
                                         callback.call(Err(errors::AuthenticatorError::U2FToken(
                                             errors::U2FTokenError::Unknown,

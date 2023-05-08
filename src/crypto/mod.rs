@@ -351,7 +351,8 @@ impl PinUvAuthToken {
         let pin_auth = self.pin_protocol.0.authenticate(&self.pin_token, message)?;
         Ok(PinUvAuthParam {
             pin_auth,
-            pin_auth_token: self,
+            pin_protocol: self.pin_protocol,
+            permissions: self.permissions,
         })
     }
 }
@@ -359,8 +360,9 @@ impl PinUvAuthToken {
 #[derive(Clone, Debug)]
 pub struct PinUvAuthParam {
     pin_auth: Vec<u8>,
-    /// The token this param was derived from
-    pub pin_auth_token: PinUvAuthToken,
+    pub pin_protocol: PinUvAuthProtocol,
+    #[allow(dead_code)] // Not yet used
+    permissions: PinUvAuthTokenPermission,
 }
 
 impl PinUvAuthParam {
@@ -368,11 +370,8 @@ impl PinUvAuthParam {
         let pin_protocol = PinUvAuthProtocol(Box::new(PinUvAuth1 {}));
         Self {
             pin_auth: vec![],
-            pin_auth_token: PinUvAuthToken {
-                pin_protocol,
-                pin_token: vec![],
-                permissions: PinUvAuthTokenPermission::empty(),
-            },
+            pin_protocol,
+            permissions: PinUvAuthTokenPermission::empty(),
         }
     }
 }
