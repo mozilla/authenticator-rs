@@ -84,6 +84,12 @@ pub trait AuthenticatorTransport {
         status: Sender<crate::StatusUpdate>,
         callback: StateCallback<crate::Result<crate::ResetResult>>,
     ) -> crate::Result<()>;
+    fn manage(
+        &mut self,
+        timeout: u64,
+        status: Sender<crate::StatusUpdate>,
+        callback: StateCallback<crate::Result<crate::ResetResult>>,
+    ) -> crate::Result<()>;
 }
 
 pub struct AuthenticatorService {
@@ -287,6 +293,39 @@ impl AuthenticatorService {
 
         Ok(())
     }
+
+    pub fn manage(
+        &mut self,
+        timeout: u64,
+        status: Sender<crate::StatusUpdate>,
+        callback: StateCallback<crate::Result<crate::ResetResult>>,
+    ) -> crate::Result<()> {
+        let iterable_transports = self.transports.clone();
+        if iterable_transports.is_empty() {
+            return Err(AuthenticatorError::NoConfiguredTransports);
+        }
+
+        debug!(
+            "Manage called with {} transports, iterable is {}",
+            self.transports.len(),
+            iterable_transports.len()
+        );
+
+        for (idx, transport_mutex) in iterable_transports.iter().enumerate() {
+            let mut transports_to_cancel = iterable_transports.clone();
+            transports_to_cancel.remove(idx);
+
+            debug!("reset transports_to_cancel {}", transports_to_cancel.len());
+
+            transport_mutex.lock().unwrap().manage(
+                timeout,
+                status.clone(),
+                clone_and_configure_cancellation_callback(callback.clone(), transports_to_cancel),
+            )?;
+        }
+
+        Ok(())
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -397,6 +436,15 @@ mod tests {
             &mut self,
             _timeout: u64,
             _new_pin: Pin,
+            _status: Sender<crate::StatusUpdate>,
+            _callback: StateCallback<crate::Result<crate::ResetResult>>,
+        ) -> crate::Result<()> {
+            unimplemented!();
+        }
+
+        fn manage(
+            &mut self,
+            _timeout: u64,
             _status: Sender<crate::StatusUpdate>,
             _callback: StateCallback<crate::Result<crate::ResetResult>>,
         ) -> crate::Result<()> {

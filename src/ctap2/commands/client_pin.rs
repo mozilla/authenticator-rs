@@ -676,7 +676,7 @@ impl AsRef<[u8]> for EncryptedPinToken {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Pin(String);
 
 impl fmt::Debug for Pin {

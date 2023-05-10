@@ -36,10 +36,10 @@ use crate::transport::{errors::HIDError, hid::HIDDevice, FidoDevice, Nonce};
 use crate::u2fprotocol::{u2f_init_device, u2f_is_keyhandle_valid, u2f_register, u2f_sign};
 use crate::u2ftypes::U2FDevice;
 use crate::{
-    send_status, AuthenticatorTransports, KeyHandle, RegisterFlags, RegisterResult, SignFlags,
-    SignResult, StatusPinUv, StatusUpdate,
+    send_status, AuthenticatorTransports, InteractiveRequest, KeyHandle, RegisterFlags,
+    RegisterResult, SignFlags, SignResult, StatusPinUv, StatusUpdate,
 };
-use std::sync::mpsc::{channel, Sender};
+use std::sync::mpsc::{channel, RecvError, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::Duration;
 
@@ -97,6 +97,7 @@ impl StateMachine {
     fn init_and_select(
         info: DeviceBuildParameters,
         selector: &Sender<DeviceSelectorEvent>,
+        status: &Sender<crate::StatusUpdate>,
         ctap2_only: bool,
         keep_alive: &dyn Fn() -> bool,
     ) -> Option<Device> {
@@ -123,22 +124,16 @@ impl StateMachine {
             return None;
         }
 
-        let write_only_clone = match dev.clone_device_as_write_only() {
-            Ok(x) => x,
-            Err(_) => {
-                // There is probably something seriously wrong here, if this happens.
-                // So `NotAToken()` is probably too weak a response here.
-                warn!("error while cloning device: {:?}", dev.id());
-                selector
-                    .send(DeviceSelectorEvent::NotAToken(dev.id()))
-                    .ok()?;
-                return None;
-            }
-        };
         let (tx, rx) = channel();
         selector
-            .send(DeviceSelectorEvent::ImAToken((write_only_clone, tx)))
+            .send(DeviceSelectorEvent::ImAToken((dev.id(), tx)))
             .ok()?;
+        send_status(
+            status,
+            crate::StatusUpdate::DeviceAvailable {
+                dev_info: dev.get_device_info(),
+            },
+        );
 
         // We can be cancelled from the user (through keep_alive()) or from the device selector
         // (through a DeviceCommand::Cancel on rx).  We'll combine those signals into a single
@@ -147,29 +142,50 @@ impl StateMachine {
 
         // Blocking recv. DeviceSelector will tell us what to do
         match rx.recv() {
-            Ok(DeviceCommand::Blink) => match dev.block_and_blink(&keep_blinking) {
-                BlinkResult::DeviceSelected => {
-                    // User selected us. Let DeviceSelector know, so it can cancel all other
-                    // outstanding open blink-requests.
-                    selector
-                        .send(DeviceSelectorEvent::SelectedToken(dev.id()))
-                        .ok()?;
+            Ok(DeviceCommand::Blink) => {
+                // Inform the user that there are multiple devices available.
+                // NOTE: We'll send this once per device, so the recipient should be prepared
+                // to receive this message multiple times.
+                send_status(status, crate::StatusUpdate::SelectDeviceNotice);
+                match dev.block_and_blink(&keep_blinking) {
+                    BlinkResult::DeviceSelected => {
+                        // User selected us. Let DeviceSelector know, so it can cancel all other
+                        // outstanding open blink-requests.
+                        selector
+                            .send(DeviceSelectorEvent::SelectedToken(dev.id()))
+                            .ok()?;
+
+                        send_status(
+                            status,
+                            crate::StatusUpdate::DeviceSelected(dev.get_device_info()),
+                        );
+                    }
+                    BlinkResult::Cancelled => {
+                        info!("Device {:?} was not selected", dev.id());
+                        return None;
+                    }
                 }
-                BlinkResult::Cancelled => {
-                    info!("Device {:?} was not selected", dev.id());
-                    return None;
-                }
-            },
+            }
             Ok(DeviceCommand::Cancel) => {
                 info!("Device {:?} was not selected", dev.id());
                 return None;
             }
             Ok(DeviceCommand::Removed) => {
                 info!("Device {:?} was removed", dev.id());
+                send_status(
+                    status,
+                    crate::StatusUpdate::DeviceUnavailable {
+                        dev_info: dev.get_device_info(),
+                    },
+                );
                 return None;
             }
             Ok(DeviceCommand::Continue) => {
                 // Just continue
+                send_status(
+                    status,
+                    crate::StatusUpdate::DeviceSelected(dev.get_device_info()),
+                );
             }
             Err(_) => {
                 warn!("Error when trying to receive messages from DeviceSelector! Exiting.");
@@ -200,9 +216,9 @@ impl StateMachine {
         }
         match rx.recv() {
             Ok(pin) => Ok(pin),
-            Err(_) => {
+            Err(RecvError) => {
                 // recv() can only fail, if the other side is dropping the Sender.
-                error!("Callback dropped the channel. Aborting.");
+                info!("Callback dropped the channel. Aborting.");
                 callback.call(Err(AuthenticatorError::CancelledByUser));
                 Err(())
             }
@@ -471,7 +487,7 @@ impl StateMachine {
             cbc.clone(),
             status,
             move |info, selector, status, alive| {
-                let mut dev = match Self::init_and_select(info, &selector, false, alive) {
+                let mut dev = match Self::init_and_select(info, &selector, &status, false, alive) {
                     None => {
                         return;
                     }
@@ -666,6 +682,13 @@ impl StateMachine {
                             skip_uv = true;
                             continue;
                         }
+                        Err(HIDError::Command(CommandError::StatusCode(
+                            StatusCode::CredentialExcluded,
+                            _,
+                        ))) => {
+                            callback.call(Err(AuthenticatorError::CredentialExcluded));
+                            break;
+                        }
                         Err(e) => {
                             warn!("error happened: {e}");
                             callback.call(Err(AuthenticatorError::HIDError(e)));
@@ -736,7 +759,7 @@ impl StateMachine {
             callback.clone(),
             status,
             move |info, selector, status, alive| {
-                let mut dev = match Self::init_and_select(info, &selector, false, alive) {
+                let mut dev = match Self::init_and_select(info, &selector, &status, false, alive) {
                     None => {
                         return;
                     }
@@ -963,6 +986,45 @@ impl StateMachine {
         }
     }
 
+    pub fn reset_helper(
+        dev: &mut Device,
+        selector: Sender<DeviceSelectorEvent>,
+        status: Sender<crate::StatusUpdate>,
+        callback: StateCallback<crate::Result<crate::ResetResult>>,
+        keep_alive: &dyn Fn() -> bool,
+    ) {
+        let reset = Reset {};
+        info!("Device {:?} continues with the reset process", dev.id());
+        debug!("------------------------------------------------------------------");
+        debug!("{:?}", reset);
+        debug!("------------------------------------------------------------------");
+
+        let resp = dev.send_cbor_cancellable(&reset, keep_alive);
+        if resp.is_ok() {
+            send_status(
+                &status,
+                crate::StatusUpdate::Success {
+                    dev_info: dev.get_device_info(),
+                },
+            );
+            // The DeviceSelector could already be dead, but it might also wait
+            // for us to respond, in order to cancel all other tokens in case
+            // we skipped the "blinking"-action and went straight for the actual
+            // request.
+            let _ = selector.send(DeviceSelectorEvent::SelectedToken(dev.id()));
+        }
+
+        match resp {
+            Ok(()) => callback.call(Ok(())),
+            Err(HIDError::DeviceNotSupported) | Err(HIDError::UnsupportedCommand) => {}
+            Err(HIDError::Command(CommandError::StatusCode(StatusCode::ChannelBusy, _))) => {}
+            Err(e) => {
+                warn!("error happened: {}", e);
+                callback.call(Err(AuthenticatorError::HIDError(e)));
+            }
+        }
+    }
+
     pub fn reset(
         &mut self,
         timeout: u64,
@@ -978,50 +1040,110 @@ impl StateMachine {
             callback.clone(),
             status,
             move |info, selector, status, alive| {
-                let reset = Reset {};
-                let mut dev = match Self::init_and_select(info, &selector, true, alive) {
+                let mut dev = match Self::init_and_select(info, &selector, &status, true, alive) {
                     None => {
                         return;
                     }
                     Some(dev) => dev,
                 };
-
-                info!("Device {:?} continues with the reset process", dev.id());
-                debug!("------------------------------------------------------------------");
-                debug!("{:?}", reset);
-                debug!("------------------------------------------------------------------");
-
-                let resp = dev.send_cbor_cancellable(&reset, alive);
-                if resp.is_ok() {
-                    send_status(
-                        &status,
-                        crate::StatusUpdate::Success {
-                            dev_info: dev.get_device_info(),
-                        },
-                    );
-                    // The DeviceSelector could already be dead, but it might also wait
-                    // for us to respond, in order to cancel all other tokens in case
-                    // we skipped the "blinking"-action and went straight for the actual
-                    // request.
-                    let _ = selector.send(DeviceSelectorEvent::SelectedToken(dev.id()));
-                }
-
-                match resp {
-                    Ok(()) => callback.call(Ok(())),
-                    Err(HIDError::DeviceNotSupported) | Err(HIDError::UnsupportedCommand) => {}
-                    Err(HIDError::Command(CommandError::StatusCode(
-                        StatusCode::ChannelBusy,
-                        _,
-                    ))) => {}
-                    Err(e) => {
-                        warn!("error happened: {}", e);
-                        callback.call(Err(AuthenticatorError::HIDError(e)));
-                    }
-                }
+                Self::reset_helper(&mut dev, selector, status, callback.clone(), alive);
             },
         );
 
         self.transaction = Some(try_or!(transaction, move |e| cbc.call(Err(e))));
+    }
+
+    pub fn set_or_change_pin_helper(
+        dev: &mut Device,
+        mut current_pin: Option<Pin>,
+        new_pin: Pin,
+        status: Sender<crate::StatusUpdate>,
+        callback: StateCallback<crate::Result<crate::ResetResult>>,
+        alive: &dyn Fn() -> bool,
+    ) {
+        let mut shared_secret = match dev.establish_shared_secret() {
+            Ok(s) => s,
+            Err(e) => {
+                callback.call(Err(AuthenticatorError::HIDError(e)));
+                return;
+            }
+        };
+
+        let authinfo = match dev.get_authenticator_info() {
+            Some(i) => i.clone(),
+            None => {
+                callback.call(Err(HIDError::DeviceNotInitialized.into()));
+                return;
+            }
+        };
+
+        // If the device has a min PIN use that, otherwise default to 4 according to Spec
+        if new_pin.as_bytes().len() < authinfo.min_pin_length.unwrap_or(4) as usize {
+            callback.call(Err(AuthenticatorError::PinError(PinError::PinIsTooShort)));
+            return;
+        }
+
+        // As per Spec: "Maximum PIN Length: UTF-8 representation MUST NOT exceed 63 bytes"
+        if new_pin.as_bytes().len() >= 64 {
+            callback.call(Err(AuthenticatorError::PinError(PinError::PinIsTooLong(
+                new_pin.as_bytes().len(),
+            ))));
+            return;
+        }
+
+        // Check if a client-pin is already set, or if a new one should be created
+        let res = if Some(true) == authinfo.options.client_pin {
+            let mut res;
+            let mut was_invalid = false;
+            let mut retries = None;
+            loop {
+                // current_pin will only be Some() in the interactive mode (running `manage()`)
+                // In case that PIN is wrong, we want to avoid an endless-loop here with re-trying
+                // that wrong PIN all the time. So we `take()` it, and only test it once.
+                // If that PIN is wrong, we fall back to the "ask_user_for_pin"-method.
+                let curr_pin = match current_pin.take() {
+                    None => {
+                        match Self::ask_user_for_pin(was_invalid, retries, &status, &callback) {
+                            Ok(pin) => pin,
+                            _ => {
+                                return;
+                            }
+                        }
+                    }
+                    Some(pin) => pin,
+                };
+
+                res = ChangeExistingPin::new(&authinfo, &shared_secret, &curr_pin, &new_pin)
+                    .map_err(HIDError::Command)
+                    .and_then(|msg| dev.send_cbor_cancellable(&msg, alive))
+                    .map_err(|e| repackage_pin_errors(dev, e));
+
+                if let Err(AuthenticatorError::PinError(PinError::InvalidPin(r))) = res {
+                    was_invalid = true;
+                    retries = r;
+                    // We need to re-establish the shared secret for the next round.
+                    match dev.establish_shared_secret() {
+                        Ok(s) => {
+                            shared_secret = s;
+                        }
+                        Err(e) => {
+                            callback.call(Err(AuthenticatorError::HIDError(e)));
+                            return;
+                        }
+                    };
+
+                    continue;
+                } else {
+                    break;
+                }
+            }
+            res
+        } else {
+            dev.send_cbor_cancellable(&SetNewPin::new(&shared_secret, &new_pin), alive)
+                .map_err(AuthenticatorError::HIDError)
+        };
+
+        callback.call(res);
     }
 
     pub fn set_pin(
@@ -1041,95 +1163,21 @@ impl StateMachine {
             callback.clone(),
             status,
             move |info, selector, status, alive| {
-                let mut dev = match Self::init_and_select(info, &selector, true, alive) {
+                let mut dev = match Self::init_and_select(info, &selector, &status, true, alive) {
                     None => {
                         return;
                     }
                     Some(dev) => dev,
                 };
 
-                let mut shared_secret = match dev.establish_shared_secret() {
-                    Ok(s) => s,
-                    Err(e) => {
-                        callback.call(Err(AuthenticatorError::HIDError(e)));
-                        return;
-                    }
-                };
-
-                let authinfo = match dev.get_authenticator_info() {
-                    Some(i) => i.clone(),
-                    None => {
-                        callback.call(Err(HIDError::DeviceNotInitialized.into()));
-                        return;
-                    }
-                };
-
-                // With CTAP2.1 we will have an adjustable required length for PINs
-                if new_pin.as_bytes().len() < 4 {
-                    callback.call(Err(AuthenticatorError::PinError(PinError::PinIsTooShort)));
-                    return;
-                }
-
-                if new_pin.as_bytes().len() > 64 {
-                    callback.call(Err(AuthenticatorError::PinError(PinError::PinIsTooLong(
-                        new_pin.as_bytes().len(),
-                    ))));
-                    return;
-                }
-
-                // Check if a client-pin is already set, or if a new one should be created
-                let res = if authinfo.options.client_pin.unwrap_or_default() {
-                    let mut res;
-                    let mut was_invalid = false;
-                    let mut retries = None;
-                    loop {
-                        let current_pin = match Self::ask_user_for_pin(
-                            was_invalid,
-                            retries,
-                            &status,
-                            &callback,
-                        ) {
-                            Ok(pin) => pin,
-                            _ => {
-                                return;
-                            }
-                        };
-
-                        res = ChangeExistingPin::new(
-                            &authinfo,
-                            &shared_secret,
-                            &current_pin,
-                            &new_pin,
-                        )
-                        .map_err(HIDError::Command)
-                        .and_then(|msg| dev.send_cbor_cancellable(&msg, alive))
-                        .map_err(|e| repackage_pin_errors(&mut dev, e));
-
-                        if let Err(AuthenticatorError::PinError(PinError::InvalidPin(r))) = res {
-                            was_invalid = true;
-                            retries = r;
-                            // We need to re-establish the shared secret for the next round.
-                            match dev.establish_shared_secret() {
-                                Ok(s) => {
-                                    shared_secret = s;
-                                }
-                                Err(e) => {
-                                    callback.call(Err(AuthenticatorError::HIDError(e)));
-                                    return;
-                                }
-                            };
-
-                            continue;
-                        } else {
-                            break;
-                        }
-                    }
-                    res
-                } else {
-                    dev.send_cbor_cancellable(&SetNewPin::new(&shared_secret, &new_pin), alive)
-                        .map_err(AuthenticatorError::HIDError)
-                };
-                callback.call(res);
+                Self::set_or_change_pin_helper(
+                    &mut dev,
+                    None,
+                    new_pin.clone(),
+                    status,
+                    callback.clone(),
+                    alive,
+                );
             },
         );
         self.transaction = Some(try_or!(transaction, move |e| cbc.call(Err(e))));
@@ -1147,7 +1195,6 @@ impl StateMachine {
     ) {
         // Abort any prior register/sign calls.
         self.cancel();
-
         let cbc = callback.clone();
 
         let transaction = Transaction::new(
@@ -1374,5 +1421,96 @@ impl StateMachine {
         );
 
         self.transaction = Some(try_or!(transaction, |e| cbc.call(Err(e))));
+    }
+
+    // Function to interactively manage a specific token.
+    // Difference to register/sign: These want to do something and don't care
+    // with which token they do it.
+    // This function wants to manipulate a specific token. For this, we first
+    // have to select one and then do something with it, based on what it
+    // supports (Set PIN, Change PIN, Reset, etc.).
+    // Hence, we first go through the discovery-phase, then provide the user
+    // with the AuthenticatorInfo and then let them interactively decide what to do
+    pub fn manage(
+        &mut self,
+        timeout: u64,
+        status: Sender<crate::StatusUpdate>,
+        callback: StateCallback<crate::Result<crate::ResetResult>>,
+    ) {
+        // Abort any prior register/sign calls.
+        self.cancel();
+        let cbc = callback.clone();
+
+        let transaction = Transaction::new(
+            timeout,
+            callback.clone(),
+            status,
+            move |info, selector, status, alive| {
+                let mut dev = match Self::init_and_select(info, &selector, &status, true, alive) {
+                    None => {
+                        return;
+                    }
+                    Some(dev) => dev,
+                };
+
+                info!("Device {:?} selected for interactive management.", dev.id());
+
+                // Sending the user the info about the token
+                let (tx, rx) = channel();
+                send_status(
+                    &status,
+                    crate::StatusUpdate::InteractiveManagement((
+                        tx,
+                        dev.get_device_info(),
+                        dev.get_authenticator_info().cloned(),
+                    )),
+                );
+                while alive() {
+                    match rx.recv_timeout(Duration::from_millis(400)) {
+                        Ok(InteractiveRequest::Reset) => {
+                            Self::reset_helper(&mut dev, selector, status, callback.clone(), alive);
+                        }
+                        Ok(InteractiveRequest::ChangePIN(curr_pin, new_pin)) => {
+                            Self::set_or_change_pin_helper(
+                                &mut dev,
+                                Some(curr_pin),
+                                new_pin,
+                                status,
+                                callback.clone(),
+                                alive,
+                            );
+                        }
+                        Ok(InteractiveRequest::SetPIN(pin)) => {
+                            Self::set_or_change_pin_helper(
+                                &mut dev,
+                                None,
+                                pin,
+                                status,
+                                callback.clone(),
+                                alive,
+                            );
+                        }
+                        Err(RecvTimeoutError::Timeout) => {
+                            if !alive() {
+                                // We got stopped at some point
+                                callback.call(Err(AuthenticatorError::CancelledByUser));
+                                break;
+                            }
+                            continue;
+                        }
+                        Err(RecvTimeoutError::Disconnected) => {
+                            // recv() failed, because the other side is dropping the Sender.
+                            info!(
+                                "Callback dropped the channel, so we abort the interactive session"
+                            );
+                            callback.call(Err(AuthenticatorError::CancelledByUser));
+                        }
+                    }
+                    break;
+                }
+            },
+        );
+
+        self.transaction = Some(try_or!(transaction, move |e| cbc.call(Err(e))));
     }
 }

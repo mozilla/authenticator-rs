@@ -77,6 +77,9 @@ fn main() {
     let (status_tx, status_rx) = channel::<StatusUpdate>();
     thread::spawn(move || loop {
         match status_rx.recv() {
+            Ok(StatusUpdate::InteractiveManagement(..)) => {
+                panic!("STATUS: This can't happen when doing non-interactive usage");
+            }
             Ok(StatusUpdate::DeviceAvailable { dev_info }) => {
                 println!("STATUS: device available: {dev_info}")
             }
@@ -200,10 +203,7 @@ fn main() {
                 registered_key_handle = Some(pub_key);
                 continue;
             }
-            Err(AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
-                StatusCode::CredentialExcluded,
-                None,
-            )))) => {
+            Err(AuthenticatorError::CredentialExcluded) => {
                 println!("Got an 'already registered' error, as expected.");
                 if ctap_args.exclude_list.len() > 1 {
                     println!("Quitting.");
