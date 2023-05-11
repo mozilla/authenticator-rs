@@ -3,12 +3,13 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use authenticator::{
-    authenticatorservice::{AuthenticatorService, RegisterArgs},
+    authenticatorservice::{AuthenticatorService, GetAssertionExtensions, RegisterArgs, SignArgs},
+    ctap2::commands::StatusCode,
     ctap2::server::{
         PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty,
         ResidentKeyRequirement, Transport, User, UserVerificationRequirement,
     },
-    errors::AuthenticatorError,
+    errors::{AuthenticatorError, CommandError, HIDError, UnsupportedOption},
     statecallback::StateCallback,
     COSEAlgorithm, Pin, RegisterResult, SignResult, StatusPinUv, StatusUpdate,
 };
