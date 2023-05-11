@@ -468,10 +468,11 @@ impl GetAssertionResult {
                 CommandError::Deserializing(DesError::custom("unable to parse authentication"))
             })?;
 
-        let mut flags = AuthenticatorDataFlags::empty();
-        if user_presence == 1 {
-            flags |= AuthenticatorDataFlags::USER_PRESENT;
-        }
+        // Step 5 of Section 10.3 of CTAP2.1: "Copy bits 0 (the UP bit) and bit 1 from the
+        // CTAP2/U2F response user presence byte to bits 0 and 1 of the CTAP2 flags, respectively.
+        // Set all other bits of flags to zero."
+        let flag_mask = AuthenticatorDataFlags::USER_PRESENT | AuthenticatorDataFlags::RESERVED_1;
+        let flags = flag_mask & AuthenticatorDataFlags::from_bits_truncate(user_presence);
         let auth_data = AuthenticatorData {
             rp_id_hash: rp_id_hash.clone(),
             flags,
@@ -1309,6 +1310,25 @@ pub mod test {
                 None,
             ),
             Ok(..)
+        );
+    }
+
+    #[test]
+    fn test_get_assertion_ctap1_flags() {
+        // Ensure that only the two low bits of flags are preserved when repackaging a
+        // CTAP1 response.
+        let mut sample = GET_ASSERTION_SAMPLE_RESPONSE_CTAP1.to_vec();
+        sample[0] = 0xff; // Set all 8 flag bits before repackaging
+        let add_info = PublicKeyCredentialDescriptor {
+            id: vec![],
+            transports: vec![],
+        };
+        let rp_hash = RpIdHash([0u8; 32]);
+        let resp = GetAssertionResult::from_ctap1(&sample, &rp_hash, &add_info)
+            .expect("could not handle response");
+        assert_eq!(
+            resp.0[0].auth_data.flags,
+            AuthenticatorDataFlags::USER_PRESENT | AuthenticatorDataFlags::RESERVED_1
         );
     }
 
