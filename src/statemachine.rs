@@ -607,6 +607,7 @@ impl StateMachine {
                             // Now we need to send a dummy registration request, to make the token blink
                             // Spec says "dummy appid and invalid challenge". We use the same, as we do for
                             // making the token blink upon device selection.
+                            send_status(&status, crate::StatusUpdate::PresenceRequired);
                             let msg = dummy_make_credentials_cmd();
                             let _ = dev.send_msg_cancellable(&msg, alive); // Ignore answer, return "CredentialExcluded"
                             callback.call(Err(HIDError::Command(CommandError::StatusCode(
@@ -621,6 +622,7 @@ impl StateMachine {
                     debug!("------------------------------------------------------------------");
                     debug!("{makecred:?} using {pin_uv_auth_result:?}");
                     debug!("------------------------------------------------------------------");
+                    send_status(&status, crate::StatusUpdate::PresenceRequired);
                     let resp = dev.send_msg_cancellable(&makecred, alive);
                     if resp.is_ok() {
                         send_status(
@@ -877,6 +879,7 @@ impl StateMachine {
                     // If the incoming list was not empty, but the filtered list is, we have to error out
                     if !original_allow_list_was_empty && get_assertion.allow_list.is_empty() {
                         // We have to collect a user interaction
+                        send_status(&status, crate::StatusUpdate::PresenceRequired);
                         let msg = dummy_make_credentials_cmd();
                         let _ = dev.send_msg_cancellable(&msg, alive); // Ignore answer, return "NoCredentials"
                         callback.call(Err(HIDError::Command(CommandError::StatusCode(
@@ -890,7 +893,7 @@ impl StateMachine {
                     debug!("------------------------------------------------------------------");
                     debug!("{get_assertion:?} using {pin_uv_auth_result:?}");
                     debug!("------------------------------------------------------------------");
-
+                    send_status(&status, crate::StatusUpdate::PresenceRequired);
                     let mut resp = dev.send_msg_cancellable(&get_assertion, alive);
                     if resp.is_err() {
                         // Retry with a different RP ID if one was supplied. This is intended to be
@@ -995,10 +998,11 @@ impl StateMachine {
     ) {
         let reset = Reset {};
         info!("Device {:?} continues with the reset process", dev.id());
+
         debug!("------------------------------------------------------------------");
         debug!("{:?}", reset);
         debug!("------------------------------------------------------------------");
-
+        send_status(&status, crate::StatusUpdate::PresenceRequired);
         let resp = dev.send_cbor_cancellable(&reset, keep_alive);
         if resp.is_ok() {
             send_status(
@@ -1245,6 +1249,8 @@ impl StateMachine {
                         .unwrap_or(false) /* no match on failure */
                 });
 
+                send_status(&status, crate::StatusUpdate::PresenceRequired);
+
                 while alive() {
                     if excluded {
                         let blank = vec![0u8; PARAMETER_SIZE];
@@ -1362,6 +1368,8 @@ impl StateMachine {
                         dev_info: dev.get_device_info(),
                     },
                 );
+
+                send_status(&status, crate::StatusUpdate::PresenceRequired);
 
                 'outer: while alive() {
                     // If the device matches none of the given key handles
