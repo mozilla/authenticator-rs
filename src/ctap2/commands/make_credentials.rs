@@ -18,14 +18,10 @@ use crate::ctap2::server::{
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty,
     RelyingPartyWrapper, RpIdHash, User, UserVerificationRequirement,
 };
+use crate::ctap2::utils::{read_byte, serde_parse_err};
 use crate::errors::AuthenticatorError;
 use crate::transport::errors::{ApduErrorStatus, HIDError};
 use crate::u2ftypes::{CTAP1RequestAPDU, U2FDevice};
-use nom::{
-    bytes::complete::{tag, take},
-    error::VerboseError,
-    number::complete::be_u8,
-};
 #[cfg(test)]
 use serde::Deserialize;
 use serde::{
@@ -35,7 +31,7 @@ use serde::{
 };
 use serde_cbor::{self, de::from_slice, ser, Value};
 use std::fmt;
-use std::io;
+use std::io::{self, Cursor, Read};
 
 #[derive(Debug)]
 pub struct MakeCredentialsResult(pub AttestationObject);
@@ -45,30 +41,35 @@ impl MakeCredentialsResult {
         input: &[u8],
         rp_id_hash: &RpIdHash,
     ) -> Result<MakeCredentialsResult, CommandError> {
-        let parse_register = |input| {
-            let (rest, _) = tag(&[0x05])(input)?;
-            let (rest, public_key) = take(65u8)(rest)?;
-            let (rest, key_handle_len) = be_u8(rest)?;
-            let (rest, key_handle) = take(key_handle_len)(rest)?;
-            Ok((rest, public_key, key_handle))
-        };
+        let mut data = Cursor::new(input);
+        let magic_num = read_byte(&mut data).map_err(CommandError::Deserializing)?;
+        if magic_num != 0x05 {
+            error!("error while parsing registration: magic header not 0x05, but {magic_num}");
+            return Err(CommandError::Deserializing(DesError::invalid_value(
+                serde::de::Unexpected::Unsigned(magic_num as u64),
+                &"0x05",
+            )));
+        }
+        let mut public_key = [0u8; 65];
+        data.read_exact(&mut public_key)
+            .map_err(|_| CommandError::Deserializing(serde_parse_err("PublicKey")))?;
 
-        let (rest, public_key, key_handle) =
-            parse_register(input).map_err(|e: nom::Err<VerboseError<_>>| {
-                error!("error while parsing registration: {:?}", e);
-                CommandError::Deserializing(DesError::custom("unable to parse registration"))
+        let credential_id_len = read_byte(&mut data).map_err(CommandError::Deserializing)?;
+        let mut credential_id = vec![0u8; credential_id_len as usize];
+        data.read_exact(&mut credential_id)
+            .map_err(|_| CommandError::Deserializing(serde_parse_err("CredentialId")))?;
+
+        let cert_and_sig = parse_u2f_der_certificate(&data.get_ref()[data.position() as usize..])
+            .map_err(|err| {
+            CommandError::Deserializing(serde_parse_err(&format!(
+                "Certificate and Signature: {err:?}",
+            )))
+        })?;
+
+        let credential_ec2_key = COSEEC2Key::from_sec1_uncompressed(Curve::SECP256R1, &public_key)
+            .map_err(|err| {
+                CommandError::Deserializing(serde_parse_err(&format!("EC2 Key: {err:?}",)))
             })?;
-
-        let cert_and_sig = parse_u2f_der_certificate(rest).map_err(|e| {
-            error!("error while parsing registration: {:?}", e);
-            CommandError::Deserializing(DesError::custom("unable to parse registration"))
-        })?;
-
-        let credential_ec2_key = COSEEC2Key::from_sec1_uncompressed(Curve::SECP256R1, public_key)
-            .map_err(|e| {
-            error!("error while parsing registration: {:?}", e);
-            CommandError::Deserializing(DesError::custom("unable to parse registration"))
-        })?;
 
         let credential_public_key = COSEKey {
             alg: COSEAlgorithm::ES256,
@@ -85,7 +86,7 @@ impl MakeCredentialsResult {
             counter: 0,
             credential_data: Some(AttestedCredentialData {
                 aaguid: AAGuid::default(),
-                credential_id: Vec::from(key_handle),
+                credential_id,
                 credential_public_key,
             }),
             extensions: Default::default(),

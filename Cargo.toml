@@ -65,7 +65,6 @@ serde_cbor = "0.11"
 serde_json = "1.0"
 bytes = { version = "0.5", optional = true, features = ["serde"] }
 base64 = "^0.13"
-nom = { version = "^7.1.1", features = ["std"], default-features = false}
 sha2 = "^0.10.0"
 cfg-if = "1.0"
 # Crypto backends
