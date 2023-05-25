@@ -1,12 +1,12 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-use crate::consts::CID_BROADCAST;
+use crate::consts::{HIDCmd, CID_BROADCAST};
 use crate::crypto::SharedSecret;
 use crate::ctap2::commands::get_info::AuthenticatorInfo;
 use crate::transport::device_selector::DeviceCommand;
-use crate::transport::{hid::HIDDevice, FidoDevice, HIDError};
-use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
+use crate::transport::{hid::HIDDevice, FidoDevice, HIDError, Nonce};
+use crate::u2ftypes::U2FDeviceInfo;
 use std::hash::{Hash, Hasher};
 use std::io::{self, Read, Write};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -104,7 +104,27 @@ impl Hash for Device {
     }
 }
 
-impl U2FDevice for Device {
+impl HIDDevice for Device {
+    type Id = String;
+    type BuildParameters = &'static str; // None used
+
+    fn id(&self) -> Self::Id {
+        self.id.clone()
+    }
+
+    fn new(id: Self::BuildParameters) -> Result<Self, (HIDError, Self::Id)> {
+        Ok(Device {
+            id: id.to_string(),
+            cid: CID_BROADCAST,
+            reads: vec![],
+            writes: vec![],
+            dev_info: None,
+            authenticator_info: None,
+            sender: None,
+            receiver: None,
+        })
+    }
+
     fn get_cid(&self) -> &[u8; 4] {
         &self.cid
     }
@@ -124,6 +144,22 @@ impl U2FDevice for Device {
     fn get_property(&self, prop_name: &str) -> io::Result<String> {
         Ok(format!("{prop_name} not implemented"))
     }
+}
+
+impl FidoDevice for Device {
+    fn pre_init(&mut self, noncecmd: Nonce) -> Result<(), HIDError> {
+        HIDDevice::pre_init(self, noncecmd)
+    }
+
+    fn sendrecv(
+        &mut self,
+        cmd: HIDCmd,
+        send: &[u8],
+        keep_alive: &dyn Fn() -> bool,
+    ) -> io::Result<(HIDCmd, Vec<u8>)> {
+        HIDDevice::sendrecv(self, cmd, send, keep_alive)
+    }
+
     fn get_device_info(&self) -> U2FDeviceInfo {
         self.dev_info.clone().unwrap()
     }
@@ -131,11 +167,22 @@ impl U2FDevice for Device {
     fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {
         self.dev_info = Some(dev_info);
     }
-}
 
-impl HIDDevice for Device {
-    type Id = String;
-    type BuildParameters = &'static str; // None used
+    fn initialized(&self) -> bool {
+        self.get_cid() != &CID_BROADCAST
+    }
+
+    fn is_u2f(&mut self) -> bool {
+        self.sender.is_some()
+    }
+
+    fn get_shared_secret(&self) -> std::option::Option<&SharedSecret> {
+        None
+    }
+
+    fn set_shared_secret(&mut self, _: SharedSecret) {
+        // Nothing
+    }
 
     fn get_authenticator_info(&self) -> Option<&AuthenticatorInfo> {
         self.authenticator_info.as_ref()
@@ -144,38 +191,4 @@ impl HIDDevice for Device {
     fn set_authenticator_info(&mut self, authenticator_info: AuthenticatorInfo) {
         self.authenticator_info = Some(authenticator_info);
     }
-
-    fn set_shared_secret(&mut self, _: SharedSecret) {
-        // Nothing
-    }
-    fn get_shared_secret(&self) -> std::option::Option<&SharedSecret> {
-        None
-    }
-
-    fn new(id: Self::BuildParameters) -> Result<Self, (HIDError, Self::Id)> {
-        Ok(Device {
-            id: id.to_string(),
-            cid: CID_BROADCAST,
-            reads: vec![],
-            writes: vec![],
-            dev_info: None,
-            authenticator_info: None,
-            sender: None,
-            receiver: None,
-        })
-    }
-
-    fn initialized(&self) -> bool {
-        self.get_cid() != &CID_BROADCAST
-    }
-
-    fn id(&self) -> Self::Id {
-        self.id.clone()
-    }
-
-    fn is_u2f(&mut self) -> bool {
-        self.sender.is_some()
-    }
 }
-
-impl FidoDevice for Device {}

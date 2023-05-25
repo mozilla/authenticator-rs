@@ -8,8 +8,8 @@ use crate::consts::{CID_BROADCAST, MAX_HID_RPT_SIZE};
 use crate::ctap2::commands::get_info::AuthenticatorInfo;
 use crate::transport::hid::HIDDevice;
 use crate::transport::platform::iokit::*;
-use crate::transport::{FidoDevice, HIDError, SharedSecret};
-use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
+use crate::transport::{FidoDevice, HIDCmd, HIDError, Nonce, SharedSecret};
+use crate::u2ftypes::U2FDeviceInfo;
 use core_foundation::base::*;
 use core_foundation::string::*;
 use std::convert::TryInto;
@@ -130,7 +130,26 @@ impl Write for Device {
     }
 }
 
-impl U2FDevice for Device {
+impl HIDDevice for Device {
+    type BuildParameters = (IOHIDDeviceRef, Receiver<Vec<u8>>);
+    type Id = IOHIDDeviceRef;
+
+    fn new(dev_ids: Self::BuildParameters) -> Result<Self, (HIDError, Self::Id)> {
+        let (device_ref, report_rx) = dev_ids;
+        Ok(Self {
+            device_ref,
+            cid: CID_BROADCAST,
+            report_rx: Some(report_rx),
+            dev_info: None,
+            secret: None,
+            authenticator_info: None,
+        })
+    }
+
+    fn id(&self) -> Self::Id {
+        self.device_ref
+    }
+
     fn get_cid(&self) -> &[u8; 4] {
         &self.cid
     }
@@ -150,6 +169,21 @@ impl U2FDevice for Device {
     fn get_property(&self, prop_name: &str) -> io::Result<String> {
         unsafe { self.get_property_macos(prop_name) }
     }
+}
+
+impl FidoDevice for Device {
+    fn pre_init(&mut self, noncecmd: Nonce) -> Result<(), HIDError> {
+        HIDDevice::pre_init(self, noncecmd)
+    }
+
+    fn sendrecv(
+        &mut self,
+        cmd: HIDCmd,
+        send: &[u8],
+        keep_alive: &dyn Fn() -> bool,
+    ) -> io::Result<(HIDCmd, Vec<u8>)> {
+        HIDDevice::sendrecv(self, cmd, send, keep_alive)
+    }
 
     fn get_device_info(&self) -> U2FDeviceInfo {
         // unwrap is okay, as dev_info must have already been set, else
@@ -160,32 +194,10 @@ impl U2FDevice for Device {
     fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {
         self.dev_info = Some(dev_info);
     }
-}
-
-impl HIDDevice for Device {
-    type BuildParameters = (IOHIDDeviceRef, Receiver<Vec<u8>>);
-    type Id = IOHIDDeviceRef;
-
-    fn new(dev_ids: Self::BuildParameters) -> Result<Self, (HIDError, Self::Id)> {
-        let (device_ref, report_rx) = dev_ids;
-        Ok(Self {
-            device_ref,
-            cid: CID_BROADCAST,
-            report_rx: Some(report_rx),
-            dev_info: None,
-            secret: None,
-            authenticator_info: None,
-        })
-    }
 
     fn initialized(&self) -> bool {
         self.cid != CID_BROADCAST
     }
-
-    fn id(&self) -> Self::Id {
-        self.device_ref
-    }
-
     fn is_u2f(&mut self) -> bool {
         true
     }
@@ -205,5 +217,3 @@ impl HIDDevice for Device {
         self.authenticator_info = Some(authenticator_info);
     }
 }
-
-impl FidoDevice for Device {}

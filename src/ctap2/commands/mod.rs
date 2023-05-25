@@ -10,7 +10,6 @@ use serde_cbor::{error::Error as CborError, Value};
 use serde_json as json;
 use std::error::Error as StdErrorT;
 use std::fmt;
-use std::io::{Read, Write};
 
 pub(crate) mod client_pin;
 pub(crate) mod get_assertion;
@@ -80,13 +79,11 @@ pub trait RequestCtap2: fmt::Debug {
 
     fn wire_format(&self) -> Result<Vec<u8>, HIDError>;
 
-    fn handle_response_ctap2<Dev>(
+    fn handle_response_ctap2<Dev: FidoDevice>(
         &self,
         dev: &mut Dev,
         input: &[u8],
-    ) -> Result<Self::Output, HIDError>
-    where
-        Dev: FidoDevice + Read + Write + fmt::Debug;
+    ) -> Result<Self::Output, HIDError>;
 }
 
 #[derive(Debug, Clone)]

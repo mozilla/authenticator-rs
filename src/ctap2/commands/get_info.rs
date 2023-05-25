@@ -2,7 +2,7 @@ use super::{Command, CommandError, RequestCtap2, StatusCode};
 use crate::ctap2::attestation::AAGuid;
 use crate::ctap2::server::PublicKeyCredentialParameters;
 use crate::transport::errors::HIDError;
-use crate::u2ftypes::U2FDevice;
+use crate::transport::FidoDevice;
 use serde::{
     de::{Error as SError, IgnoredAny, MapAccess, Visitor},
     Deserialize, Deserializer, Serialize,
@@ -25,14 +25,11 @@ impl RequestCtap2 for GetInfo {
         Ok(Vec::new())
     }
 
-    fn handle_response_ctap2<Dev>(
+    fn handle_response_ctap2<Dev: FidoDevice>(
         &self,
         _dev: &mut Dev,
         input: &[u8],
-    ) -> Result<Self::Output, HIDError>
-    where
-        Dev: U2FDevice,
-    {
+    ) -> Result<Self::Output, HIDError> {
         if input.is_empty() {
             return Err(CommandError::InputTooSmall.into());
         }
@@ -534,7 +531,6 @@ pub mod tests {
     use crate::transport::device_selector::Device;
     use crate::transport::platform::device::IN_HID_RPT_SIZE;
     use crate::transport::{hid::HIDDevice, FidoDevice, Nonce};
-    use crate::u2ftypes::U2FDevice;
     use rand::{thread_rng, RngCore};
     use serde_cbor::de::from_slice;
 

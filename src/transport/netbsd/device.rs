@@ -9,8 +9,8 @@ use crate::transport::hid::HIDDevice;
 use crate::transport::platform::fd::Fd;
 use crate::transport::platform::monitor::WrappedOpenDevice;
 use crate::transport::platform::uhid;
-use crate::transport::{FidoDevice, HIDError, SharedSecret};
-use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
+use crate::transport::{FidoDevice, HIDCmd, HIDError, Nonce, SharedSecret};
+use crate::u2ftypes::U2FDeviceInfo;
 use crate::util::io_err;
 use std::ffi::OsString;
 use std::hash::{Hash, Hasher};
@@ -126,38 +126,6 @@ impl Write for Device {
     }
 }
 
-impl U2FDevice for Device {
-    fn get_cid(&self) -> &[u8; 4] {
-        &self.cid
-    }
-
-    fn set_cid(&mut self, cid: [u8; 4]) {
-        self.cid = cid;
-    }
-
-    fn in_rpt_size(&self) -> usize {
-        MAX_HID_RPT_SIZE
-    }
-
-    fn out_rpt_size(&self) -> usize {
-        MAX_HID_RPT_SIZE
-    }
-
-    fn get_property(&self, _prop_name: &str) -> io::Result<String> {
-        Err(io::Error::new(io::ErrorKind::Other, "Not implemented"))
-    }
-
-    fn get_device_info(&self) -> U2FDeviceInfo {
-        // unwrap is okay, as dev_info must have already been set, else
-        // a programmer error
-        self.dev_info.clone().unwrap()
-    }
-
-    fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {
-        self.dev_info = Some(dev_info);
-    }
-}
-
 impl HIDDevice for Device {
     type BuildParameters = WrappedOpenDevice;
     type Id = OsString;
@@ -180,13 +148,58 @@ impl HIDDevice for Device {
         }
     }
 
+    fn id(&self) -> Self::Id {
+        self.path.clone()
+    }
+
+    fn get_cid(&self) -> &[u8; 4] {
+        &self.cid
+    }
+
+    fn set_cid(&mut self, cid: [u8; 4]) {
+        self.cid = cid;
+    }
+
+    fn in_rpt_size(&self) -> usize {
+        MAX_HID_RPT_SIZE
+    }
+
+    fn out_rpt_size(&self) -> usize {
+        MAX_HID_RPT_SIZE
+    }
+
+    fn get_property(&self, _prop_name: &str) -> io::Result<String> {
+        Err(io::Error::new(io::ErrorKind::Other, "Not implemented"))
+    }
+}
+
+impl FidoDevice for Device {
+    fn pre_init(&mut self, noncecmd: Nonce) -> Result<(), HIDError> {
+        HIDDevice::pre_init(self, noncecmd)
+    }
+
+    fn sendrecv(
+        &mut self,
+        cmd: HIDCmd,
+        send: &[u8],
+        keep_alive: &dyn Fn() -> bool,
+    ) -> io::Result<(HIDCmd, Vec<u8>)> {
+        HIDDevice::sendrecv(self, cmd, send, keep_alive)
+    }
+
+    fn get_device_info(&self) -> U2FDeviceInfo {
+        // unwrap is okay, as dev_info must have already been set, else
+        // a programmer error
+        self.dev_info.clone().unwrap()
+    }
+
+    fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {
+        self.dev_info = Some(dev_info);
+    }
+
     fn initialized(&self) -> bool {
         // During successful init, the broadcast channel id gets repplaced by an actual one
         self.cid != CID_BROADCAST
-    }
-
-    fn id(&self) -> Self::Id {
-        self.path.clone()
     }
 
     fn is_u2f(&mut self) -> bool {
@@ -226,5 +239,3 @@ impl HIDDevice for Device {
         self.authenticator_info = Some(authenticator_info);
     }
 }
-
-impl FidoDevice for Device {}

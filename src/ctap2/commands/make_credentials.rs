@@ -20,7 +20,8 @@ use crate::ctap2::server::{
 };
 use crate::errors::AuthenticatorError;
 use crate::transport::errors::{ApduErrorStatus, HIDError};
-use crate::u2ftypes::{CTAP1RequestAPDU, U2FDevice};
+use crate::transport::FidoDevice;
+use crate::u2ftypes::CTAP1RequestAPDU;
 use nom::{
     bytes::complete::{tag, take},
     error::VerboseError,
@@ -34,8 +35,6 @@ use serde::{
     Serialize, Serializer,
 };
 use serde_cbor::{self, de::from_slice, ser, Value};
-use std::fmt;
-use std::io;
 
 #[derive(Debug)]
 pub struct MakeCredentialsResult(pub AttestationObject);
@@ -374,14 +373,11 @@ impl RequestCtap2 for MakeCredentials {
         Ok(ser::to_vec(&self).map_err(CommandError::Serializing)?)
     }
 
-    fn handle_response_ctap2<Dev>(
+    fn handle_response_ctap2<Dev: FidoDevice>(
         &self,
         _dev: &mut Dev,
         input: &[u8],
-    ) -> Result<Self::Output, HIDError>
-    where
-        Dev: U2FDevice + io::Read + io::Write + fmt::Debug,
-    {
+    ) -> Result<Self::Output, HIDError> {
         if input.is_empty() {
             return Err(HIDError::Command(CommandError::InputTooSmall));
         }

@@ -1,38 +1,35 @@
 use crate::consts::{HIDCmd, CID_BROADCAST};
-use crate::crypto::SharedSecret;
-use crate::ctap2::commands::get_info::AuthenticatorInfo;
+
+use crate::transport::FidoDevice;
 use crate::transport::{errors::HIDError, Nonce};
-use crate::u2ftypes::{U2FDevice, U2FDeviceInfo, U2FHIDCont, U2FHIDInit, U2FHIDInitResp};
+use crate::u2ftypes::{U2FDeviceInfo, U2FHIDCont, U2FHIDInit, U2FHIDInitResp};
 use rand::{thread_rng, RngCore};
 use std::cmp::Eq;
 use std::fmt;
 use std::hash::Hash;
 use std::io;
+use std::io::{Read, Write};
 
-pub trait HIDDevice
-where
-    Self: io::Read,
-    Self: io::Write,
-    Self: U2FDevice,
-    Self: Sized,
-    Self: fmt::Debug,
-{
+pub trait HIDDevice: FidoDevice + Read + Write {
     type BuildParameters: Sized;
     type Id: fmt::Debug + PartialEq + Eq + Hash + Sized;
 
     // Open device, verify that it is indeed a CTAP device and potentially read initial values
     fn new(parameters: Self::BuildParameters) -> Result<Self, (HIDError, Self::Id)>;
     fn id(&self) -> Self::Id;
-    fn initialized(&self) -> bool;
-    // Check if the device is actually a token
-    fn is_u2f(&mut self) -> bool;
-    fn get_authenticator_info(&self) -> Option<&AuthenticatorInfo>;
-    fn set_authenticator_info(&mut self, authenticator_info: AuthenticatorInfo);
-    fn set_shared_secret(&mut self, secret: SharedSecret);
-    fn get_shared_secret(&self) -> Option<&SharedSecret>;
+
+    // Channel ID management
+    fn get_cid(&self) -> &[u8; 4];
+    fn set_cid(&mut self, cid: [u8; 4]);
+
+    // HID report sizes
+    fn in_rpt_size(&self) -> usize;
+    fn out_rpt_size(&self) -> usize;
+
+    fn get_property(&self, prop_name: &str) -> io::Result<String>;
 
     // Initialize on a protocol-level
-    fn initialize(&mut self, noncecmd: Nonce) -> Result<(), HIDError> {
+    fn pre_init(&mut self, noncecmd: Nonce) -> Result<(), HIDError> {
         if self.initialized() {
             return Ok(());
         }
@@ -48,7 +45,7 @@ where
 
         // Send Init to broadcast address to create a new channel
         self.set_cid(CID_BROADCAST);
-        let (cmd, raw) = self.sendrecv(HIDCmd::Init, &nonce, &|| true)?;
+        let (cmd, raw) = HIDDevice::sendrecv(self, HIDCmd::Init, &nonce, &|| true)?;
         if cmd != HIDCmd::Init {
             return Err(HIDError::DeviceError);
         }
@@ -91,11 +88,17 @@ where
         send: &[u8],
         keep_alive: &dyn Fn() -> bool,
     ) -> io::Result<(HIDCmd, Vec<u8>)> {
-        let cmd: u8 = cmd.into();
-        self.u2f_write(cmd, send)?;
+        self.u2f_write(cmd.into(), send)?;
+        debug!("sent to Device {:?} cmd={:?}: {:?}", self.id(), cmd, send);
         loop {
             let (cmd, data) = self.u2f_read()?;
             if cmd != HIDCmd::Keepalive {
+                debug!(
+                    "got from Device {:?} status={:?}: {:?}",
+                    self.id(),
+                    cmd,
+                    data
+                );
                 return Ok((cmd, data));
             }
             // The authenticator might send us HIDCmd::Keepalive messages indefinitely, e.g. if

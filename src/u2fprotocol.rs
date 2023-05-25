@@ -9,9 +9,9 @@ extern crate std;
 use rand::{thread_rng, RngCore};
 use std::ffi::CString;
 use std::io;
-use std::io::{Read, Write};
 
 use crate::consts::*;
+use crate::transport::hid::HIDDevice;
 use crate::u2ftypes::*;
 use crate::util::io_err;
 
@@ -19,10 +19,7 @@ use crate::util::io_err;
 // Device Commands
 ////////////////////////////////////////////////////////////////////////
 
-pub fn u2f_init_device<T>(dev: &mut T) -> bool
-where
-    T: U2FDevice + Read + Write,
-{
+pub fn u2f_init_device<T: HIDDevice>(dev: &mut T) -> bool {
     let mut nonce = [0u8; 8];
     thread_rng().fill_bytes(&mut nonce);
 
@@ -30,10 +27,11 @@ where
     init_device(dev, &nonce).is_ok() && is_v2_device(dev).unwrap_or(false)
 }
 
-pub fn u2f_register<T>(dev: &mut T, challenge: &[u8], application: &[u8]) -> io::Result<Vec<u8>>
-where
-    T: U2FDevice + Read + Write,
-{
+pub fn u2f_register<T: HIDDevice>(
+    dev: &mut T,
+    challenge: &[u8],
+    application: &[u8],
+) -> io::Result<Vec<u8>> {
     if challenge.len() != PARAMETER_SIZE || application.len() != PARAMETER_SIZE {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -50,15 +48,12 @@ where
     status_word_to_result(status, resp)
 }
 
-pub fn u2f_sign<T>(
+pub fn u2f_sign<T: HIDDevice>(
     dev: &mut T,
     challenge: &[u8],
     application: &[u8],
     key_handle: &[u8],
-) -> io::Result<Vec<u8>>
-where
-    T: U2FDevice + Read + Write,
-{
+) -> io::Result<Vec<u8>> {
     if challenge.len() != PARAMETER_SIZE || application.len() != PARAMETER_SIZE {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -84,15 +79,12 @@ where
     status_word_to_result(status, resp)
 }
 
-pub fn u2f_is_keyhandle_valid<T>(
+pub fn u2f_is_keyhandle_valid<T: HIDDevice>(
     dev: &mut T,
     challenge: &[u8],
     application: &[u8],
     key_handle: &[u8],
-) -> io::Result<bool>
-where
-    T: U2FDevice + Read + Write,
-{
+) -> io::Result<bool> {
     if challenge.len() != PARAMETER_SIZE || application.len() != PARAMETER_SIZE {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -122,10 +114,7 @@ where
 // Internal Device Commands
 ////////////////////////////////////////////////////////////////////////
 
-fn init_device<T>(dev: &mut T, nonce: &[u8]) -> io::Result<()>
-where
-    T: U2FDevice + Read + Write,
-{
+fn init_device<T: HIDDevice>(dev: &mut T, nonce: &[u8]) -> io::Result<()> {
     assert_eq!(nonce.len(), INIT_NONCE_SIZE);
     // Send Init to broadcast address to create a new channel
     let raw = sendrecv(dev, HIDCmd::Init, nonce)?;
@@ -153,10 +142,7 @@ where
     Ok(())
 }
 
-fn is_v2_device<T>(dev: &mut T) -> io::Result<bool>
-where
-    T: U2FDevice + Read + Write,
-{
+fn is_v2_device<T: HIDDevice>(dev: &mut T) -> io::Result<bool> {
     let (data, status) = send_ctap1(dev, U2F_VERSION, 0x00, &[])?;
     let actual = CString::new(data)?;
     let expected = CString::new("U2F_V2")?;
@@ -183,10 +169,7 @@ fn status_word_to_result<T>(status: [u8; 2], val: T) -> io::Result<T> {
 // Device Communication Functions
 ////////////////////////////////////////////////////////////////////////
 
-pub fn sendrecv<T>(dev: &mut T, cmd: HIDCmd, send: &[u8]) -> io::Result<Vec<u8>>
-where
-    T: U2FDevice + Read + Write,
-{
+pub fn sendrecv<T: HIDDevice>(dev: &mut T, cmd: HIDCmd, send: &[u8]) -> io::Result<Vec<u8>> {
     // Send initialization packet.
     let mut count = U2FHIDInit::write(dev, cmd.into(), send)?;
 
@@ -212,10 +195,12 @@ where
     Ok(data)
 }
 
-fn send_ctap1<T>(dev: &mut T, cmd: u8, p1: u8, send: &[u8]) -> io::Result<(Vec<u8>, [u8; 2])>
-where
-    T: U2FDevice + Read + Write,
-{
+fn send_ctap1<T: HIDDevice>(
+    dev: &mut T,
+    cmd: u8,
+    p1: u8,
+    send: &[u8],
+) -> io::Result<(Vec<u8>, [u8; 2])> {
     let apdu = CTAP1RequestAPDU::serialize(cmd, p1, send)?;
     let mut data = sendrecv(dev, HIDCmd::Msg, &apdu)?;
 
@@ -234,10 +219,11 @@ where
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::{init_device, is_v2_device, send_ctap1, sendrecv, U2FDevice};
+    use super::{init_device, is_v2_device, send_ctap1, sendrecv};
     use crate::consts::{Capability, HIDCmd, CID_BROADCAST, SW_NO_ERROR};
     use crate::transport::device_selector::Device;
     use crate::transport::hid::HIDDevice;
+    use crate::transport::FidoDevice;
     use crate::u2ftypes::U2FDeviceInfo;
     use rand::{thread_rng, RngCore};
 

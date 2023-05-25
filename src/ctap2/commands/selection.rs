@@ -1,6 +1,6 @@
 use super::{Command, CommandError, RequestCtap2, StatusCode};
 use crate::transport::errors::HIDError;
-use crate::u2ftypes::U2FDevice;
+use crate::transport::FidoDevice;
 use serde_cbor::{de::from_slice, Value};
 
 #[derive(Debug, Default)]
@@ -17,14 +17,11 @@ impl RequestCtap2 for Selection {
         Ok(Vec::new())
     }
 
-    fn handle_response_ctap2<Dev>(
+    fn handle_response_ctap2<Dev: FidoDevice>(
         &self,
         _dev: &mut Dev,
         input: &[u8],
-    ) -> Result<Self::Output, HIDError>
-    where
-        Dev: U2FDevice,
-    {
+    ) -> Result<Self::Output, HIDError> {
         if input.is_empty() {
             return Err(CommandError::InputTooSmall.into());
         }
@@ -51,7 +48,6 @@ pub mod tests {
     use crate::consts::HIDCmd;
     use crate::transport::device_selector::Device;
     use crate::transport::{hid::HIDDevice, FidoDevice};
-    use crate::u2ftypes::U2FDevice;
     use rand::{thread_rng, RngCore};
     use serde_cbor::{de::from_slice, Value};
 

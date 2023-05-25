@@ -4,7 +4,7 @@ use crate::ctap2::commands::client_pin::{
     GetKeyAgreement, GetPinToken, GetPinUvAuthTokenUsingPinWithPermissions,
     GetPinUvAuthTokenUsingUvWithPermissions, PinUvAuthTokenPermission,
 };
-use crate::ctap2::commands::get_info::{AuthenticatorVersion, GetInfo};
+use crate::ctap2::commands::get_info::{AuthenticatorInfo, AuthenticatorVersion, GetInfo};
 use crate::ctap2::commands::get_version::GetVersion;
 use crate::ctap2::commands::make_credentials::dummy_make_credentials_cmd;
 use crate::ctap2::commands::selection::Selection;
@@ -13,10 +13,13 @@ use crate::ctap2::commands::{
 };
 use crate::transport::device_selector::BlinkResult;
 use crate::transport::errors::{ApduErrorStatus, HIDError};
-use crate::transport::hid::HIDDevice;
+use crate::u2ftypes::U2FDeviceInfo;
 use crate::util::io_err;
 use crate::Pin;
 use std::convert::TryFrom;
+use std::fmt;
+
+use std::io;
 use std::thread;
 use std::time::Duration;
 
@@ -76,9 +79,30 @@ pub enum Nonce {
     Use([u8; 8]),
 }
 
-// TODO(MS): This is the lazy way: FidoDevice currently only extends HIDDevice by more functions,
-//           but the goal is to remove U2FDevice entirely and copy over the trait-definition here
-pub trait FidoDevice: HIDDevice {
+pub trait FidoDevice
+where
+    Self: Sized,
+    Self: fmt::Debug,
+{
+    fn pre_init(&mut self, noncecmd: Nonce) -> Result<(), HIDError>;
+    fn initialized(&self) -> bool;
+
+    fn sendrecv(
+        &mut self,
+        cmd: HIDCmd,
+        send: &[u8],
+        keep_alive: &dyn Fn() -> bool,
+    ) -> io::Result<(HIDCmd, Vec<u8>)>;
+
+    // Check if the device is actually a token
+    fn is_u2f(&mut self) -> bool;
+    fn get_authenticator_info(&self) -> Option<&AuthenticatorInfo>;
+    fn set_authenticator_info(&mut self, authenticator_info: AuthenticatorInfo);
+    fn get_device_info(&self) -> U2FDeviceInfo;
+    fn set_device_info(&mut self, dev_info: U2FDeviceInfo);
+    fn set_shared_secret(&mut self, secret: SharedSecret);
+    fn get_shared_secret(&self) -> Option<&SharedSecret>;
+
     fn send_msg<Out, Req: Request<Out>>(&mut self, msg: &Req) -> Result<Out, HIDError> {
         self.send_msg_cancellable(msg, &|| true)
     }
@@ -123,12 +147,6 @@ pub trait FidoDevice: HIDDevice {
         let buf = buf;
 
         let (cmd, resp) = self.sendrecv(HIDCmd::Cbor, &buf, keep_alive)?;
-        debug!(
-            "got from Device {:?} status={:?}: {:?}",
-            self.id(),
-            cmd,
-            resp
-        );
         if cmd == HIDCmd::Cbor {
             Ok(msg.handle_response_ctap2(self, &resp)?)
         } else {
@@ -147,12 +165,6 @@ pub trait FidoDevice: HIDDevice {
         while keep_alive() {
             // sendrecv will not block with a CTAP1 device
             let (cmd, mut data) = self.sendrecv(HIDCmd::Msg, &data, &|| true)?;
-            debug!(
-                "got from Device {:?} status={:?}: {:?}",
-                self.id(),
-                cmd,
-                data
-            );
             if cmd == HIDCmd::Msg {
                 if data.len() < 2 {
                     return Err(io_err("Unexpected Response: shorter than expected").into());
@@ -182,9 +194,8 @@ pub trait FidoDevice: HIDDevice {
         )))
     }
 
-    // This is ugly as we have 2 init-functions now, but the fastest way currently.
     fn init(&mut self, nonce: Nonce) -> Result<(), HIDError> {
-        <Self as HIDDevice>::initialize(self, nonce)?;
+        self.pre_init(nonce)?;
 
         // If the device has the CBOR capability flag, then we'll check
         // for CTAP2 support by sending an authenticatorGetInfo command.
@@ -193,7 +204,7 @@ pub trait FidoDevice: HIDDevice {
         if self.get_device_info().cap_flags.contains(Capability::CBOR) {
             let command = GetInfo::default();
             if let Ok(info) = self.send_cbor(&command) {
-                debug!("{:?}: {:?}", self.id(), info);
+                debug!("{:?}", info);
                 if info.max_supported_version() != AuthenticatorVersion::U2F_V2 {
                     // Device supports CTAP2
                     self.set_authenticator_info(info);
