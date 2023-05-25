@@ -23,7 +23,6 @@ use crate::transport::device_selector::{
 use crate::transport::platform::transaction::Transaction;
 use crate::transport::{hid::HIDDevice, FidoDevice, Nonce};
 use crate::u2fprotocol::{u2f_init_device, u2f_is_keyhandle_valid, u2f_register, u2f_sign};
-use crate::u2ftypes::U2FDevice;
 use crate::{
     send_status, AuthenticatorTransports, InteractiveRequest, KeyHandle, RegisterFlags,
     RegisterResult, SignFlags, SignResult,

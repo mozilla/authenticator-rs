@@ -37,7 +37,6 @@ use crate::transport::device_selector::{Device, DeviceSelectorEvent};
 
 use crate::transport::{errors::HIDError, hid::HIDDevice, FidoDevice};
 
-use crate::u2ftypes::U2FDevice;
 use crate::{send_status, RegisterResult, SignResult, StatusPinUv, StatusUpdate};
 use std::sync::mpsc::{channel, RecvError, Sender};
 use std::thread;

@@ -33,7 +33,6 @@ use serde::{
 use serde_bytes::ByteBuf;
 use serde_cbor::{de::from_slice, ser, Value};
 use std::fmt;
-use std::io;
 
 #[derive(Clone, Copy, Debug, Serialize)]
 #[cfg_attr(test, derive(Deserialize))]
@@ -381,14 +380,11 @@ impl RequestCtap2 for GetAssertion {
         Ok(ser::to_vec(&self).map_err(CommandError::Serializing)?)
     }
 
-    fn handle_response_ctap2<Dev>(
+    fn handle_response_ctap2<Dev: FidoDevice>(
         &self,
         dev: &mut Dev,
         input: &[u8],
-    ) -> Result<Self::Output, HIDError>
-    where
-        Dev: FidoDevice + io::Read + io::Write + fmt::Debug,
-    {
+    ) -> Result<Self::Output, HIDError> {
         if input.is_empty() {
             return Err(CommandError::InputTooSmall.into());
         }
@@ -617,7 +613,7 @@ pub mod test {
     use crate::transport::device_selector::Device;
     use crate::transport::hid::HIDDevice;
     use crate::transport::FidoDevice;
-    use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
+    use crate::u2ftypes::U2FDeviceInfo;
     use rand::{thread_rng, RngCore};
 
     #[test]

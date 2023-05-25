@@ -7,8 +7,8 @@ use crate::consts::CID_BROADCAST;
 use crate::ctap2::commands::get_info::AuthenticatorInfo;
 use crate::transport::hid::HIDDevice;
 use crate::transport::platform::{hidraw, monitor};
-use crate::transport::{FidoDevice, HIDError, SharedSecret};
-use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
+use crate::transport::{FidoDevice, HIDCmd, HIDError, Nonce, SharedSecret};
+use crate::u2ftypes::U2FDeviceInfo;
 use crate::util::from_unix_result;
 use std::fs::OpenOptions;
 use std::hash::{Hash, Hasher};
@@ -68,38 +68,6 @@ impl Write for Device {
     }
 }
 
-impl U2FDevice for Device {
-    fn get_cid(&self) -> &[u8; 4] {
-        &self.cid
-    }
-
-    fn set_cid(&mut self, cid: [u8; 4]) {
-        self.cid = cid;
-    }
-
-    fn in_rpt_size(&self) -> usize {
-        self.in_rpt_size
-    }
-
-    fn out_rpt_size(&self) -> usize {
-        self.out_rpt_size
-    }
-
-    fn get_property(&self, prop_name: &str) -> io::Result<String> {
-        monitor::get_property_linux(&self.path, prop_name)
-    }
-
-    fn get_device_info(&self) -> U2FDeviceInfo {
-        // unwrap is okay, as dev_info must have already been set, else
-        // a programmer error
-        self.dev_info.clone().unwrap()
-    }
-
-    fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {
-        self.dev_info = Some(dev_info);
-    }
-}
-
 impl HIDDevice for Device {
     type BuildParameters = PathBuf;
     type Id = PathBuf;
@@ -130,13 +98,58 @@ impl HIDDevice for Device {
         }
     }
 
-    fn initialized(&self) -> bool {
-        // During successful init, the broadcast channel id gets repplaced by an actual one
-        self.cid != CID_BROADCAST
-    }
-
     fn id(&self) -> Self::Id {
         self.path.clone()
+    }
+
+    fn get_cid(&self) -> &[u8; 4] {
+        &self.cid
+    }
+
+    fn set_cid(&mut self, cid: [u8; 4]) {
+        self.cid = cid;
+    }
+
+    fn in_rpt_size(&self) -> usize {
+        self.in_rpt_size
+    }
+
+    fn out_rpt_size(&self) -> usize {
+        self.out_rpt_size
+    }
+
+    fn get_property(&self, prop_name: &str) -> io::Result<String> {
+        monitor::get_property_linux(&self.path, prop_name)
+    }
+}
+
+impl FidoDevice for Device {
+    fn pre_init(&mut self, noncecmd: Nonce) -> Result<(), HIDError> {
+        HIDDevice::pre_init(self, noncecmd)
+    }
+
+    fn sendrecv(
+        &mut self,
+        cmd: HIDCmd,
+        send: &[u8],
+        keep_alive: &dyn Fn() -> bool,
+    ) -> io::Result<(HIDCmd, Vec<u8>)> {
+        HIDDevice::sendrecv(self, cmd, send, keep_alive)
+    }
+
+    fn get_device_info(&self) -> U2FDeviceInfo {
+        // unwrap is okay, as dev_info must have already been set, else
+        // a programmer error
+        self.dev_info.clone().unwrap()
+    }
+
+    fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {
+        self.dev_info = Some(dev_info);
+    }
+
+    fn initialized(&self) -> bool {
+        // During successful init, the broadcast channel id gets replaced by an actual one
+        self.cid != CID_BROADCAST
     }
 
     fn is_u2f(&mut self) -> bool {
@@ -159,5 +172,3 @@ impl HIDDevice for Device {
         self.authenticator_info = Some(authenticator_info);
     }
 }
-
-impl FidoDevice for Device {}

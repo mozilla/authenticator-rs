@@ -9,13 +9,13 @@
 #[macro_use]
 mod util;
 
-#[cfg(any(target_os = "linux"))]
+#[cfg(target_os = "linux")]
 extern crate libudev;
 
-#[cfg(any(target_os = "freebsd"))]
+#[cfg(target_os = "freebsd")]
 extern crate devd_rs;
 
-#[cfg(any(target_os = "macos"))]
+#[cfg(target_os = "macos")]
 extern crate core_foundation;
 
 extern crate libc;

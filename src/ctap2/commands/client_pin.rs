@@ -5,7 +5,7 @@
 use super::{get_info::AuthenticatorInfo, Command, CommandError, RequestCtap2, StatusCode};
 use crate::crypto::{COSEKey, CryptoError, PinUvAuthProtocol, PinUvAuthToken, SharedSecret};
 use crate::transport::errors::HIDError;
-use crate::u2ftypes::U2FDevice;
+use crate::transport::FidoDevice;
 use serde::{
     de::{Error as SerdeError, IgnoredAny, MapAccess, Visitor},
     ser::SerializeMap,
@@ -625,14 +625,11 @@ where
         Ok(output)
     }
 
-    fn handle_response_ctap2<Dev>(
+    fn handle_response_ctap2<Dev: FidoDevice>(
         &self,
         _dev: &mut Dev,
         input: &[u8],
-    ) -> Result<Self::Output, HIDError>
-    where
-        Dev: U2FDevice,
-    {
+    ) -> Result<Self::Output, HIDError> {
         trace!("Client pin subcomand response:{:04X?}", &input);
         if input.is_empty() {
             return Err(CommandError::InputTooSmall.into());
