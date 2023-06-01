@@ -104,12 +104,6 @@ impl StateMachine {
         selector
             .send(DeviceSelectorEvent::ImAToken((dev.id(), tx)))
             .ok()?;
-        send_status(
-            status,
-            crate::StatusUpdate::DeviceAvailable {
-                dev_info: dev.get_device_info(),
-            },
-        );
 
         // We can be cancelled from the user (through keep_alive()) or from the device selector
         // (through a DeviceCommand::Cancel on rx).  We'll combine those signals into a single
@@ -130,11 +124,6 @@ impl StateMachine {
                         selector
                             .send(DeviceSelectorEvent::SelectedToken(dev.id()))
                             .ok()?;
-
-                        send_status(
-                            status,
-                            crate::StatusUpdate::DeviceSelected(dev.get_device_info()),
-                        );
                     }
                     BlinkResult::Cancelled => {
                         info!("Device {:?} was not selected", dev.id());
@@ -148,20 +137,10 @@ impl StateMachine {
             }
             Ok(DeviceCommand::Removed) => {
                 info!("Device {:?} was removed", dev.id());
-                send_status(
-                    status,
-                    crate::StatusUpdate::DeviceUnavailable {
-                        dev_info: dev.get_device_info(),
-                    },
-                );
                 return None;
             }
             Ok(DeviceCommand::Continue) => {
                 // Just continue
-                send_status(
-                    status,
-                    crate::StatusUpdate::DeviceSelected(dev.get_device_info()),
-                );
             }
             Err(_) => {
                 warn!("Error when trying to receive messages from DeviceSelector! Exiting.");
@@ -432,13 +411,6 @@ impl StateMachine {
                     return;
                 }
 
-                send_status(
-                    &status,
-                    crate::StatusUpdate::DeviceAvailable {
-                        dev_info: dev.get_device_info(),
-                    },
-                );
-
                 // Iterate the exclude list and see if there are any matches.
                 // If so, we'll keep polling the device anyway to test for user
                 // consent, to be consistent with CTAP2 device behavior.
@@ -476,8 +448,6 @@ impl StateMachine {
                                 break;
                             }
                         };
-                        let dev_info = dev.get_device_info();
-                        send_status(&status, crate::StatusUpdate::Success { dev_info });
                         callback.call(Ok(RegisterResult::CTAP2(result)));
                         break;
                     }
@@ -485,13 +455,6 @@ impl StateMachine {
                     // Sleep a bit before trying again.
                     thread::sleep(Duration::from_millis(100));
                 }
-
-                send_status(
-                    &status,
-                    crate::StatusUpdate::DeviceUnavailable {
-                        dev_info: dev.get_device_info(),
-                    },
-                );
             },
         );
 
@@ -566,13 +529,6 @@ impl StateMachine {
                     return;
                 }
 
-                send_status(
-                    &status,
-                    crate::StatusUpdate::DeviceAvailable {
-                        dev_info: dev.get_device_info(),
-                    },
-                );
-
                 send_status(&status, crate::StatusUpdate::PresenceRequired);
 
                 'outer: while alive() {
@@ -611,8 +567,6 @@ impl StateMachine {
                                         break 'outer;
                                     }
                                 };
-                                let dev_info = dev.get_device_info();
-                                send_status(&status, crate::StatusUpdate::Success { dev_info });
                                 callback.call(Ok(SignResult::CTAP2(result)));
                                 break 'outer;
                             }
@@ -622,13 +576,6 @@ impl StateMachine {
                     // Sleep a bit before trying again.
                     thread::sleep(Duration::from_millis(100));
                 }
-
-                send_status(
-                    &status,
-                    crate::StatusUpdate::DeviceUnavailable {
-                        dev_info: dev.get_device_info(),
-                    },
-                );
             },
         );
 
@@ -673,7 +620,6 @@ impl StateMachine {
                     &status,
                     crate::StatusUpdate::InteractiveManagement((
                         tx,
-                        dev.get_device_info(),
                         dev.get_authenticator_info().cloned(),
                     )),
                 );
