@@ -16,15 +16,11 @@ use crate::ctap2::commands::make_credentials::UserVerification;
 use crate::ctap2::server::{
     PublicKeyCredentialDescriptor, RelyingPartyWrapper, RpIdHash, User, UserVerificationRequirement,
 };
+use crate::ctap2::utils::{read_be_u32, read_byte};
 use crate::errors::AuthenticatorError;
 use crate::transport::errors::{ApduErrorStatus, HIDError};
 use crate::transport::FidoDevice;
 use crate::u2ftypes::CTAP1RequestAPDU;
-use nom::{
-    error::VerboseError,
-    number::complete::{be_u32, be_u8},
-    sequence::tuple,
-};
 use serde::{
     de::{Error as DesError, MapAccess, Visitor},
     ser::{Error as SerError, SerializeMap},
@@ -33,6 +29,7 @@ use serde::{
 use serde_bytes::ByteBuf;
 use serde_cbor::{de::from_slice, ser, Value};
 use std::fmt;
+use std::io::Cursor;
 
 #[derive(Clone, Copy, Debug, Serialize)]
 #[cfg_attr(test, derive(Deserialize))]
@@ -452,17 +449,11 @@ impl GetAssertionResult {
         rp_id_hash: &RpIdHash,
         key_handle: &PublicKeyCredentialDescriptor,
     ) -> Result<GetAssertionResult, CommandError> {
-        let parse_authentication = |input| {
-            // Parsing an u8, then a u32, and the rest is the signature
-            let (rest, (user_presence, counter)) = tuple((be_u8, be_u32))(input)?;
-            let signature = Vec::from(rest);
-            Ok((user_presence, counter, signature))
-        };
-        let (user_presence, counter, signature) =
-            parse_authentication(input).map_err(|e: nom::Err<VerboseError<_>>| {
-                error!("error while parsing authentication: {:?}", e);
-                CommandError::Deserializing(DesError::custom("unable to parse authentication"))
-            })?;
+        let mut data = Cursor::new(input);
+        let user_presence = read_byte(&mut data).map_err(CommandError::Deserializing)?;
+        let counter = read_be_u32(&mut data).map_err(CommandError::Deserializing)?;
+        // Remaining data is signature (Note: `data.remaining_slice()` is not yet stabilized)
+        let signature = Vec::from(&data.get_ref()[data.position() as usize..]);
 
         // Step 5 of Section 10.3 of CTAP2.1: "Copy bits 0 (the UP bit) and bit 1 from the
         // CTAP2/U2F response user presence byte to bits 0 and 1 of the CTAP2 flags, respectively.
