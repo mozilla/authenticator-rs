@@ -1,4 +1,4 @@
-use crate::consts::{Capability, HIDCmd};
+use crate::consts::HIDCmd;
 use crate::crypto::{PinUvAuthProtocol, PinUvAuthToken, SharedSecret};
 use crate::ctap2::commands::client_pin::{
     GetKeyAgreement, GetPinToken, GetPinUvAuthTokenUsingPinWithPermissions,
@@ -13,7 +13,6 @@ use crate::ctap2::commands::{
 };
 use crate::transport::device_selector::BlinkResult;
 use crate::transport::errors::{ApduErrorStatus, HIDError};
-use crate::u2ftypes::U2FDeviceInfo;
 use crate::util::io_err;
 use crate::Pin;
 use std::convert::TryFrom;
@@ -96,10 +95,9 @@ where
 
     // Check if the device is actually a token
     fn is_u2f(&mut self) -> bool;
+    fn should_try_ctap2(&self) -> bool;
     fn get_authenticator_info(&self) -> Option<&AuthenticatorInfo>;
     fn set_authenticator_info(&mut self, authenticator_info: AuthenticatorInfo);
-    fn get_device_info(&self) -> U2FDeviceInfo;
-    fn set_device_info(&mut self, dev_info: U2FDeviceInfo);
     fn set_shared_secret(&mut self, secret: SharedSecret);
     fn get_shared_secret(&self) -> Option<&SharedSecret>;
 
@@ -201,7 +199,7 @@ where
         // for CTAP2 support by sending an authenticatorGetInfo command.
         // We're not aware of any CTAP2 devices that fail to set the CBOR
         // capability flag, but we may need to rework this in the future.
-        if self.get_device_info().cap_flags.contains(Capability::CBOR) {
+        if self.should_try_ctap2() {
             let command = GetInfo::default();
             if let Ok(info) = self.send_cbor(&command) {
                 debug!("{:?}", info);

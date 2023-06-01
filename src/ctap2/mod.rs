@@ -424,12 +424,6 @@ pub fn register<Dev: FidoDevice>(
         let resp = dev.send_msg_cancellable(&makecred, alive);
         match resp {
             Ok(MakeCredentialsResult(attestation)) => {
-                send_status(
-                    &status,
-                    crate::StatusUpdate::Success {
-                        dev_info: dev.get_device_info(),
-                    },
-                );
                 callback.call(Ok(RegisterResult::CTAP2(attestation)));
                 return true;
             }
@@ -625,12 +619,6 @@ pub fn sign<Dev: FidoDevice>(
         }
         match resp {
             Ok(assertions) => {
-                send_status(
-                    &status,
-                    crate::StatusUpdate::Success {
-                        dev_info: dev.get_device_info(),
-                    },
-                );
                 callback.call(Ok(SignResult::CTAP2(assertions)));
                 return true;
             }
@@ -696,12 +684,6 @@ pub fn reset_helper(
     send_status(&status, crate::StatusUpdate::PresenceRequired);
     let resp = dev.send_cbor_cancellable(&reset, keep_alive);
     if resp.is_ok() {
-        send_status(
-            &status,
-            crate::StatusUpdate::Success {
-                dev_info: dev.get_device_info(),
-            },
-        );
         // The DeviceSelector could already be dead, but it might also wait
         // for us to respond, in order to cancel all other tokens in case
         // we skipped the "blinking"-action and went straight for the actual

@@ -18,6 +18,9 @@ pub trait HIDDevice: FidoDevice + Read + Write {
     fn new(parameters: Self::BuildParameters) -> Result<Self, (HIDError, Self::Id)>;
     fn id(&self) -> Self::Id;
 
+    fn get_device_info(&self) -> U2FDeviceInfo;
+    fn set_device_info(&mut self, dev_info: U2FDeviceInfo);
+
     // Channel ID management
     fn get_cid(&self) -> &[u8; 4];
     fn set_cid(&mut self, cid: [u8; 4]);

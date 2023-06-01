@@ -223,7 +223,6 @@ pub(crate) mod tests {
     use crate::consts::{Capability, HIDCmd, CID_BROADCAST, SW_NO_ERROR};
     use crate::transport::device_selector::Device;
     use crate::transport::hid::HIDDevice;
-    use crate::transport::FidoDevice;
     use crate::u2ftypes::U2FDeviceInfo;
     use rand::{thread_rng, RngCore};
 

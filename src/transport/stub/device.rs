@@ -62,6 +62,14 @@ impl HIDDevice for Device {
     fn get_property(&self, prop_name: &str) -> io::Result<String> {
         unimplemented!();
     }
+
+    fn get_device_info(&self) -> U2FDeviceInfo {
+        unimplemented!();
+    }
+
+    fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {
+        unimplemented!();
+    }
 }
 
 impl FidoDevice for Device {
@@ -78,20 +86,16 @@ impl FidoDevice for Device {
         unimplemented!();
     }
 
+    fn should_try_ctap2(&self) -> bool {
+        unimplemented!();
+    }
+
     fn initialized(&self) -> bool {
         unimplemented!();
     }
 
     fn is_u2f(&mut self) -> bool {
         unimplemented!()
-    }
-
-    fn get_device_info(&self) -> U2FDeviceInfo {
-        unimplemented!();
-    }
-
-    fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {
-        unimplemented!();
     }
 
     fn get_authenticator_info(&self) -> Option<&AuthenticatorInfo> {

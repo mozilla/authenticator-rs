@@ -4,7 +4,7 @@
 
 extern crate log;
 
-use crate::consts::{CID_BROADCAST, MAX_HID_RPT_SIZE};
+use crate::consts::{Capability, CID_BROADCAST, MAX_HID_RPT_SIZE};
 use crate::ctap2::commands::get_info::AuthenticatorInfo;
 use crate::transport::hid::HIDDevice;
 use crate::transport::platform::iokit::*;
@@ -169,6 +169,16 @@ impl HIDDevice for Device {
     fn get_property(&self, prop_name: &str) -> io::Result<String> {
         unsafe { self.get_property_macos(prop_name) }
     }
+
+    fn get_device_info(&self) -> U2FDeviceInfo {
+        // unwrap is okay, as dev_info must have already been set, else
+        // a programmer error
+        self.dev_info.clone().unwrap()
+    }
+
+    fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {
+        self.dev_info = Some(dev_info);
+    }
 }
 
 impl FidoDevice for Device {
@@ -185,14 +195,10 @@ impl FidoDevice for Device {
         HIDDevice::sendrecv(self, cmd, send, keep_alive)
     }
 
-    fn get_device_info(&self) -> U2FDeviceInfo {
-        // unwrap is okay, as dev_info must have already been set, else
-        // a programmer error
-        self.dev_info.clone().unwrap()
-    }
-
-    fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {
-        self.dev_info = Some(dev_info);
+    fn should_try_ctap2(&self) -> bool {
+        HIDDevice::get_device_info(self)
+            .cap_flags
+            .contains(Capability::CBOR)
     }
 
     fn initialized(&self) -> bool {
