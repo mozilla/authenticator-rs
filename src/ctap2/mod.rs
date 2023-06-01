@@ -565,9 +565,8 @@ pub fn sign<Dev: FidoDevice>(
         }
 
         // Do "pre-flight": Filter the allow-list
-        let original_allow_list_was_empty = get_assertion.allow_list.is_empty();
-        if dev.get_authenticator_info().is_some() {
-            get_assertion.allow_list = unwrap_result!(
+        let filtered_allow_list = if dev.get_authenticator_info().is_some() {
+            unwrap_result!(
                 do_credential_list_filtering_ctap2(
                     dev,
                     &get_assertion.allow_list,
@@ -575,7 +574,7 @@ pub fn sign<Dev: FidoDevice>(
                     pin_uv_auth_result.get_pin_uv_auth_token(),
                 ),
                 callback
-            );
+            )
         } else {
             let key_handle = do_credential_list_filtering_ctap1(
                 dev,
@@ -585,16 +584,25 @@ pub fn sign<Dev: FidoDevice>(
             );
             match key_handle {
                 Some(key_handle) => {
-                    get_assertion.allow_list = vec![key_handle];
+                    vec![key_handle]
                 }
-                None => {
-                    get_assertion.allow_list.clear();
-                }
+                None => Vec::new(),
             }
-        }
+        };
 
         // If the incoming list was not empty, but the filtered list is, we have to error out
-        if !original_allow_list_was_empty && get_assertion.allow_list.is_empty() {
+        if !get_assertion.allow_list.is_empty() && filtered_allow_list.is_empty() {
+            // We `take()` the alternate_rp_id to not get into an endless loop, if none of the combinations work
+            if let Some(alternate_rp_id) = get_assertion.alternate_rp_id.take() {
+                // Retry with a different RP ID if one was supplied. This is intended to be
+                // used with the AppID provided in the WebAuthn FIDO AppID extension.
+                get_assertion.rp = RelyingPartyWrapper::Data(RelyingParty {
+                    id: alternate_rp_id,
+                    ..Default::default()
+                });
+                continue;
+            }
+
             // We have to collect a user interaction
             send_status(&status, crate::StatusUpdate::PresenceRequired);
             let msg = dummy_make_credentials_cmd();
@@ -607,23 +615,13 @@ pub fn sign<Dev: FidoDevice>(
             return false;
         }
 
+        get_assertion.allow_list = filtered_allow_list;
+
         debug!("------------------------------------------------------------------");
         debug!("{get_assertion:?} using {pin_uv_auth_result:?}");
         debug!("------------------------------------------------------------------");
         send_status(&status, crate::StatusUpdate::PresenceRequired);
-        let mut resp = dev.send_msg_cancellable(&get_assertion, alive);
-        if resp.is_err() {
-            // Retry with a different RP ID if one was supplied. This is intended to be
-            // used with the AppID provided in the WebAuthn FIDO AppID extension.
-            if let Some(alternate_rp_id) = get_assertion.alternate_rp_id {
-                get_assertion.rp = RelyingPartyWrapper::Data(RelyingParty {
-                    id: alternate_rp_id,
-                    ..Default::default()
-                });
-                get_assertion.alternate_rp_id = None;
-                resp = dev.send_msg_cancellable(&get_assertion, alive);
-            }
-        }
+        let resp = dev.send_msg_cancellable(&get_assertion, alive);
         match resp {
             Ok(assertions) => {
                 send_status(

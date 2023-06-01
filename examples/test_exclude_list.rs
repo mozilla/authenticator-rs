@@ -231,7 +231,7 @@ fn main() {
     // Signing
     let mut ctap_args = SignArgs {
         client_data_hash: chall_bytes,
-        origin,
+        origin: origin.clone(),
         relying_party_id: "example.com".to_string(),
         allow_list: vec![],
         extensions: GetAssertionExtensions::default(),
@@ -308,8 +308,68 @@ fn main() {
                 }
                 continue;
             }
-            Err(e) => panic!("Registration failed: {:?}", e),
+            Err(e) => panic!("Signing failed: {:?}", e),
         };
     }
+
+    println!("Signing with alternate RP with long pre-flighting list");
+    // Signing with alternate RP
+    ctap_args.relying_party_id = "new-example.com".to_string();
+    ctap_args.alternate_rp_id = Some("example.com".to_string());
+
+    let (sign_tx, sign_rx) = channel();
+    let callback = StateCallback::new(Box::new(move |rv| {
+        sign_tx.send(rv).unwrap();
+    }));
+
+    if let Err(e) = manager.sign(
+        timeout_ms,
+        ctap_args.clone(),
+        status_tx.clone(),
+        callback.clone(),
+    ) {
+        panic!("Couldn't sign: {:?}", e);
+    };
+
+    let sign_result = sign_rx
+        .recv()
+        .expect("Problem receiving, unable to continue");
+    match sign_result {
+        Ok(SignResult::CTAP1(..)) => panic!("Requested CTAP2, but got CTAP1 results!"),
+        Ok(SignResult::CTAP2(..)) => {
+            println!("Successfully signed!");
+            println!("Quitting.");
+        }
+        Err(e) => panic!("Signing failed: {:?}", e),
+    };
+
+    // Removing the only valid key-handle, so that the next round should fail.
+    ctap_args.allow_list.pop();
+
+    let (sign_tx, sign_rx) = channel();
+    let callback = StateCallback::new(Box::new(move |rv| {
+        sign_tx.send(rv).unwrap();
+    }));
+    if let Err(e) = manager.sign(timeout_ms, ctap_args.clone(), status_tx.clone(), callback) {
+        panic!("Couldn't sign: {:?}", e);
+    };
+
+    let sign_result = sign_rx
+        .recv()
+        .expect("Problem receiving, unable to continue");
+    match sign_result {
+        Ok(SignResult::CTAP1(..)) => panic!("Requested CTAP2, but got CTAP1 results!"),
+        Ok(SignResult::CTAP2(..)) => {
+            panic!("Signing succeeded, but should have failed!");
+        }
+        Err(AuthenticatorError::HIDError(HIDError::Command(CommandError::StatusCode(
+            StatusCode::NoCredentials,
+            None,
+        ))))
+        | Err(AuthenticatorError::UnsupportedOption(UnsupportedOption::EmptyAllowList)) => {
+            println!("Got an 'no credentials' error, as expected with an all-fake allow-list.");
+        }
+        Err(e) => panic!("Signing failed: {:?}", e),
+    };
     println!("Done")
 }
