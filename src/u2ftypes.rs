@@ -156,7 +156,7 @@ impl U2FHIDInitResp {
     pub fn read(data: &[u8], nonce: &[u8]) -> io::Result<U2FHIDInitResp> {
         assert_eq!(nonce.len(), INIT_NONCE_SIZE);
 
-        if data.len() != INIT_NONCE_SIZE + 9 {
+        if data.len() < INIT_NONCE_SIZE + 9 {
             return Err(io_err("invalid init response"));
         }
 

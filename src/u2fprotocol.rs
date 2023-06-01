@@ -244,10 +244,11 @@ pub(crate) mod tests {
 
         // init_resp packet
         let mut msg = CID_BROADCAST.to_vec();
-        msg.extend(vec![HIDCmd::Init.into(), 0x00, 0x11]); // cmd + bcnt
+        msg.extend(vec![HIDCmd::Init.into(), 0x00, 0x12]); // cmd + bcnt
         msg.extend_from_slice(&nonce);
         msg.extend_from_slice(&cid); // new channel id
         msg.extend(vec![0x02, 0x04, 0x01, 0x08, 0x01]); // versions + flags
+        msg.extend(vec![0xff]); // grease for future extension
         device.add_read(&msg, 0);
 
         init_device(&mut device, &nonce).unwrap();
