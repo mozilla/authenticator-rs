@@ -47,7 +47,7 @@ pub mod tests {
     use super::*;
     use crate::consts::HIDCmd;
     use crate::transport::device_selector::Device;
-    use crate::transport::{hid::HIDDevice, FidoDevice, FidoProtocol};
+    use crate::transport::{hid::HIDDevice, FidoDevice, FidoDeviceIO, FidoProtocol};
     use rand::{thread_rng, RngCore};
     use serde_cbor::{de::from_slice, Value};
 

@@ -1,14 +1,20 @@
 use crate::consts::{HIDCmd, CID_BROADCAST};
 
-use crate::transport::{errors::HIDError, Nonce};
-use crate::transport::{FidoDevice, FidoProtocol};
+use crate::ctap2::commands::{
+    CommandError, Request, RequestCtap1, RequestCtap2, Retryable, StatusCode,
+};
+use crate::transport::errors::{ApduErrorStatus, HIDError};
+use crate::transport::{FidoDevice, FidoDeviceIO, FidoProtocol, Nonce};
 use crate::u2ftypes::{U2FDeviceInfo, U2FHIDCont, U2FHIDInit, U2FHIDInitResp};
+use crate::util::io_err;
 use rand::{thread_rng, RngCore};
 use std::cmp::Eq;
 use std::fmt;
 use std::hash::Hash;
 use std::io;
 use std::io::{Read, Write};
+use std::thread;
+use std::time::Duration;
 
 pub trait HIDDevice: FidoDevice + Read + Write {
     type BuildParameters: Sized;
@@ -155,5 +161,85 @@ pub trait HIDDevice: FidoDevice + Read + Write {
         };
         trace!("u2f_read({:?}) cmd={:?}: {:04X?}", self.id(), cmd, &data);
         Ok((cmd, data))
+    }
+}
+
+impl<T: HIDDevice> FidoDeviceIO for T {
+    fn send_msg_cancellable<Out, Req: Request<Out>>(
+        &mut self,
+        msg: &Req,
+        keep_alive: &dyn Fn() -> bool,
+    ) -> Result<Out, HIDError> {
+        if !self.initialized() {
+            return Err(HIDError::DeviceNotInitialized);
+        }
+
+        match self.get_protocol() {
+            FidoProtocol::CTAP1 => self.send_ctap1_cancellable(msg, keep_alive),
+            FidoProtocol::CTAP2 => self.send_cbor_cancellable(msg, keep_alive),
+        }
+    }
+
+    fn send_cbor_cancellable<Req: RequestCtap2>(
+        &mut self,
+        msg: &Req,
+        keep_alive: &dyn Fn() -> bool,
+    ) -> Result<Req::Output, HIDError> {
+        debug!("sending {:?} to {:?}", msg, self);
+
+        let mut data = msg.wire_format()?;
+        let mut buf: Vec<u8> = Vec::with_capacity(data.len() + 1);
+        // CTAP2 command
+        buf.push(Req::command() as u8);
+        // payload
+        buf.append(&mut data);
+        let buf = buf;
+
+        let (cmd, resp) = self.sendrecv(HIDCmd::Cbor, &buf, keep_alive)?;
+        if cmd == HIDCmd::Cbor {
+            Ok(msg.handle_response_ctap2(self, &resp)?)
+        } else {
+            Err(HIDError::UnexpectedCmd(cmd.into()))
+        }
+    }
+
+    fn send_ctap1_cancellable<Req: RequestCtap1>(
+        &mut self,
+        msg: &Req,
+        keep_alive: &dyn Fn() -> bool,
+    ) -> Result<Req::Output, HIDError> {
+        debug!("sending {:?} to {:?}", msg, self);
+        let (data, add_info) = msg.ctap1_format()?;
+
+        while keep_alive() {
+            // sendrecv will not block with a CTAP1 device
+            let (cmd, mut data) = self.sendrecv(HIDCmd::Msg, &data, &|| true)?;
+            if cmd == HIDCmd::Msg {
+                if data.len() < 2 {
+                    return Err(io_err("Unexpected Response: shorter than expected").into());
+                }
+                let split_at = data.len() - 2;
+                let status = data.split_off(split_at);
+                // This will bubble up error if status != no error
+                let status = ApduErrorStatus::from([status[0], status[1]]);
+
+                match msg.handle_response_ctap1(status, &data, &add_info) {
+                    Ok(out) => return Ok(out),
+                    Err(Retryable::Retry) => {
+                        // sleep 100ms then loop again
+                        // TODO(baloo): meh, use tokio instead?
+                        thread::sleep(Duration::from_millis(100));
+                    }
+                    Err(Retryable::Error(e)) => return Err(e),
+                }
+            } else {
+                return Err(HIDError::UnexpectedCmd(cmd.into()));
+            }
+        }
+
+        Err(HIDError::Command(CommandError::StatusCode(
+            StatusCode::KeepaliveCancel,
+            None,
+        )))
     }
 }

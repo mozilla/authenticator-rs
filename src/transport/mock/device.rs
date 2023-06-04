@@ -1,7 +1,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-use crate::consts::{Capability, HIDCmd, CID_BROADCAST};
+use crate::consts::{Capability, CID_BROADCAST};
 use crate::crypto::SharedSecret;
 use crate::ctap2::commands::get_info::AuthenticatorInfo;
 use crate::transport::device_selector::DeviceCommand;
@@ -159,15 +159,6 @@ impl HIDDevice for Device {
 impl FidoDevice for Device {
     fn pre_init(&mut self, noncecmd: Nonce) -> Result<(), HIDError> {
         HIDDevice::pre_init(self, noncecmd)
-    }
-
-    fn sendrecv(
-        &mut self,
-        cmd: HIDCmd,
-        send: &[u8],
-        keep_alive: &dyn Fn() -> bool,
-    ) -> io::Result<(HIDCmd, Vec<u8>)> {
-        HIDDevice::sendrecv(self, cmd, send, keep_alive)
     }
 
     fn should_try_ctap2(&self) -> bool {

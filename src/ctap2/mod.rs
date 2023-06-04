@@ -35,7 +35,7 @@ use crate::errors::{AuthenticatorError, UnsupportedOption};
 use crate::statecallback::StateCallback;
 use crate::transport::device_selector::{Device, DeviceSelectorEvent};
 
-use crate::transport::{errors::HIDError, hid::HIDDevice, FidoDevice, FidoProtocol};
+use crate::transport::{errors::HIDError, hid::HIDDevice, FidoDevice, FidoDeviceIO, FidoProtocol};
 
 use crate::{send_status, RegisterResult, SignResult, StatusPinUv, StatusUpdate};
 use std::sync::mpsc::{channel, RecvError, Sender};

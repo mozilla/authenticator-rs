@@ -8,7 +8,7 @@ use crate::consts::{Capability, CID_BROADCAST, MAX_HID_RPT_SIZE};
 use crate::ctap2::commands::get_info::AuthenticatorInfo;
 use crate::transport::hid::HIDDevice;
 use crate::transport::platform::uhid;
-use crate::transport::{FidoDevice, FidoProtocol, HIDCmd, HIDError, Nonce, SharedSecret};
+use crate::transport::{FidoDevice, FidoProtocol, HIDError, Nonce, SharedSecret};
 use crate::u2ftypes::U2FDeviceInfo;
 use crate::util::from_unix_result;
 use crate::util::io_err;
@@ -186,15 +186,6 @@ impl HIDDevice for Device {
 impl FidoDevice for Device {
     fn pre_init(&mut self, noncecmd: Nonce) -> Result<(), HIDError> {
         HIDDevice::pre_init(self, noncecmd)
-    }
-
-    fn sendrecv(
-        &mut self,
-        cmd: HIDCmd,
-        send: &[u8],
-        keep_alive: &dyn Fn() -> bool,
-    ) -> io::Result<(HIDCmd, Vec<u8>)> {
-        HIDDevice::sendrecv(self, cmd, send, keep_alive)
     }
 
     fn should_try_ctap2(&self) -> bool {
