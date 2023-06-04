@@ -603,7 +603,7 @@ pub mod test {
     };
     use crate::transport::device_selector::Device;
     use crate::transport::hid::HIDDevice;
-    use crate::transport::{FidoDevice, FidoProtocol};
+    use crate::transport::{FidoDevice, FidoDeviceIO, FidoProtocol};
     use crate::u2ftypes::U2FDeviceInfo;
     use rand::{thread_rng, RngCore};
 

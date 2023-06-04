@@ -1,4 +1,3 @@
-use crate::consts::HIDCmd;
 use crate::crypto::{PinUvAuthProtocol, PinUvAuthToken, SharedSecret};
 use crate::ctap2::commands::client_pin::{
     GetKeyAgreement, GetPinToken, GetPinUvAuthTokenUsingPinWithPermissions,
@@ -8,19 +7,13 @@ use crate::ctap2::commands::get_info::{AuthenticatorInfo, AuthenticatorVersion, 
 use crate::ctap2::commands::get_version::GetVersion;
 use crate::ctap2::commands::make_credentials::dummy_make_credentials_cmd;
 use crate::ctap2::commands::selection::Selection;
-use crate::ctap2::commands::{
-    CommandError, Request, RequestCtap1, RequestCtap2, Retryable, StatusCode,
-};
+use crate::ctap2::commands::{CommandError, Request, RequestCtap1, RequestCtap2, StatusCode};
 use crate::transport::device_selector::BlinkResult;
-use crate::transport::errors::{ApduErrorStatus, HIDError};
-use crate::util::io_err;
+use crate::transport::errors::HIDError;
+
 use crate::Pin;
 use std::convert::TryFrom;
 use std::fmt;
-
-use std::io;
-use std::thread;
-use std::time::Duration;
 
 pub mod device_selector;
 pub mod errors;
@@ -84,20 +77,45 @@ pub enum FidoProtocol {
     CTAP2,
 }
 
-pub trait FidoDevice
+pub trait FidoDeviceIO {
+    fn send_msg<Out, Req: Request<Out>>(&mut self, msg: &Req) -> Result<Out, HIDError> {
+        self.send_msg_cancellable(msg, &|| true)
+    }
+
+    fn send_cbor<Req: RequestCtap2>(&mut self, msg: &Req) -> Result<Req::Output, HIDError> {
+        self.send_cbor_cancellable(msg, &|| true)
+    }
+
+    fn send_ctap1<Req: RequestCtap1>(&mut self, msg: &Req) -> Result<Req::Output, HIDError> {
+        self.send_ctap1_cancellable(msg, &|| true)
+    }
+
+    fn send_msg_cancellable<Out, Req: Request<Out>>(
+        &mut self,
+        msg: &Req,
+        keep_alive: &dyn Fn() -> bool,
+    ) -> Result<Out, HIDError>;
+
+    fn send_cbor_cancellable<Req: RequestCtap2>(
+        &mut self,
+        msg: &Req,
+        keep_alive: &dyn Fn() -> bool,
+    ) -> Result<Req::Output, HIDError>;
+
+    fn send_ctap1_cancellable<Req: RequestCtap1>(
+        &mut self,
+        msg: &Req,
+        keep_alive: &dyn Fn() -> bool,
+    ) -> Result<Req::Output, HIDError>;
+}
+
+pub trait FidoDevice: FidoDeviceIO
 where
     Self: Sized,
     Self: fmt::Debug,
 {
     fn pre_init(&mut self, noncecmd: Nonce) -> Result<(), HIDError>;
     fn initialized(&self) -> bool;
-
-    fn sendrecv(
-        &mut self,
-        cmd: HIDCmd,
-        send: &[u8],
-        keep_alive: &dyn Fn() -> bool,
-    ) -> io::Result<(HIDCmd, Vec<u8>)>;
 
     // Check if the device is actually a token
     fn is_u2f(&mut self) -> bool;
@@ -117,97 +135,6 @@ where
 
     fn get_shared_secret(&self) -> Option<&SharedSecret>;
     fn set_shared_secret(&mut self, secret: SharedSecret);
-
-    fn send_msg<Out, Req: Request<Out>>(&mut self, msg: &Req) -> Result<Out, HIDError> {
-        self.send_msg_cancellable(msg, &|| true)
-    }
-
-    fn send_cbor<Req: RequestCtap2>(&mut self, msg: &Req) -> Result<Req::Output, HIDError> {
-        self.send_cbor_cancellable(msg, &|| true)
-    }
-
-    fn send_ctap1<Req: RequestCtap1>(&mut self, msg: &Req) -> Result<Req::Output, HIDError> {
-        self.send_ctap1_cancellable(msg, &|| true)
-    }
-
-    fn send_msg_cancellable<Out, Req: Request<Out>>(
-        &mut self,
-        msg: &Req,
-        keep_alive: &dyn Fn() -> bool,
-    ) -> Result<Out, HIDError> {
-        if !self.initialized() {
-            return Err(HIDError::DeviceNotInitialized);
-        }
-
-        if self.get_protocol() == FidoProtocol::CTAP2 {
-            self.send_cbor_cancellable(msg, keep_alive)
-        } else {
-            self.send_ctap1_cancellable(msg, keep_alive)
-        }
-    }
-
-    fn send_cbor_cancellable<Req: RequestCtap2>(
-        &mut self,
-        msg: &Req,
-        keep_alive: &dyn Fn() -> bool,
-    ) -> Result<Req::Output, HIDError> {
-        debug!("sending {:?} to {:?}", msg, self);
-
-        let mut data = msg.wire_format()?;
-        let mut buf: Vec<u8> = Vec::with_capacity(data.len() + 1);
-        // CTAP2 command
-        buf.push(Req::command() as u8);
-        // payload
-        buf.append(&mut data);
-        let buf = buf;
-
-        let (cmd, resp) = self.sendrecv(HIDCmd::Cbor, &buf, keep_alive)?;
-        if cmd == HIDCmd::Cbor {
-            Ok(msg.handle_response_ctap2(self, &resp)?)
-        } else {
-            Err(HIDError::UnexpectedCmd(cmd.into()))
-        }
-    }
-
-    fn send_ctap1_cancellable<Req: RequestCtap1>(
-        &mut self,
-        msg: &Req,
-        keep_alive: &dyn Fn() -> bool,
-    ) -> Result<Req::Output, HIDError> {
-        debug!("sending {:?} to {:?}", msg, self);
-        let (data, add_info) = msg.ctap1_format()?;
-
-        while keep_alive() {
-            // sendrecv will not block with a CTAP1 device
-            let (cmd, mut data) = self.sendrecv(HIDCmd::Msg, &data, &|| true)?;
-            if cmd == HIDCmd::Msg {
-                if data.len() < 2 {
-                    return Err(io_err("Unexpected Response: shorter than expected").into());
-                }
-                let split_at = data.len() - 2;
-                let status = data.split_off(split_at);
-                // This will bubble up error if status != no error
-                let status = ApduErrorStatus::from([status[0], status[1]]);
-
-                match msg.handle_response_ctap1(status, &data, &add_info) {
-                    Ok(out) => return Ok(out),
-                    Err(Retryable::Retry) => {
-                        // sleep 100ms then loop again
-                        // TODO(baloo): meh, use tokio instead?
-                        thread::sleep(Duration::from_millis(100));
-                    }
-                    Err(Retryable::Error(e)) => return Err(e),
-                }
-            } else {
-                return Err(HIDError::UnexpectedCmd(cmd.into()));
-            }
-        }
-
-        Err(HIDError::Command(CommandError::StatusCode(
-            StatusCode::KeepaliveCancel,
-            None,
-        )))
-    }
 
     fn init(&mut self, nonce: Nonce) -> Result<(), HIDError> {
         self.pre_init(nonce)?;
