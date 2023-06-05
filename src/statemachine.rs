@@ -21,7 +21,7 @@ use crate::transport::device_selector::{
     BlinkResult, Device, DeviceBuildParameters, DeviceCommand, DeviceSelectorEvent,
 };
 use crate::transport::platform::transaction::Transaction;
-use crate::transport::{hid::HIDDevice, FidoDevice, Nonce};
+use crate::transport::{hid::HIDDevice, FidoDevice, FidoProtocol, Nonce};
 use crate::u2fprotocol::{u2f_init_device, u2f_is_keyhandle_valid, u2f_register, u2f_sign};
 use crate::{
     send_status, AuthenticatorTransports, InteractiveRequest, KeyHandle, RegisterFlags,
@@ -94,7 +94,7 @@ impl StateMachine {
             return None;
         }
 
-        if ctap2_only && dev.get_authenticator_info().is_none() {
+        if ctap2_only && dev.get_protocol() != FidoProtocol::CTAP2 {
             info!("Device does not support CTAP2");
             selector.send(DeviceSelectorEvent::NotAToken(dev.id())).ok();
             return None;
@@ -400,6 +400,10 @@ impl StateMachine {
                     return;
                 }
 
+                // This legacy code doesn't use `FidoDevice::get_protocol()`, but let's ensure the
+                // protocol is set to CTAP1 as a precaution.
+                dev.downgrade_to_ctap1();
+
                 // We currently support none of the authenticator selection
                 // criteria because we can't ask tokens whether they do support
                 // those features. If flags are set, ignore all tokens for now.
@@ -491,6 +495,10 @@ impl StateMachine {
                 if !dev.is_u2f() || !u2f_init_device(dev) {
                     return;
                 }
+
+                // This legacy code doesn't use `FidoDevice::get_protocol()`, but let's ensure the
+                // protocol is set to CTAP1 as a precaution.
+                dev.downgrade_to_ctap1();
 
                 // We currently don't support user verification because we can't
                 // ask tokens whether they do support that. If the flag is set,

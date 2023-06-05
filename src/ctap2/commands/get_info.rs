@@ -536,7 +536,7 @@ pub mod tests {
     use crate::crypto::COSEAlgorithm;
     use crate::transport::device_selector::Device;
     use crate::transport::platform::device::IN_HID_RPT_SIZE;
-    use crate::transport::{hid::HIDDevice, FidoDevice, Nonce};
+    use crate::transport::{hid::HIDDevice, FidoDevice, FidoProtocol, Nonce};
     use rand::{thread_rng, RngCore};
     use serde_cbor::de::from_slice;
 
@@ -854,6 +854,7 @@ pub mod tests {
     #[test]
     fn test_get_info_ctap2_only() {
         let mut device = Device::new("commands/get_info").unwrap();
+        assert_eq!(device.get_protocol(), FidoProtocol::CTAP2);
         let nonce = [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01];
 
         // channel id
