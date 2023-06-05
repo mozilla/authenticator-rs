@@ -7,7 +7,7 @@ use crate::consts::{Capability, CID_BROADCAST};
 use crate::ctap2::commands::get_info::AuthenticatorInfo;
 use crate::transport::hid::HIDDevice;
 use crate::transport::platform::{hidraw, monitor};
-use crate::transport::{FidoDevice, HIDCmd, HIDError, Nonce, SharedSecret};
+use crate::transport::{FidoDevice, FidoProtocol, HIDCmd, HIDError, Nonce, SharedSecret};
 use crate::u2ftypes::U2FDeviceInfo;
 use crate::util::from_unix_result;
 use std::fs::OpenOptions;
@@ -27,6 +27,7 @@ pub struct Device {
     dev_info: Option<U2FDeviceInfo>,
     secret: Option<SharedSecret>,
     authenticator_info: Option<AuthenticatorInfo>,
+    protocol: FidoProtocol,
 }
 
 impl PartialEq for Device {
@@ -89,6 +90,7 @@ impl HIDDevice for Device {
             dev_info: None,
             secret: None,
             authenticator_info: None,
+            protocol: FidoProtocol::CTAP2,
         };
         if res.is_u2f() {
             info!("new device {:?}", res.path);
@@ -176,5 +178,13 @@ impl FidoDevice for Device {
 
     fn set_authenticator_info(&mut self, authenticator_info: AuthenticatorInfo) {
         self.authenticator_info = Some(authenticator_info);
+    }
+
+    fn get_protocol(&self) -> FidoProtocol {
+        self.protocol
+    }
+
+    fn downgrade_to_ctap1(&mut self) {
+        self.protocol = FidoProtocol::CTAP1;
     }
 }

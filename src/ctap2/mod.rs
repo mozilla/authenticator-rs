@@ -35,7 +35,7 @@ use crate::errors::{AuthenticatorError, UnsupportedOption};
 use crate::statecallback::StateCallback;
 use crate::transport::device_selector::{Device, DeviceSelectorEvent};
 
-use crate::transport::{errors::HIDError, hid::HIDDevice, FidoDevice};
+use crate::transport::{errors::HIDError, hid::HIDDevice, FidoDevice, FidoProtocol};
 
 use crate::{send_status, RegisterResult, SignResult, StatusPinUv, StatusUpdate};
 use std::sync::mpsc::{channel, RecvError, Sender};
@@ -104,10 +104,10 @@ fn get_pin_uv_auth_param<Dev: FidoDevice, T: PinUvAuthCommand + Request<V>, V>(
     cmd.set_pin_uv_auth_param(None)?;
     cmd.set_uv_option(None);
 
-    // CTAP1/U2F-only devices do not support user verification, so we skip it
-    let info = match dev.get_authenticator_info() {
-        Some(info) => info,
-        None => return Ok(PinUvAuthResult::DeviceIsCtap1),
+    // Skip user verification if we're using CTAP1 or if the device does not support CTAP2.
+    let info = match (dev.get_protocol(), dev.get_authenticator_info()) {
+        (FidoProtocol::CTAP2, Some(info)) => info,
+        _ => return Ok(PinUvAuthResult::DeviceIsCtap1),
     };
 
     // Only use UV, if the device supports it and we don't skip it
@@ -299,7 +299,14 @@ pub fn register<Dev: FidoDevice>(
 ) -> bool {
     let mut options = MakeCredentialsOptions::default();
 
-    if let Some(info) = dev.get_authenticator_info() {
+    if dev.get_protocol() == FidoProtocol::CTAP2 {
+        let info = match dev.get_authenticator_info() {
+            Some(info) => info,
+            None => {
+                callback.call(Err(HIDError::DeviceNotInitialized.into()));
+                return false;
+            }
+        };
         // Check if extensions have been requested that are not supported by the device
         if let Some(true) = args.extensions.hmac_secret {
             if !info.supports_hmac_secret() {
@@ -383,7 +390,7 @@ pub fn register<Dev: FidoDevice>(
         };
 
         // Do "pre-flight": Filter the exclude-list
-        if dev.get_authenticator_info().is_some() {
+        if dev.get_protocol() == FidoProtocol::CTAP2 {
             makecred.exclude_list = unwrap_result!(
                 do_credential_list_filtering_ctap2(
                     dev,
@@ -483,7 +490,14 @@ pub fn sign<Dev: FidoDevice>(
     callback: StateCallback<crate::Result<crate::SignResult>>,
     alive: &dyn Fn() -> bool,
 ) -> bool {
-    if let Some(info) = dev.get_authenticator_info() {
+    if dev.get_protocol() == FidoProtocol::CTAP2 {
+        let info = match dev.get_authenticator_info() {
+            Some(info) => info,
+            None => {
+                callback.call(Err(HIDError::DeviceNotInitialized.into()));
+                return false;
+            }
+        };
         // Check if extensions have been requested that are not supported by the device
         if args.extensions.hmac_secret.is_some() && !info.supports_hmac_secret() {
             callback.call(Err(AuthenticatorError::UnsupportedOption(
@@ -559,7 +573,7 @@ pub fn sign<Dev: FidoDevice>(
 
         // Do "pre-flight": Filter the allow-list
         let original_allow_list_was_empty = get_assertion.allow_list.is_empty();
-        if dev.get_authenticator_info().is_some() {
+        if dev.get_protocol() == FidoProtocol::CTAP2 {
             get_assertion.allow_list = unwrap_result!(
                 do_credential_list_filtering_ctap2(
                     dev,

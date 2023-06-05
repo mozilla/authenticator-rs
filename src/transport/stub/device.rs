@@ -4,8 +4,8 @@
 
 use crate::ctap2::commands::get_info::AuthenticatorInfo;
 use crate::transport::hid::HIDDevice;
-use crate::transport::FidoDevice;
-use crate::transport::{HIDCmd, HIDError, Nonce, SharedSecret};
+use crate::transport::{FidoDevice, FidoProtocol, HIDCmd};
+use crate::transport::{HIDError, Nonce, SharedSecret};
 use crate::u2ftypes::U2FDeviceInfo;
 use std::hash::Hash;
 use std::io;
@@ -111,6 +111,14 @@ impl FidoDevice for Device {
     }
 
     fn get_shared_secret(&self) -> Option<&SharedSecret> {
+        unimplemented!()
+    }
+
+    fn get_protocol(&self) -> FidoProtocol {
+        unimplemented!()
+    }
+
+    fn downgrade_to_ctap1(&mut self) {
         unimplemented!()
     }
 }

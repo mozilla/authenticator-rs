@@ -460,6 +460,7 @@ pub mod test {
     };
     use crate::transport::device_selector::Device;
     use crate::transport::hid::HIDDevice;
+    use crate::transport::{FidoDevice, FidoProtocol};
     use serde_bytes::ByteBuf;
 
     fn create_attestation_obj() -> AttestationObject {
@@ -595,6 +596,7 @@ pub mod test {
         );
 
         let mut device = Device::new("commands/make_credentials").unwrap(); // not really used (all functions ignore it)
+        assert_eq!(device.get_protocol(), FidoProtocol::CTAP2);
         let req_serialized = req
             .wire_format()
             .expect("Failed to serialize MakeCredentials request");

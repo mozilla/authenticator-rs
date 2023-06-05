@@ -47,12 +47,13 @@ pub mod tests {
     use super::*;
     use crate::consts::HIDCmd;
     use crate::transport::device_selector::Device;
-    use crate::transport::{hid::HIDDevice, FidoDevice};
+    use crate::transport::{hid::HIDDevice, FidoDevice, FidoProtocol};
     use rand::{thread_rng, RngCore};
     use serde_cbor::{de::from_slice, Value};
 
     fn issue_command_and_get_response(cmd: u8, add: &[u8]) -> Result<(), HIDError> {
         let mut device = Device::new("commands/selection").unwrap();
+        assert_eq!(device.get_protocol(), FidoProtocol::CTAP2);
         // ctap2 request
         let mut cid = [0u8; 4];
         thread_rng().fill_bytes(&mut cid);

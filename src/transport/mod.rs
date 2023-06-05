@@ -78,6 +78,12 @@ pub enum Nonce {
     Use([u8; 8]),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FidoProtocol {
+    CTAP1,
+    CTAP2,
+}
+
 pub trait FidoDevice
 where
     Self: Sized,
@@ -98,8 +104,19 @@ where
     fn should_try_ctap2(&self) -> bool;
     fn get_authenticator_info(&self) -> Option<&AuthenticatorInfo>;
     fn set_authenticator_info(&mut self, authenticator_info: AuthenticatorInfo);
-    fn set_shared_secret(&mut self, secret: SharedSecret);
+
+    // `get_protocol()` indicates whether we're using CTAP1 or CTAP2.
+    // Prior to initializing the device, `get_protocol()` should return CTAP2 unless
+    // there's a reason to believe that the device does not support CTAP2 (e.g. if
+    // it's a HID device and it does not have the CBOR capability).
+    fn get_protocol(&self) -> FidoProtocol;
+
+    // We do not provide a generic `set_protocol(..)` function as this would have complicated
+    // interactions with the AuthenticatorInfo state.
+    fn downgrade_to_ctap1(&mut self);
+
     fn get_shared_secret(&self) -> Option<&SharedSecret>;
+    fn set_shared_secret(&mut self, secret: SharedSecret);
 
     fn send_msg<Out, Req: Request<Out>>(&mut self, msg: &Req) -> Result<Out, HIDError> {
         self.send_msg_cancellable(msg, &|| true)
@@ -122,7 +139,7 @@ where
             return Err(HIDError::DeviceNotInitialized);
         }
 
-        if self.get_authenticator_info().is_some() {
+        if self.get_protocol() == FidoProtocol::CTAP2 {
             self.send_cbor_cancellable(msg, keep_alive)
         } else {
             self.send_ctap1_cancellable(msg, keep_alive)
@@ -195,24 +212,19 @@ where
     fn init(&mut self, nonce: Nonce) -> Result<(), HIDError> {
         self.pre_init(nonce)?;
 
-        // If the device has the CBOR capability flag, then we'll check
-        // for CTAP2 support by sending an authenticatorGetInfo command.
-        // We're not aware of any CTAP2 devices that fail to set the CBOR
-        // capability flag, but we may need to rework this in the future.
         if self.should_try_ctap2() {
             let command = GetInfo::default();
             if let Ok(info) = self.send_cbor(&command) {
                 debug!("{:?}", info);
-                if info.max_supported_version() != AuthenticatorVersion::U2F_V2 {
-                    // Device supports CTAP2
-                    self.set_authenticator_info(info);
-                    return Ok(());
+                if info.max_supported_version() == AuthenticatorVersion::U2F_V2 {
+                    self.downgrade_to_ctap1();
                 }
+                self.set_authenticator_info(info);
+                return Ok(());
             }
-            // An error from GetInfo might indicate that we're talking
-            // to a CTAP1 device that mistakenly claimed the CBOR capability,
-            // so we fallthrough here.
         }
+
+        self.downgrade_to_ctap1();
         // We want to return an error here if this device doesn't support CTAP1,
         // so we send a U2F_VERSION command.
         let command = GetVersion::default();
@@ -221,9 +233,10 @@ where
     }
 
     fn block_and_blink(&mut self, keep_alive: &dyn Fn() -> bool) -> BlinkResult {
-        let supports_select_cmd = self.get_authenticator_info().map_or(false, |i| {
-            i.versions.contains(&AuthenticatorVersion::FIDO_2_1)
-        });
+        let supports_select_cmd = self.get_protocol() == FidoProtocol::CTAP2
+            && self.get_authenticator_info().map_or(false, |i| {
+                i.versions.contains(&AuthenticatorVersion::FIDO_2_1)
+            });
         let resp = if supports_select_cmd {
             let msg = Selection {};
             self.send_cbor_cancellable(&msg, keep_alive)
@@ -265,9 +278,9 @@ where
 
     fn establish_shared_secret(&mut self) -> Result<SharedSecret, HIDError> {
         // CTAP1 devices don't support establishing a shared secret
-        let info = match self.get_authenticator_info() {
-            Some(info) => info,
-            None => return Err(HIDError::UnsupportedCommand),
+        let info = match (self.get_protocol(), self.get_authenticator_info()) {
+            (FidoProtocol::CTAP2, Some(info)) => info,
+            _ => return Err(HIDError::UnsupportedCommand),
         };
 
         let pin_protocol = PinUvAuthProtocol::try_from(info)?;

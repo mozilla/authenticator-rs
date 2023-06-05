@@ -5,7 +5,7 @@ use crate::consts::{Capability, HIDCmd, CID_BROADCAST};
 use crate::crypto::SharedSecret;
 use crate::ctap2::commands::get_info::AuthenticatorInfo;
 use crate::transport::device_selector::DeviceCommand;
-use crate::transport::{hid::HIDDevice, FidoDevice, HIDError, Nonce};
+use crate::transport::{hid::HIDDevice, FidoDevice, FidoProtocol, HIDError, Nonce};
 use crate::u2ftypes::U2FDeviceInfo;
 use std::hash::{Hash, Hasher};
 use std::io::{self, Read, Write};
@@ -24,6 +24,7 @@ pub struct Device {
     pub authenticator_info: Option<AuthenticatorInfo>,
     pub sender: Option<Sender<DeviceCommand>>,
     pub receiver: Option<Receiver<DeviceCommand>>,
+    pub protocol: FidoProtocol,
 }
 
 impl Device {
@@ -122,6 +123,7 @@ impl HIDDevice for Device {
             authenticator_info: None,
             sender: None,
             receiver: None,
+            protocol: FidoProtocol::CTAP2,
         })
     }
 
@@ -196,5 +198,13 @@ impl FidoDevice for Device {
 
     fn set_authenticator_info(&mut self, authenticator_info: AuthenticatorInfo) {
         self.authenticator_info = Some(authenticator_info);
+    }
+
+    fn get_protocol(&self) -> FidoProtocol {
+        self.protocol
+    }
+
+    fn downgrade_to_ctap1(&mut self) {
+        self.protocol = FidoProtocol::CTAP1;
     }
 }

@@ -1,7 +1,7 @@
 use crate::consts::{HIDCmd, CID_BROADCAST};
 
-use crate::transport::FidoDevice;
 use crate::transport::{errors::HIDError, Nonce};
+use crate::transport::{FidoDevice, FidoProtocol};
 use crate::u2ftypes::{U2FDeviceInfo, U2FHIDCont, U2FHIDInit, U2FHIDInitResp};
 use rand::{thread_rng, RngCore};
 use std::cmp::Eq;
@@ -114,7 +114,7 @@ pub trait HIDDevice: FidoDevice + Read + Write {
 
         // If this is a CTAP2 device we can tell the authenticator to cancel the transaction on its
         // side as well. There's nothing to do for U2F/CTAP1 devices.
-        if self.get_authenticator_info().is_some() {
+        if self.get_protocol() == FidoProtocol::CTAP2 {
             self.u2f_write(u8::from(HIDCmd::Cancel), &[])?;
         }
         // For CTAP2 devices we expect to read
