@@ -150,11 +150,26 @@ impl TryFrom<&AuthenticatorInfo> for PinUvAuthProtocol {
         // "If there are multiple mutually supported protocols, and the platform
         // has no preference, it SHOULD select the one listed first in
         // pinUvAuthProtocols."
-        for proto_id in info.pin_protocols.iter() {
-            match proto_id {
-                1 => return Ok(PinUvAuthProtocol(Box::new(PinUvAuth1 {}))),
-                2 => return Ok(PinUvAuthProtocol(Box::new(PinUvAuth2 {}))),
-                _ => continue,
+        if let Some(pin_protocols) = &info.pin_protocols {
+            for proto_id in pin_protocols.iter() {
+                match proto_id {
+                    1 => return Ok(PinUvAuthProtocol(Box::new(PinUvAuth1 {}))),
+                    2 => return Ok(PinUvAuthProtocol(Box::new(PinUvAuth2 {}))),
+                    _ => continue,
+                }
+            }
+        } else {
+            match info.max_supported_version() {
+                crate::ctap2::commands::get_info::AuthenticatorVersion::U2F_V2 => {
+                    return Err(CommandError::UnsupportedPinProtocol)
+                }
+                crate::ctap2::commands::get_info::AuthenticatorVersion::FIDO_2_0 => {
+                    return Ok(PinUvAuthProtocol(Box::new(PinUvAuth1 {})))
+                }
+                crate::ctap2::commands::get_info::AuthenticatorVersion::FIDO_2_1_PRE
+                | crate::ctap2::commands::get_info::AuthenticatorVersion::FIDO_2_1 => {
+                    return Ok(PinUvAuthProtocol(Box::new(PinUvAuth2 {})))
+                }
             }
         }
         Err(CommandError::UnsupportedPinProtocol)
@@ -1126,14 +1141,21 @@ pub fn parse_u2f_der_certificate(data: &[u8]) -> Result<U2FRegisterAnswer, Crypt
 
 #[cfg(all(test, not(feature = "crypto_dummy")))]
 mod test {
+    use std::convert::TryFrom;
+
     use super::{
         backend::hmac_sha256, backend::sha256, backend::test_ecdh_p256_raw, COSEAlgorithm, COSEKey,
         Curve, PinProtocolImpl, PinUvAuth1, PinUvAuth2, PinUvAuthProtocol, PublicInputs,
         SharedSecret,
     };
     use crate::crypto::{COSEEC2Key, COSEKeyType};
+    use crate::ctap2::attestation::AAGuid;
     use crate::ctap2::commands::client_pin::Pin;
+    use crate::ctap2::commands::get_info::{
+        tests::AAGUID_RAW, AuthenticatorOptions, AuthenticatorVersion,
+    };
     use crate::util::decode_hex;
+    use crate::AuthenticatorInfo;
     use serde_cbor::de::from_slice;
 
     #[test]
@@ -1339,5 +1361,56 @@ mod test {
             .authenticate(&shared_secret, &new_pin_enc)
             .expect("HMAC-SHA256 failed");
         assert_eq!(pin_auth[0..16], expected_pin_auth);
+    }
+
+    #[test]
+    fn test_pin_protocol() {
+        let mut info = AuthenticatorInfo {
+            versions: vec![AuthenticatorVersion::U2F_V2, AuthenticatorVersion::FIDO_2_0],
+            extensions: vec![],
+            aaguid: AAGuid(AAGUID_RAW),
+            options: AuthenticatorOptions {
+                platform_device: false,
+                resident_key: true,
+                client_pin: Some(false),
+                user_presence: true,
+                ..Default::default()
+            },
+            max_msg_size: Some(1200),
+            pin_protocols: None,
+            ..Default::default()
+        };
+
+        // Valid pin_protocols
+        info.pin_protocols = Some(vec![1, 2]);
+        let pin = PinUvAuthProtocol::try_from(&info).unwrap();
+        assert_eq!(pin.id(), 1); // The one listed first
+
+        // Invalid pin_protocols
+        info.pin_protocols = Some(vec![0, 10]);
+        PinUvAuthProtocol::try_from(&info).unwrap_err();
+
+        info.pin_protocols = None;
+        // No PIN protocols. CTAP1 - not supported
+        info.versions = vec![AuthenticatorVersion::U2F_V2];
+        PinUvAuthProtocol::try_from(&info).unwrap_err();
+
+        // No PIN protocols. CTAP2.0 - Fallback to 1
+        info.versions = vec![AuthenticatorVersion::U2F_V2, AuthenticatorVersion::FIDO_2_0];
+        let pin = PinUvAuthProtocol::try_from(&info).unwrap();
+        assert_eq!(pin.id(), 1);
+
+        // No PIN protocols. CTAP2.1 - Fallback to 2
+        info.versions = vec![AuthenticatorVersion::FIDO_2_1];
+        let pin = PinUvAuthProtocol::try_from(&info).unwrap();
+        assert_eq!(pin.id(), 2);
+
+        // No PIN protocols. CTAP2.1_PRE - Fallback to 2
+        info.versions = vec![
+            AuthenticatorVersion::FIDO_2_0,
+            AuthenticatorVersion::FIDO_2_1_PRE,
+        ];
+        let pin = PinUvAuthProtocol::try_from(&info).unwrap();
+        assert_eq!(pin.id(), 2);
     }
 }

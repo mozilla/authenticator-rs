@@ -1139,7 +1139,7 @@ pub mod test {
                 ..Default::default()
             },
             max_msg_size: Some(1200),
-            pin_protocols: vec![1],
+            pin_protocols: Some(vec![1]),
             max_credential_count_in_list: None,
             max_credential_id_length: Some(80),
             transports: None,
