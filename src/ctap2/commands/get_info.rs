@@ -2,7 +2,7 @@ use super::{Command, CommandError, RequestCtap2, StatusCode};
 use crate::ctap2::attestation::AAGuid;
 use crate::ctap2::server::PublicKeyCredentialParameters;
 use crate::transport::errors::HIDError;
-use crate::transport::FidoDevice;
+use crate::transport::{FidoDevice, VirtualFidoDevice};
 use serde::{
     de::{Error as SError, IgnoredAny, MapAccess, Visitor},
     Deserialize, Deserializer, Serialize,
@@ -49,6 +49,13 @@ impl RequestCtap2 for GetInfo {
         } else {
             Err(CommandError::InputTooSmall.into())
         }
+    }
+
+    fn send_to_virtual_device<Dev: VirtualFidoDevice>(
+        &self,
+        dev: &mut Dev,
+    ) -> Result<Self::Output, HIDError> {
+        dev.get_info()
     }
 }
 

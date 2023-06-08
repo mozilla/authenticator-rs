@@ -1,6 +1,7 @@
 use super::{CommandError, RequestCtap1, Retryable};
 use crate::consts::U2F_VERSION;
 use crate::transport::errors::{ApduErrorStatus, HIDError};
+use crate::transport::VirtualFidoDevice;
 use crate::u2ftypes::CTAP1RequestAPDU;
 
 #[allow(non_camel_case_types)]
@@ -43,6 +44,13 @@ impl RequestCtap1 for GetVersion {
         let cmd = U2F_VERSION;
         let data = CTAP1RequestAPDU::serialize(cmd, flags, &[])?;
         Ok((data, ()))
+    }
+
+    fn send_to_virtual_device<Dev: VirtualFidoDevice>(
+        &self,
+        dev: &mut Dev,
+    ) -> Result<Self::Output, HIDError> {
+        dev.get_version(self)
     }
 }
 

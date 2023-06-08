@@ -1,13 +1,18 @@
 use crate::crypto::{PinUvAuthProtocol, PinUvAuthToken, SharedSecret};
 use crate::ctap2::commands::client_pin::{
-    GetKeyAgreement, GetPinToken, GetPinUvAuthTokenUsingPinWithPermissions,
+    ClientPINSubCommand, GetKeyAgreement, GetPinToken, GetPinUvAuthTokenUsingPinWithPermissions,
     GetPinUvAuthTokenUsingUvWithPermissions, PinUvAuthTokenPermission,
 };
+use crate::ctap2::commands::get_assertion::{GetAssertion, GetAssertionResult};
 use crate::ctap2::commands::get_info::{AuthenticatorInfo, AuthenticatorVersion, GetInfo};
-use crate::ctap2::commands::get_version::GetVersion;
-use crate::ctap2::commands::make_credentials::dummy_make_credentials_cmd;
+use crate::ctap2::commands::get_version::{U2FInfo, GetVersion};
+use crate::ctap2::commands::make_credentials::{
+    dummy_make_credentials_cmd, MakeCredentials, MakeCredentialsResult,
+};
+use crate::ctap2::commands::reset::Reset;
 use crate::ctap2::commands::selection::Selection;
 use crate::ctap2::commands::{CommandError, Request, RequestCtap1, RequestCtap2, StatusCode};
+use crate::ctap2::preflight::CheckKeyHandle;
 use crate::transport::device_selector::BlinkResult;
 use crate::transport::errors::HIDError;
 
@@ -280,4 +285,15 @@ where
 
         Ok(pin_auth_token)
     }
+}
+
+pub trait VirtualFidoDevice: FidoDevice {
+    fn check_key_handle(&self, req: &CheckKeyHandle) -> Result<(), HIDError>;
+    fn client_pin<T: ClientPINSubCommand>(&self, req: &T) -> Result<T::Output, HIDError>;
+    fn get_assertion(&self, req: &GetAssertion) -> Result<GetAssertionResult, HIDError>;
+    fn get_info(&self) -> Result<AuthenticatorInfo, HIDError>;
+    fn get_version(&self, req: &GetVersion) -> Result<U2FInfo, HIDError>;
+    fn make_credentials(&self, req: &MakeCredentials) -> Result<MakeCredentialsResult, HIDError>;
+    fn reset(&self, req: &Reset) -> Result<(), HIDError>;
+    fn selection(&self, req: &Selection) -> Result<(), HIDError>;
 }

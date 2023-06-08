@@ -19,7 +19,7 @@ use crate::ctap2::server::{
 use crate::ctap2::utils::{read_be_u32, read_byte};
 use crate::errors::AuthenticatorError;
 use crate::transport::errors::{ApduErrorStatus, HIDError};
-use crate::transport::FidoDevice;
+use crate::transport::{FidoDevice, VirtualFidoDevice};
 use crate::u2ftypes::CTAP1RequestAPDU;
 use serde::{
     de::{Error as DesError, MapAccess, Visitor},
@@ -364,6 +364,13 @@ impl RequestCtap1 for GetAssertion {
             .map_err(HIDError::Command)
             .map_err(Retryable::Error)
     }
+
+    fn send_to_virtual_device<Dev: VirtualFidoDevice>(
+        &self,
+        dev: &mut Dev,
+    ) -> Result<Self::Output, HIDError> {
+        dev.get_assertion(self)
+    }
 }
 
 impl RequestCtap2 for GetAssertion {
@@ -417,6 +424,13 @@ impl RequestCtap2 for GetAssertion {
         } else {
             Err(CommandError::StatusCode(status, None).into())
         }
+    }
+
+    fn send_to_virtual_device<Dev: VirtualFidoDevice>(
+        &self,
+        dev: &mut Dev,
+    ) -> Result<Self::Output, HIDError> {
+        dev.get_assertion(self)
     }
 }
 

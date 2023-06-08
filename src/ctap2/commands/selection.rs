@@ -1,6 +1,6 @@
 use super::{Command, CommandError, RequestCtap2, StatusCode};
 use crate::transport::errors::HIDError;
-use crate::transport::FidoDevice;
+use crate::transport::{FidoDevice, VirtualFidoDevice};
 use serde_cbor::{de::from_slice, Value};
 
 #[derive(Debug, Default)]
@@ -39,6 +39,13 @@ impl RequestCtap2 for Selection {
             };
             Err(CommandError::StatusCode(status, msg).into())
         }
+    }
+
+    fn send_to_virtual_device<Dev: VirtualFidoDevice>(
+        &self,
+        dev: &mut Dev,
+    ) -> Result<Self::Output, HIDError> {
+        dev.selection(self)
     }
 }
 
