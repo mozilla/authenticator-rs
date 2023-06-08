@@ -5,7 +5,7 @@
 use super::{get_info::AuthenticatorInfo, Command, CommandError, RequestCtap2, StatusCode};
 use crate::crypto::{COSEKey, CryptoError, PinUvAuthProtocol, PinUvAuthToken, SharedSecret};
 use crate::transport::errors::HIDError;
-use crate::transport::FidoDevice;
+use crate::transport::{FidoDevice, VirtualFidoDevice};
 use serde::{
     de::{Error as SerdeError, IgnoredAny, MapAccess, Visitor},
     ser::SerializeMap,
@@ -649,6 +649,13 @@ where
             };
             Err(CommandError::StatusCode(status, add_data).into())
         }
+    }
+
+    fn send_to_virtual_device<Dev: VirtualFidoDevice>(
+        &self,
+        dev: &mut Dev,
+    ) -> Result<Self::Output, HIDError> {
+        dev.client_pin(self)
     }
 }
 

@@ -21,7 +21,7 @@ use crate::ctap2::server::{
 use crate::ctap2::utils::{read_byte, serde_parse_err};
 use crate::errors::AuthenticatorError;
 use crate::transport::errors::{ApduErrorStatus, HIDError};
-use crate::transport::FidoDevice;
+use crate::transport::{FidoDevice, VirtualFidoDevice};
 use crate::u2ftypes::CTAP1RequestAPDU;
 #[cfg(test)]
 use serde::Deserialize;
@@ -362,6 +362,13 @@ impl RequestCtap1 for MakeCredentials {
             .map_err(HIDError::Command)
             .map_err(Retryable::Error)
     }
+
+    fn send_to_virtual_device<Dev: VirtualFidoDevice>(
+        &self,
+        dev: &mut Dev,
+    ) -> Result<Self::Output, HIDError> {
+        dev.make_credentials(self)
+    }
 }
 
 impl RequestCtap2 for MakeCredentials {
@@ -402,6 +409,13 @@ impl RequestCtap2 for MakeCredentials {
         } else {
             Err(HIDError::Command(CommandError::StatusCode(status, None)))
         }
+    }
+
+    fn send_to_virtual_device<Dev: VirtualFidoDevice>(
+        &self,
+        dev: &mut Dev,
+    ) -> Result<Self::Output, HIDError> {
+        dev.make_credentials(self)
     }
 }
 

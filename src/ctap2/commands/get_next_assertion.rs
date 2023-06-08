@@ -1,7 +1,7 @@
 use super::{Command, CommandError, RequestCtap2, StatusCode};
 use crate::ctap2::commands::get_assertion::GetAssertionResponse;
 use crate::transport::errors::HIDError;
-use crate::transport::FidoDevice;
+use crate::transport::{FidoDevice, VirtualFidoDevice};
 use serde_cbor::{de::from_slice, Value};
 
 #[derive(Debug)]
@@ -43,5 +43,12 @@ impl RequestCtap2 for GetNextAssertion {
         } else {
             Err(CommandError::StatusCode(status, None).into())
         }
+    }
+
+    fn send_to_virtual_device<Dev: VirtualFidoDevice>(
+        &self,
+        _dev: &mut Dev,
+    ) -> Result<Self::Output, HIDError> {
+        unimplemented!()
     }
 }

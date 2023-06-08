@@ -5,7 +5,7 @@ use crate::ctap2::commands::get_info::AuthenticatorInfo;
 use crate::ctap2::server::UserVerificationRequirement;
 use crate::errors::AuthenticatorError;
 use crate::transport::errors::{ApduErrorStatus, HIDError};
-use crate::transport::FidoDevice;
+use crate::transport::{FidoDevice, VirtualFidoDevice};
 use serde_cbor::{error::Error as CborError, Value};
 use serde_json as json;
 use std::error::Error as StdErrorT;
@@ -70,6 +70,11 @@ pub trait RequestCtap1: fmt::Debug {
         input: &[u8],
         add_info: &Self::AdditionalInfo,
     ) -> Result<Self::Output, Retryable<HIDError>>;
+
+    fn send_to_virtual_device<Dev: VirtualFidoDevice>(
+        &self,
+        dev: &mut Dev,
+    ) -> Result<Self::Output, HIDError>;
 }
 
 pub trait RequestCtap2: fmt::Debug {
@@ -83,6 +88,11 @@ pub trait RequestCtap2: fmt::Debug {
         &self,
         dev: &mut Dev,
         input: &[u8],
+    ) -> Result<Self::Output, HIDError>;
+
+    fn send_to_virtual_device<Dev: VirtualFidoDevice>(
+        &self,
+        dev: &mut Dev,
     ) -> Result<Self::Output, HIDError>;
 }
 
