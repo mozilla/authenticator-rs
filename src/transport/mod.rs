@@ -1,11 +1,12 @@
 use crate::crypto::{PinUvAuthProtocol, PinUvAuthToken, SharedSecret};
 use crate::ctap2::commands::client_pin::{
-    ClientPINSubCommand, GetKeyAgreement, GetPinToken, GetPinUvAuthTokenUsingPinWithPermissions,
-    GetPinUvAuthTokenUsingUvWithPermissions, PinUvAuthTokenPermission,
+    ClientPIN, ClientPinResponse, GetKeyAgreement, GetPinToken,
+    GetPinUvAuthTokenUsingPinWithPermissions, GetPinUvAuthTokenUsingUvWithPermissions,
+    PinUvAuthTokenPermission,
 };
 use crate::ctap2::commands::get_assertion::{GetAssertion, GetAssertionResult};
 use crate::ctap2::commands::get_info::{AuthenticatorInfo, AuthenticatorVersion, GetInfo};
-use crate::ctap2::commands::get_version::{U2FInfo, GetVersion};
+use crate::ctap2::commands::get_version::{GetVersion, U2FInfo};
 use crate::ctap2::commands::make_credentials::{
     dummy_make_credentials_cmd, MakeCredentials, MakeCredentialsResult,
 };
@@ -219,11 +220,19 @@ where
 
         // Not reusing the shared secret here, if it exists, since we might start again
         // with a different PIN (e.g. if the last one was wrong)
-        let pin_command = GetKeyAgreement::new(pin_protocol);
-        let device_key_agreement = self.send_cbor(&pin_command)?;
-        let shared_secret = device_key_agreement.shared_secret()?;
-        self.set_shared_secret(shared_secret.clone());
-        Ok(shared_secret)
+        let pin_command = GetKeyAgreement::new(pin_protocol.clone());
+        let resp = self.send_cbor(&pin_command)?;
+        if let Some(device_key_agreement_key) = resp.key_agreement {
+            let shared_secret = pin_protocol
+                .encapsulate(&device_key_agreement_key)
+                .map_err(CommandError::from)?;
+            self.set_shared_secret(shared_secret.clone());
+            Ok(shared_secret)
+        } else {
+            Err(HIDError::Command(CommandError::MissingRequiredField(
+                "key_agreement",
+            )))
+        }
     }
 
     /// CTAP 2.0-only version:
@@ -239,9 +248,21 @@ where
         let shared_secret = self.establish_shared_secret()?;
 
         let pin_command = GetPinToken::new(&shared_secret, pin);
-        let pin_token = self.send_cbor(&pin_command)?;
-
-        Ok(pin_token)
+        let resp = self.send_cbor(&pin_command)?;
+        if let Some(encrypted_pin_token) = resp.pin_token {
+            // CTAP 2.1 spec:
+            // If authenticatorClientPIN's getPinToken subcommand is invoked, default permissions
+            // of `mc` and `ga` (value 0x03) are granted for the returned pinUvAuthToken.
+            let default_permissions = PinUvAuthTokenPermission::default();
+            let pin_token = shared_secret
+                .decrypt_pin_token(default_permissions, encrypted_pin_token.as_ref())
+                .map_err(CommandError::from)?;
+            Ok(pin_token)
+        } else {
+            Err(HIDError::Command(CommandError::MissingRequiredField(
+                "pin_token",
+            )))
+        }
     }
 
     fn get_pin_uv_auth_token_using_uv_with_permissions(
@@ -256,9 +277,19 @@ where
             permission,
             rp_id.cloned(),
         );
-        let pin_auth_token = self.send_cbor(&pin_command)?;
 
-        Ok(pin_auth_token)
+        let resp = self.send_cbor(&pin_command)?;
+
+        if let Some(encrypted_pin_token) = resp.pin_token {
+            let pin_token = shared_secret
+                .decrypt_pin_token(permission, encrypted_pin_token.as_ref())
+                .map_err(CommandError::from)?;
+            Ok(pin_token)
+        } else {
+            Err(HIDError::Command(CommandError::MissingRequiredField(
+                "pin_token",
+            )))
+        }
     }
 
     fn get_pin_uv_auth_token_using_pin_with_permissions(
@@ -281,15 +312,25 @@ where
             permission,
             rp_id.cloned(),
         );
-        let pin_auth_token = self.send_cbor(&pin_command)?;
 
-        Ok(pin_auth_token)
+        let resp = self.send_cbor(&pin_command)?;
+
+        if let Some(encrypted_pin_token) = resp.pin_token {
+            let pin_token = shared_secret
+                .decrypt_pin_token(permission, encrypted_pin_token.as_ref())
+                .map_err(CommandError::from)?;
+            Ok(pin_token)
+        } else {
+            Err(HIDError::Command(CommandError::MissingRequiredField(
+                "pin_token",
+            )))
+        }
     }
 }
 
 pub trait VirtualFidoDevice: FidoDevice {
     fn check_key_handle(&self, req: &CheckKeyHandle) -> Result<(), HIDError>;
-    fn client_pin<T: ClientPINSubCommand>(&self, req: &T) -> Result<T::Output, HIDError>;
+    fn client_pin(&self, req: &ClientPIN) -> Result<ClientPinResponse, HIDError>;
     fn get_assertion(&self, req: &GetAssertion) -> Result<GetAssertionResult, HIDError>;
     fn get_info(&self) -> Result<AuthenticatorInfo, HIDError>;
     fn get_version(&self, req: &GetVersion) -> Result<U2FInfo, HIDError>;
