@@ -1,6 +1,8 @@
 use super::server::RelyingPartyWrapper;
 use crate::crypto::{CryptoError, PinUvAuthParam, PinUvAuthToken};
-use crate::ctap2::commands::client_pin::{GetPinRetries, GetUvRetries, Pin, PinError};
+use crate::ctap2::commands::client_pin::{
+    ClientPinResponse, GetPinRetries, GetUvRetries, Pin, PinError,
+};
 use crate::ctap2::commands::get_info::AuthenticatorInfo;
 use crate::ctap2::server::UserVerificationRequirement;
 use crate::errors::AuthenticatorError;
@@ -162,8 +164,10 @@ pub(crate) fn repackage_pin_errors<D: FidoDevice>(
         HIDError::Command(CommandError::StatusCode(StatusCode::PinInvalid, _)) => {
             // If the given PIN was wrong, determine no. of left retries
             let cmd = GetPinRetries::new();
-            let retries = dev.send_cbor(&cmd).ok(); // If we got retries, wrap it in Some, otherwise ignore err
-            AuthenticatorError::PinError(PinError::InvalidPin(retries))
+            // Treat any error as if the device returned a valid response without a pinRetries
+            // field.
+            let resp = dev.send_cbor(&cmd).unwrap_or(ClientPinResponse::default());
+            AuthenticatorError::PinError(PinError::InvalidPin(resp.pin_retries))
         }
         HIDError::Command(CommandError::StatusCode(StatusCode::PinAuthBlocked, _)) => {
             AuthenticatorError::PinError(PinError::PinAuthBlocked)
@@ -183,8 +187,10 @@ pub(crate) fn repackage_pin_errors<D: FidoDevice>(
         HIDError::Command(CommandError::StatusCode(StatusCode::UvInvalid, _)) => {
             // If the internal UV failed, determine no. of left retries
             let cmd = GetUvRetries::new();
-            let retries = dev.send_cbor(&cmd).ok(); // If we got retries, wrap it in Some, otherwise ignore err
-            AuthenticatorError::PinError(PinError::InvalidUv(retries))
+            // Treat any error as if the device returned a valid response without a uvRetries
+            // field.
+            let resp = dev.send_cbor(&cmd).unwrap_or(ClientPinResponse::default());
+            AuthenticatorError::PinError(PinError::InvalidUv(resp.uv_retries))
         }
         HIDError::Command(CommandError::StatusCode(StatusCode::UvBlocked, _)) => {
             AuthenticatorError::PinError(PinError::UvBlocked)

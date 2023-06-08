@@ -803,6 +803,7 @@ pub fn set_or_change_pin_helper(
         dev.send_cbor_cancellable(&SetNewPin::new(&shared_secret, &new_pin), alive)
             .map_err(AuthenticatorError::HIDError)
     };
-
-    callback.call(res);
+    // the callback is expecting `Result<(), AuthenticatorError>`, but `ChangeExistingPin`
+    // and `SetNewPin` return the default `ClientPinResponse` on success. Just discard it.
+    callback.call(res.map(|_| ()));
 }
