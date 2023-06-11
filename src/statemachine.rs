@@ -21,7 +21,7 @@ use crate::transport::device_selector::{
     BlinkResult, Device, DeviceBuildParameters, DeviceCommand, DeviceSelectorEvent,
 };
 use crate::transport::platform::transaction::Transaction;
-use crate::transport::{hid::HIDDevice, FidoDevice, FidoProtocol, Nonce};
+use crate::transport::{hid::HIDDevice, FidoDevice, FidoProtocol};
 use crate::u2fprotocol::{u2f_init_device, u2f_is_keyhandle_valid, u2f_register, u2f_sign};
 use crate::{
     send_status, AuthenticatorTransports, InteractiveRequest, KeyHandle, RegisterFlags,
@@ -88,7 +88,7 @@ impl StateMachine {
         };
 
         // Try initializing it.
-        if let Err(e) = dev.init(Nonce::CreateRandom) {
+        if let Err(e) = dev.init() {
             warn!("error while initializing device: {}", e);
             selector.send(DeviceSelectorEvent::NotAToken(dev.id())).ok();
             return None;

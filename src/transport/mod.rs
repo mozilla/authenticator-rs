@@ -71,12 +71,6 @@ pub mod platform;
 #[path = "mock/mod.rs"]
 pub mod platform;
 
-#[derive(Debug)]
-pub enum Nonce {
-    CreateRandom,
-    Use([u8; 8]),
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FidoProtocol {
     CTAP1,
@@ -120,7 +114,7 @@ where
     Self: Sized,
     Self: fmt::Debug,
 {
-    fn pre_init(&mut self, noncecmd: Nonce) -> Result<(), HIDError>;
+    fn pre_init(&mut self) -> Result<(), HIDError>;
     fn initialized(&self) -> bool;
 
     // Check if the device is actually a token
@@ -142,8 +136,8 @@ where
     fn get_shared_secret(&self) -> Option<&SharedSecret>;
     fn set_shared_secret(&mut self, secret: SharedSecret);
 
-    fn init(&mut self, nonce: Nonce) -> Result<(), HIDError> {
-        self.pre_init(nonce)?;
+    fn init(&mut self) -> Result<(), HIDError> {
+        self.pre_init()?;
 
         if self.should_try_ctap2() {
             let command = GetInfo::default();

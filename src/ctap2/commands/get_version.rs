@@ -58,7 +58,7 @@ impl RequestCtap1 for GetVersion {
 pub mod tests {
     use crate::consts::{Capability, HIDCmd, CID_BROADCAST, SW_NO_ERROR};
     use crate::transport::device_selector::Device;
-    use crate::transport::{hid::HIDDevice, FidoDevice, FidoProtocol, Nonce};
+    use crate::transport::{hid::HIDDevice, FidoDevice, FidoProtocol};
     use rand::{thread_rng, RngCore};
 
     #[test]
@@ -104,9 +104,7 @@ pub mod tests {
         msg.extend(SW_NO_ERROR);
         device.add_read(&msg, 0);
 
-        device
-            .init(Nonce::Use(nonce))
-            .expect("Failed to init device");
+        device.init().expect("Failed to init device");
 
         assert_eq!(device.get_cid(), &cid);
 
