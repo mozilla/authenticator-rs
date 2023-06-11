@@ -1,11 +1,8 @@
+pub mod attestation;
+pub mod client_data;
 #[allow(dead_code)] // TODO(MS): Remove me asap
 pub mod commands;
-pub use commands::get_assertion::GetAssertionResult;
-
-pub mod attestation;
-
-pub mod client_data;
-pub(crate) mod preflight;
+pub mod preflight;
 pub mod server;
 pub(crate) mod utils;
 
@@ -35,9 +32,10 @@ use crate::errors::{AuthenticatorError, UnsupportedOption};
 use crate::statecallback::StateCallback;
 use crate::transport::device_selector::{Device, DeviceSelectorEvent};
 
+use crate::status_update::send_status;
 use crate::transport::{errors::HIDError, hid::HIDDevice, FidoDevice, FidoDeviceIO, FidoProtocol};
 
-use crate::{send_status, RegisterResult, SignResult, StatusPinUv, StatusUpdate};
+use crate::{RegisterResult, SignResult, StatusPinUv, StatusUpdate};
 use std::sync::mpsc::{channel, RecvError, Sender};
 use std::thread;
 use std::time::Duration;
@@ -682,7 +680,7 @@ pub fn sign<Dev: FidoDevice>(
     false
 }
 
-pub fn reset_helper(
+pub(crate) fn reset_helper(
     dev: &mut Device,
     selector: Sender<DeviceSelectorEvent>,
     status: Sender<crate::StatusUpdate>,
@@ -716,7 +714,7 @@ pub fn reset_helper(
     }
 }
 
-pub fn set_or_change_pin_helper(
+pub(crate) fn set_or_change_pin_helper(
     dev: &mut Device,
     mut current_pin: Option<Pin>,
     new_pin: Pin,

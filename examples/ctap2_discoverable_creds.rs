@@ -4,12 +4,13 @@
 
 use authenticator::{
     authenticatorservice::{AuthenticatorService, RegisterArgs, SignArgs},
+    crypto::COSEAlgorithm,
     ctap2::server::{
         PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty,
         ResidentKeyRequirement, Transport, User, UserVerificationRequirement,
     },
     statecallback::StateCallback,
-    COSEAlgorithm, Pin, RegisterResult, SignResult, StatusPinUv, StatusUpdate,
+    Pin, RegisterResult, SignResult, StatusPinUv, StatusUpdate,
 };
 use getopts::Options;
 use sha2::{Digest, Sha256};
