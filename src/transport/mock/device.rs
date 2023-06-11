@@ -1,12 +1,12 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-use crate::consts::{Capability, CID_BROADCAST};
+use crate::consts::{Capability, HIDCmd, CID_BROADCAST};
 use crate::crypto::SharedSecret;
 use crate::ctap2::commands::get_info::AuthenticatorInfo;
 use crate::transport::device_selector::DeviceCommand;
-use crate::transport::{hid::HIDDevice, FidoDevice, FidoProtocol, HIDError, Nonce};
-use crate::u2ftypes::U2FDeviceInfo;
+use crate::transport::{hid::HIDDevice, FidoDevice, FidoProtocol, HIDError};
+use crate::u2ftypes::{U2FDeviceInfo, U2FHIDInitResp};
 use std::hash::{Hash, Hasher};
 use std::io::{self, Read, Write};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -154,11 +154,45 @@ impl HIDDevice for Device {
     fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {
         self.dev_info = Some(dev_info);
     }
+
+    fn pre_init(&mut self) -> Result<(), HIDError> {
+        if self.initialized() {
+            return Ok(());
+        }
+
+        let nonce = [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01];
+
+        // Send Init to broadcast address to create a new channel
+        self.set_cid(CID_BROADCAST);
+        let (cmd, raw) = HIDDevice::sendrecv(self, HIDCmd::Init, &nonce, &|| true)?;
+        if cmd != HIDCmd::Init {
+            return Err(HIDError::DeviceError);
+        }
+
+        let rsp = U2FHIDInitResp::read(&raw, &nonce)?;
+
+        // Set the new Channel ID
+        self.set_cid(rsp.cid);
+
+        let info = U2FDeviceInfo {
+            vendor_name: "Test vendor".as_bytes().to_vec(),
+            device_name: "Test device".as_bytes().to_vec(),
+            version_interface: rsp.version_interface,
+            version_major: rsp.version_major,
+            version_minor: rsp.version_minor,
+            version_build: rsp.version_build,
+            cap_flags: rsp.cap_flags,
+        };
+        debug!("{:?}: {:?}", self.id(), info);
+        self.set_device_info(info);
+
+        Ok(())
+    }
 }
 
 impl FidoDevice for Device {
-    fn pre_init(&mut self, noncecmd: Nonce) -> Result<(), HIDError> {
-        HIDDevice::pre_init(self, noncecmd)
+    fn pre_init(&mut self) -> Result<(), HIDError> {
+        HIDDevice::pre_init(self)
     }
 
     fn should_try_ctap2(&self) -> bool {

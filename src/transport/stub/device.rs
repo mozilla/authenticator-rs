@@ -5,7 +5,7 @@
 use crate::ctap2::commands::get_info::AuthenticatorInfo;
 use crate::transport::hid::HIDDevice;
 use crate::transport::{FidoDevice, FidoProtocol};
-use crate::transport::{HIDError, Nonce, SharedSecret};
+use crate::transport::{HIDError, SharedSecret};
 use crate::u2ftypes::U2FDeviceInfo;
 use std::hash::Hash;
 use std::io;
@@ -73,7 +73,7 @@ impl HIDDevice for Device {
 }
 
 impl FidoDevice for Device {
-    fn pre_init(&mut self, noncecmd: Nonce) -> Result<(), HIDError> {
+    fn pre_init(&mut self) -> Result<(), HIDError> {
         unimplemented!();
     }
 

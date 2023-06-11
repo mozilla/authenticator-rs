@@ -63,12 +63,7 @@ pub enum StatusUpdate {
     /// Sent, if multiple devices are found and the user has to select one
     SelectDeviceNotice,
     /// Sent when a token was selected for interactive management
-    InteractiveManagement(
-        (
-            Sender<InteractiveRequest>,
-            Option<AuthenticatorInfo>,
-        ),
-    ),
+    InteractiveManagement((Sender<InteractiveRequest>, Option<AuthenticatorInfo>)),
 }
 
 pub(crate) fn send_status(status: &Sender<StatusUpdate>, msg: StatusUpdate) {

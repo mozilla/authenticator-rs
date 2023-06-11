@@ -543,7 +543,7 @@ pub mod tests {
     use crate::crypto::COSEAlgorithm;
     use crate::transport::device_selector::Device;
     use crate::transport::platform::device::IN_HID_RPT_SIZE;
-    use crate::transport::{hid::HIDDevice, FidoDevice, FidoProtocol, Nonce};
+    use crate::transport::{hid::HIDDevice, FidoDevice, FidoProtocol};
     use rand::{thread_rng, RngCore};
     use serde_cbor::de::from_slice;
 
@@ -904,9 +904,7 @@ pub mod tests {
         msg.extend(vec![0x00]); // SEQ
         msg.extend(&AUTHENTICATOR_INFO_PAYLOAD[(IN_HID_RPT_SIZE - 8)..]);
         device.add_read(&msg, 0);
-        device
-            .init(Nonce::Use(nonce))
-            .expect("Failed to init device");
+        device.init().expect("Failed to init device");
 
         assert_eq!(device.get_cid(), &cid);
 

@@ -4,7 +4,7 @@ use crate::ctap2::commands::{
     CommandError, Request, RequestCtap1, RequestCtap2, Retryable, StatusCode,
 };
 use crate::transport::errors::{ApduErrorStatus, HIDError};
-use crate::transport::{FidoDevice, FidoDeviceIO, FidoProtocol, Nonce};
+use crate::transport::{FidoDevice, FidoDeviceIO, FidoProtocol};
 use crate::u2ftypes::{U2FDeviceInfo, U2FHIDCont, U2FHIDInit, U2FHIDInitResp};
 use crate::util::io_err;
 use rand::{thread_rng, RngCore};
@@ -38,19 +38,13 @@ pub trait HIDDevice: FidoDevice + Read + Write {
     fn get_property(&self, prop_name: &str) -> io::Result<String>;
 
     // Initialize on a protocol-level
-    fn pre_init(&mut self, noncecmd: Nonce) -> Result<(), HIDError> {
+    fn pre_init(&mut self) -> Result<(), HIDError> {
         if self.initialized() {
             return Ok(());
         }
 
-        let nonce = match noncecmd {
-            Nonce::Use(x) => x,
-            Nonce::CreateRandom => {
-                let mut nonce = [0u8; 8];
-                thread_rng().fill_bytes(&mut nonce);
-                nonce
-            }
-        };
+        let mut nonce = [0u8; 8];
+        thread_rng().fill_bytes(&mut nonce);
 
         // Send Init to broadcast address to create a new channel
         self.set_cid(CID_BROADCAST);
@@ -60,7 +54,7 @@ pub trait HIDDevice: FidoDevice + Read + Write {
         }
 
         let rsp = U2FHIDInitResp::read(&raw, &nonce)?;
-        // Get the new Channel ID
+        // Set the new Channel ID
         self.set_cid(rsp.cid);
 
         let vendor = self
