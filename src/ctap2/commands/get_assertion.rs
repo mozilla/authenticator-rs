@@ -157,9 +157,9 @@ impl GetAssertionExtensions {
 
 #[derive(Debug, Clone)]
 pub struct GetAssertion {
-    pub(crate) client_data_hash: ClientDataHash,
-    pub(crate) rp: RelyingPartyWrapper,
-    pub(crate) allow_list: Vec<PublicKeyCredentialDescriptor>,
+    pub client_data_hash: ClientDataHash,
+    pub rp: RelyingPartyWrapper,
+    pub allow_list: Vec<PublicKeyCredentialDescriptor>,
 
     // https://www.w3.org/TR/webauthn/#client-extension-input
     // The client extension input, which is a value that can be encoded in JSON,
@@ -167,13 +167,13 @@ pub struct GetAssertion {
     // create() call, while the CBOR authenticator extension input is passed
     // from the client to the authenticator for authenticator extensions during
     // the processing of these calls.
-    pub(crate) extensions: GetAssertionExtensions,
-    pub(crate) options: GetAssertionOptions,
-    pub(crate) pin: Option<Pin>,
-    pub(crate) pin_uv_auth_param: Option<PinUvAuthParam>,
+    pub extensions: GetAssertionExtensions,
+    pub options: GetAssertionOptions,
+    pub pin: Option<Pin>,
+    pub pin_uv_auth_param: Option<PinUvAuthParam>,
 
     // This is used to implement the FIDO AppID extension.
-    pub(crate) alternate_rp_id: Option<String>,
+    pub alternate_rp_id: Option<String>,
 }
 
 impl GetAssertion {
@@ -505,12 +505,12 @@ impl GetAssertionResult {
     }
 }
 
-pub(crate) struct GetAssertionResponse {
-    credentials: Option<PublicKeyCredentialDescriptor>,
-    auth_data: AuthenticatorData,
-    signature: Vec<u8>,
-    user: Option<User>,
-    number_of_credentials: Option<usize>,
+pub struct GetAssertionResponse {
+    pub credentials: Option<PublicKeyCredentialDescriptor>,
+    pub auth_data: AuthenticatorData,
+    pub signature: Vec<u8>,
+    pub user: Option<User>,
+    pub number_of_credentials: Option<usize>,
 }
 
 impl<'de> Deserialize<'de> for GetAssertionResponse {

@@ -13,14 +13,14 @@ use serde_json as json;
 use std::error::Error as StdErrorT;
 use std::fmt;
 
-pub(crate) mod client_pin;
-pub(crate) mod get_assertion;
-pub(crate) mod get_info;
-pub(crate) mod get_next_assertion;
-pub(crate) mod get_version;
-pub(crate) mod make_credentials;
-pub(crate) mod reset;
-pub(crate) mod selection;
+pub mod client_pin;
+pub mod get_assertion;
+pub mod get_info;
+pub mod get_next_assertion;
+pub mod get_version;
+pub mod make_credentials;
+pub mod reset;
+pub mod selection;
 
 pub trait Request<T>
 where

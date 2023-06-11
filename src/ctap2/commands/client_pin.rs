@@ -55,14 +55,14 @@ impl Default for PinUvAuthTokenPermission {
 
 #[derive(Debug)]
 pub struct ClientPIN {
-    pin_protocol: Option<PinUvAuthProtocol>,
-    subcommand: PINSubcommand,
-    key_agreement: Option<COSEKey>,
-    pin_auth: Option<ByteBuf>,
-    new_pin_enc: Option<ByteBuf>,
-    pin_hash_enc: Option<ByteBuf>,
-    permissions: Option<u8>,
-    rp_id: Option<String>,
+    pub pin_protocol: Option<PinUvAuthProtocol>,
+    pub subcommand: PINSubcommand,
+    pub key_agreement: Option<COSEKey>,
+    pub pin_auth: Option<ByteBuf>,
+    pub new_pin_enc: Option<ByteBuf>,
+    pub pin_hash_enc: Option<ByteBuf>,
+    pub permissions: Option<u8>,
+    pub rp_id: Option<String>,
 }
 
 impl Default for ClientPIN {
@@ -371,7 +371,7 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinUvAuthTokenUsingPinWithPermissions
 
 macro_rules! implementRetries {
     ($name:ident, $getter:ident) => {
-        #[derive(Debug)]
+        #[derive(Debug, Default)]
         pub struct $name {}
 
         impl $name {

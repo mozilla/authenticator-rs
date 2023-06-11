@@ -153,12 +153,12 @@ impl MakeCredentialsExtensions {
 
 #[derive(Debug, Clone)]
 pub struct MakeCredentials {
-    pub(crate) client_data_hash: ClientDataHash,
-    pub(crate) rp: RelyingPartyWrapper,
+    pub client_data_hash: ClientDataHash,
+    pub rp: RelyingPartyWrapper,
     // Note(baloo): If none -> ctap1
-    pub(crate) user: Option<User>,
-    pub(crate) pub_cred_params: Vec<PublicKeyCredentialParameters>,
-    pub(crate) exclude_list: Vec<PublicKeyCredentialDescriptor>,
+    pub user: Option<User>,
+    pub pub_cred_params: Vec<PublicKeyCredentialParameters>,
+    pub exclude_list: Vec<PublicKeyCredentialDescriptor>,
 
     // https://www.w3.org/TR/webauthn/#client-extension-input
     // The client extension input, which is a value that can be encoded in JSON,
@@ -166,11 +166,11 @@ pub struct MakeCredentials {
     // create() call, while the CBOR authenticator extension input is passed
     // from the client to the authenticator for authenticator extensions during
     // the processing of these calls.
-    pub(crate) extensions: MakeCredentialsExtensions,
-    pub(crate) options: MakeCredentialsOptions,
-    pub(crate) pin: Option<Pin>,
-    pub(crate) pin_uv_auth_param: Option<PinUvAuthParam>,
-    pub(crate) enterprise_attestation: Option<u64>,
+    pub extensions: MakeCredentialsExtensions,
+    pub options: MakeCredentialsOptions,
+    pub pin: Option<Pin>,
+    pub pin_uv_auth_param: Option<PinUvAuthParam>,
+    pub enterprise_attestation: Option<u64>,
 }
 
 impl MakeCredentials {
@@ -443,7 +443,7 @@ pub(crate) fn dummy_make_credentials_cmd() -> MakeCredentials {
             ..Default::default()
         }),
         vec![PublicKeyCredentialParameters {
-            alg: crate::COSEAlgorithm::ES256,
+            alg: COSEAlgorithm::ES256,
         }],
         vec![],
         MakeCredentialsOptions::default(),

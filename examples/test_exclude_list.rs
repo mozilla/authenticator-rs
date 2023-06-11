@@ -4,6 +4,7 @@
 
 use authenticator::{
     authenticatorservice::{AuthenticatorService, GetAssertionExtensions, RegisterArgs, SignArgs},
+    crypto::COSEAlgorithm,
     ctap2::commands::StatusCode,
     ctap2::server::{
         PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty,
@@ -11,7 +12,7 @@ use authenticator::{
     },
     errors::{AuthenticatorError, CommandError, HIDError, UnsupportedOption},
     statecallback::StateCallback,
-    COSEAlgorithm, Pin, RegisterResult, SignResult, StatusPinUv, StatusUpdate,
+    Pin, RegisterResult, SignResult, StatusPinUv, StatusUpdate,
 };
 
 use getopts::Options;
