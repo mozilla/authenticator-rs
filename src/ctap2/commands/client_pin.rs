@@ -148,7 +148,7 @@ pub trait ClientPINSubCommand {
 #[derive(Default)]
 pub struct ClientPinResponse {
     pub key_agreement: Option<COSEKey>,
-    pub pin_token: Option<EncryptedPinToken>,
+    pub pin_token: Option<Vec<u8>>,
     /// Number of PIN attempts remaining before lockout.
     pub pin_retries: Option<u8>,
     pub power_cycle_state: Option<bool>,
@@ -630,15 +630,6 @@ where
         dev: &mut Dev,
     ) -> Result<ClientPinResponse, HIDError> {
         dev.client_pin(&self.as_client_pin()?)
-    }
-}
-
-#[derive(Debug, Deserialize)]
-pub struct EncryptedPinToken(ByteBuf);
-
-impl AsRef<[u8]> for EncryptedPinToken {
-    fn as_ref(&self) -> &[u8] {
-        self.0.as_ref()
     }
 }
 
