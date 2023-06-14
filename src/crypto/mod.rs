@@ -887,13 +887,13 @@ impl COSEKey {
     /// Generates a new key pair for the specified algorithm.
     /// Returns an PKCS#8 encoding of the private key, and the public key as a COSEKey.
     pub fn generate(alg: COSEAlgorithm) -> Result<(Vec<u8>, Self), CryptoError> {
-        if alg != COSEAlgorithm::ES256 {
+        if alg != COSEAlgorithm::ES256 && alg != COSEAlgorithm::ECDH_ES_HKDF256 {
             return Err(CryptoError::UnsupportedAlgorithm(alg));
         }
         let (private, public) = gen_p256()?;
         let cose_ec2_key = COSEEC2Key::from_sec1_uncompressed(Curve::SECP256R1, &public)?;
         let public = COSEKey {
-            alg: COSEAlgorithm::ES256,
+            alg,
             key: COSEKeyType::EC2(cose_ec2_key),
         };
         Ok((private, public))
