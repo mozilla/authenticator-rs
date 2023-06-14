@@ -46,6 +46,7 @@ pub fn ecdsa_p256_sha256_sign_raw(_private: &[u8], _data: &[u8]) -> Result<Vec<u
     unimplemented!()
 }
 
+#[allow(dead_code)]
 #[cfg(test)]
 pub fn test_ecdsa_p256_sha256_verify_raw(
     _public: &[u8],
