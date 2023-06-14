@@ -1162,10 +1162,11 @@ pub fn parse_u2f_der_certificate(data: &[u8]) -> Result<U2FRegisterAnswer, Crypt
 mod test {
     use std::convert::TryFrom;
 
+    #[cfg(feature = "crypto_nss")]
+    use super::backend::{ecdsa_p256_sha256_sign_raw, test_ecdsa_p256_sha256_verify_raw};
     use super::{
-        backend::ecdsa_p256_sha256_sign_raw, backend::hmac_sha256, backend::sha256,
-        backend::test_ecdh_p256_raw, backend::test_ecdsa_p256_sha256_verify_raw, COSEAlgorithm,
-        COSEKey, Curve, PinProtocolImpl, PinUvAuth1, PinUvAuth2, PinUvAuthProtocol, PublicInputs,
+        backend::hmac_sha256, backend::sha256, backend::test_ecdh_p256_raw, COSEAlgorithm, COSEKey,
+        Curve, PinProtocolImpl, PinUvAuth1, PinUvAuth2, PinUvAuthProtocol, PublicInputs,
         SharedSecret,
     };
     use crate::crypto::{COSEEC2Key, COSEKeyType};
