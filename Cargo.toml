@@ -70,7 +70,7 @@ cfg-if = "1.0"
 # Crypto backends
 openssl-sys = { version = "0.9", optional = true}
 openssl = { version = "0.10", optional = true}
-nss-gk-api = { version = "0.2.1", optional = true }
+nss-gk-api = { version = "0.3.0", optional = true }
 pkcs11-bindings = { version = "0.1.4", optional = true }
 
 [dev-dependencies]
