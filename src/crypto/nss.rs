@@ -87,7 +87,7 @@ fn der_expect_tag_with_short_len(tag: u8, z: &[u8]) -> Result<(&[u8], &[u8])> {
         return Err(CryptoError::MalformedInput);
     }
     let (h, z) = z.split_at(1);
-    if z.len() >= 0x80 || h[0] as usize > z.len() {
+    if h[0] >= 0x80 || h[0] as usize > z.len() {
         return Err(CryptoError::MalformedInput);
     }
     Ok(z.split_at(h[0] as usize))
@@ -582,7 +582,6 @@ pub fn test_ecdsa_p256_sha256_verify_raw(
     nss_gk_api::init();
 
     let signature = decode_der_p256_sig(signature)?;
-    println!("{:?}", data);
     let public = nss_public_key_from_der_spki(public)?;
     unsafe {
         PK11_VerifyWithMechanism(
