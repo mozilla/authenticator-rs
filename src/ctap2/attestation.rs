@@ -309,7 +309,7 @@ impl AuthenticatorData {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 /// x509 encoded attestation certificate
-pub struct AttestationCertificate(#[serde(with = "serde_bytes")] pub(crate) Vec<u8>);
+pub struct AttestationCertificate(#[serde(with = "serde_bytes")] pub Vec<u8>);
 
 impl AsRef<[u8]> for AttestationCertificate {
     fn as_ref(&self) -> &[u8] {
@@ -330,6 +330,12 @@ impl fmt::Debug for Signature {
 impl AsRef<[u8]> for Signature {
     fn as_ref(&self) -> &[u8] {
         self.0.as_ref()
+    }
+}
+
+impl From<&[u8]> for Signature {
+    fn from(sig: &[u8]) -> Signature {
+        Signature(ByteBuf::from(sig))
     }
 }
 
