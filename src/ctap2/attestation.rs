@@ -9,7 +9,6 @@ use serde::{
     de::{Error as SerdeError, MapAccess, Visitor},
     Deserialize, Deserializer, Serialize,
 };
-use serde_bytes::ByteBuf;
 use serde_cbor;
 use std::fmt;
 use std::io::{Cursor, Read};
@@ -318,7 +317,7 @@ impl AsRef<[u8]> for AttestationCertificate {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq)]
-pub struct Signature(#[serde(with = "serde_bytes")] pub(crate) ByteBuf);
+pub struct Signature(#[serde(with = "serde_bytes")] pub Vec<u8>);
 
 impl fmt::Debug for Signature {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -335,7 +334,7 @@ impl AsRef<[u8]> for Signature {
 
 impl From<&[u8]> for Signature {
     fn from(sig: &[u8]) -> Signature {
-        Signature(ByteBuf::from(sig))
+        Signature(sig.to_vec())
     }
 }
 
@@ -406,7 +405,7 @@ impl AttestationStatementFidoU2F {
     pub fn new(cert: &[u8], signature: &[u8]) -> Self {
         AttestationStatementFidoU2F {
             attestation_cert: vec![AttestationCertificate(Vec::from(cert))],
-            sig: Signature(ByteBuf::from(signature)),
+            sig: Signature::from(signature),
         }
     }
 }
