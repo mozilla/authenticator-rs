@@ -11,7 +11,7 @@ use serde::{
     ser::SerializeMap,
     Deserialize, Deserializer, Serialize, Serializer,
 };
-use serde_bytes::ByteBuf;
+use serde_bytes::{ByteBuf, Bytes};
 use serde_cbor::de::from_slice;
 use serde_cbor::ser::to_vec;
 use serde_cbor::Value;
@@ -58,9 +58,9 @@ pub struct ClientPIN {
     pub pin_protocol: Option<PinUvAuthProtocol>,
     pub subcommand: PINSubcommand,
     pub key_agreement: Option<COSEKey>,
-    pub pin_auth: Option<ByteBuf>,
-    pub new_pin_enc: Option<ByteBuf>,
-    pub pin_hash_enc: Option<ByteBuf>,
+    pub pin_auth: Option<Vec<u8>>,
+    pub new_pin_enc: Option<Vec<u8>>,
+    pub pin_hash_enc: Option<Vec<u8>>,
     pub permissions: Option<u8>,
     pub rp_id: Option<String>,
 }
@@ -120,13 +120,13 @@ impl Serialize for ClientPIN {
             map.serialize_entry(&3, key_agreement)?;
         }
         if let Some(ref pin_auth) = self.pin_auth {
-            map.serialize_entry(&4, pin_auth)?;
+            map.serialize_entry(&4, Bytes::new(pin_auth))?;
         }
         if let Some(ref new_pin_enc) = self.new_pin_enc {
-            map.serialize_entry(&5, new_pin_enc)?;
+            map.serialize_entry(&5, Bytes::new(new_pin_enc))?;
         }
         if let Some(ref pin_hash_enc) = self.pin_hash_enc {
-            map.serialize_entry(&6, pin_hash_enc)?;
+            map.serialize_entry(&6, Bytes::new(pin_hash_enc))?;
         }
         if let Some(ref permissions) = self.permissions {
             map.serialize_entry(&9, permissions)?;
@@ -190,7 +190,8 @@ impl<'de> Deserialize<'de> for ClientPinResponse {
                             if pin_token.is_some() {
                                 return Err(SerdeError::duplicate_field("pin_token"));
                             }
-                            pin_token = map.next_value()?;
+                            let value: ByteBuf = map.next_value()?;
+                            pin_token = Some(value.into_vec());
                         }
                         0x03 => {
                             if pin_retries.is_some() {
@@ -292,7 +293,7 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinToken<'sc, 'pin> {
             pin_protocol: Some(self.shared_secret.pin_protocol.clone()),
             subcommand: PINSubcommand::GetPINToken,
             key_agreement: Some(self.shared_secret.client_input().clone()),
-            pin_hash_enc: Some(ByteBuf::from(pin_hash_enc)),
+            pin_hash_enc: Some(pin_hash_enc),
             ..ClientPIN::default()
         })
     }
@@ -345,7 +346,7 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinUvAuthTokenUsingPinWithPermissions
             pin_protocol: Some(self.shared_secret.pin_protocol.clone()),
             subcommand: PINSubcommand::GetPinUvAuthTokenUsingPinWithPermissions,
             key_agreement: Some(self.shared_secret.client_input().clone()),
-            pin_hash_enc: Some(ByteBuf::from(pin_hash_enc)),
+            pin_hash_enc: Some(pin_hash_enc),
             permissions: Some(self.permissions.bits()),
             rp_id: self.rp_id.clone(), /* TODO: This could probably be done less wasteful with
                                         * &str all the way */
@@ -496,8 +497,8 @@ impl<'sc, 'pin> ClientPINSubCommand for SetNewPin<'sc, 'pin> {
             pin_protocol: Some(self.shared_secret.pin_protocol.clone()),
             subcommand: PINSubcommand::SetPIN,
             key_agreement: Some(self.shared_secret.client_input().clone()),
-            new_pin_enc: Some(ByteBuf::from(new_pin_enc)),
-            pin_auth: Some(ByteBuf::from(pin_auth)),
+            new_pin_enc: Some(new_pin_enc),
+            pin_auth: Some(pin_auth),
             ..ClientPIN::default()
         })
     }
@@ -563,9 +564,9 @@ impl<'sc, 'pin> ClientPINSubCommand for ChangeExistingPin<'sc, 'pin> {
             pin_protocol: Some(self.shared_secret.pin_protocol.clone()),
             subcommand: PINSubcommand::ChangePIN,
             key_agreement: Some(self.shared_secret.client_input().clone()),
-            new_pin_enc: Some(ByteBuf::from(new_pin_enc)),
-            pin_hash_enc: Some(ByteBuf::from(pin_hash_enc)),
-            pin_auth: Some(ByteBuf::from(pin_auth)),
+            new_pin_enc: Some(new_pin_enc),
+            pin_hash_enc: Some(pin_hash_enc),
+            pin_auth: Some(pin_auth),
             permissions: None,
             rp_id: None,
         })
