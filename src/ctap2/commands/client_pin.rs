@@ -145,7 +145,7 @@ pub trait ClientPINSubCommand {
     fn parse_response_payload(&self, input: &[u8]) -> Result<Self::Output, CommandError>;
 }
 
-#[derive(Default)]
+#[derive(Default, Debug, PartialEq, Eq)]
 pub struct ClientPinResponse {
     pub key_agreement: Option<COSEKey>,
     pub pin_token: Option<Vec<u8>>,
@@ -254,9 +254,6 @@ impl ClientPINSubCommand for GetKeyAgreement {
     }
 
     fn parse_response_payload(&self, input: &[u8]) -> Result<Self::Output, CommandError> {
-        let value: Value = from_slice(input).map_err(CommandError::Deserializing)?;
-        debug!("GetKeyAgreement::parse_response_payload {:?}", value);
-
         let get_pin_response: ClientPinResponse =
             from_slice(input).map_err(CommandError::Deserializing)?;
         if get_pin_response.key_agreement.is_none() {
@@ -299,9 +296,6 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinToken<'sc, 'pin> {
     }
 
     fn parse_response_payload(&self, input: &[u8]) -> Result<Self::Output, CommandError> {
-        let value: Value = from_slice(input).map_err(CommandError::Deserializing)?;
-        debug!("GetKeyAgreement::parse_response_payload {:?}", value);
-
         let get_pin_response: ClientPinResponse =
             from_slice(input).map_err(CommandError::Deserializing)?;
         if get_pin_response.pin_token.is_none() {
@@ -355,12 +349,6 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinUvAuthTokenUsingPinWithPermissions
     }
 
     fn parse_response_payload(&self, input: &[u8]) -> Result<Self::Output, CommandError> {
-        let value: Value = from_slice(input).map_err(CommandError::Deserializing)?;
-        debug!(
-            "GetPinUvAuthTokenUsingPinWithPermissions::parse_response_payload {:?}",
-            value
-        );
-
         let get_pin_response: ClientPinResponse =
             from_slice(input).map_err(CommandError::Deserializing)?;
         if get_pin_response.pin_token.is_none() {
@@ -392,9 +380,6 @@ macro_rules! implementRetries {
             }
 
             fn parse_response_payload(&self, input: &[u8]) -> Result<Self::Output, CommandError> {
-                let value: Value = from_slice(input).map_err(CommandError::Deserializing)?;
-                debug!("{}::parse_response_payload {:?}", stringify!($name), value);
-
                 let get_pin_response: ClientPinResponse =
                     from_slice(input).map_err(CommandError::Deserializing)?;
                 if get_pin_response.$getter.is_none() {
@@ -446,9 +431,6 @@ impl<'sc> ClientPINSubCommand for GetPinUvAuthTokenUsingUvWithPermissions<'sc> {
     }
 
     fn parse_response_payload(&self, input: &[u8]) -> Result<Self::Output, CommandError> {
-        let value: Value = from_slice(input).map_err(CommandError::Deserializing)?;
-        debug!("GetKeyAgreement::parse_response_payload {:?}", value);
-
         let get_pin_response: ClientPinResponse =
             from_slice(input).map_err(CommandError::Deserializing)?;
         if get_pin_response.pin_token.is_none() {
@@ -723,5 +705,144 @@ impl StdErrorT for PinError {}
 impl From<CryptoError> for PinError {
     fn from(e: CryptoError) -> Self {
         PinError::Crypto(e)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::ClientPinResponse;
+    use crate::crypto::{COSEAlgorithm, COSEEC2Key, COSEKey, COSEKeyType, Curve};
+    use serde_cbor::de::from_slice;
+
+    #[test]
+    fn test_get_key_agreement() {
+        let reference = [
+            161, 1, 165, 1, 2, 3, 56, 24, 32, 1, 33, 88, 32, 115, 222, 167, 5, 88, 238, 119, 202,
+            121, 23, 241, 150, 9, 48, 197, 136, 174, 0, 17, 90, 190, 83, 65, 103, 237, 97, 41, 213,
+            128, 111, 7, 106, 34, 88, 32, 248, 204, 9, 26, 82, 96, 25, 72, 5, 82, 251, 185, 22, 39,
+            246, 149, 54, 246, 255, 225, 52, 102, 67, 221, 113, 194, 236, 213, 199, 147, 180, 81,
+        ];
+        let expected = ClientPinResponse {
+            key_agreement: Some(COSEKey {
+                alg: COSEAlgorithm::ECDH_ES_HKDF256,
+                key: COSEKeyType::EC2(COSEEC2Key {
+                    curve: Curve::SECP256R1,
+                    x: vec![
+                        115, 222, 167, 5, 88, 238, 119, 202, 121, 23, 241, 150, 9, 48, 197, 136,
+                        174, 0, 17, 90, 190, 83, 65, 103, 237, 97, 41, 213, 128, 111, 7, 106,
+                    ],
+                    y: vec![
+                        248, 204, 9, 26, 82, 96, 25, 72, 5, 82, 251, 185, 22, 39, 246, 149, 54,
+                        246, 255, 225, 52, 102, 67, 221, 113, 194, 236, 213, 199, 147, 180, 81,
+                    ],
+                }),
+            }),
+            pin_token: None,
+            pin_retries: None,
+            power_cycle_state: None,
+            uv_retries: None,
+        };
+        let result: ClientPinResponse =
+            from_slice(&reference).expect("could not deserialize reference");
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn test_get_pin_retries() {
+        let reference = [161, 3, 7];
+        let expected = ClientPinResponse {
+            key_agreement: None,
+            pin_token: None,
+            pin_retries: Some(7),
+            power_cycle_state: None,
+            uv_retries: None,
+        };
+        let result: ClientPinResponse =
+            from_slice(&reference).expect("could not deserialize reference");
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn test_get_uv_retries() {
+        let reference = [161, 5, 2];
+        let expected = ClientPinResponse {
+            key_agreement: None,
+            pin_token: None,
+            pin_retries: None,
+            power_cycle_state: None,
+            uv_retries: Some(2),
+        };
+        let result: ClientPinResponse =
+            from_slice(&reference).expect("could not deserialize reference");
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn test_get_pin_token() {
+        let reference = [
+            161, 2, 88, 48, 173, 244, 214, 87, 128, 57, 25, 99, 142, 140, 41, 25, 94, 60, 75, 163,
+            240, 187, 211, 138, 11, 208, 74, 117, 180, 181, 97, 31, 79, 252, 191, 244, 49, 13, 201,
+            217, 204, 219, 122, 3, 101, 4, 70, 26, 14, 41, 150, 148,
+        ];
+        let expected = ClientPinResponse {
+            key_agreement: None,
+            pin_token: Some(vec![
+                173, 244, 214, 87, 128, 57, 25, 99, 142, 140, 41, 25, 94, 60, 75, 163, 240, 187,
+                211, 138, 11, 208, 74, 117, 180, 181, 97, 31, 79, 252, 191, 244, 49, 13, 201, 217,
+                204, 219, 122, 3, 101, 4, 70, 26, 14, 41, 150, 148,
+            ]),
+            pin_retries: None,
+            power_cycle_state: None,
+            uv_retries: None,
+        };
+        let result: ClientPinResponse =
+            from_slice(&reference).expect("could not deserialize reference");
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn test_get_puat_using_uv() {
+        let reference = [
+            161, 2, 88, 48, 94, 109, 192, 236, 90, 161, 77, 153, 23, 146, 179, 189, 133, 106, 76,
+            150, 17, 238, 155, 102, 107, 201, 98, 232, 184, 33, 153, 224, 203, 87, 147, 10, 21, 20,
+            85, 184, 109, 61, 240, 58, 236, 198, 171, 48, 242, 165, 221, 214,
+        ];
+        let expected = ClientPinResponse {
+            key_agreement: None,
+            pin_token: Some(vec![
+                94, 109, 192, 236, 90, 161, 77, 153, 23, 146, 179, 189, 133, 106, 76, 150, 17, 238,
+                155, 102, 107, 201, 98, 232, 184, 33, 153, 224, 203, 87, 147, 10, 21, 20, 85, 184,
+                109, 61, 240, 58, 236, 198, 171, 48, 242, 165, 221, 214,
+            ]),
+            pin_retries: None,
+            power_cycle_state: None,
+            uv_retries: None,
+        };
+        let result: ClientPinResponse =
+            from_slice(&reference).expect("could not deserialize reference");
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn test_get_puat_using_pin() {
+        let reference = [
+            161, 2, 88, 48, 143, 174, 68, 241, 186, 39, 106, 238, 129, 15, 181, 102, 112, 130, 239,
+            96, 106, 235, 3, 10, 61, 173, 106, 252, 38, 236, 44, 112, 91, 34, 218, 136, 139, 118,
+            162, 178, 172, 227, 82, 103, 136, 91, 136, 178, 170, 233, 156, 62,
+        ];
+        let expected = ClientPinResponse {
+            key_agreement: None,
+            pin_token: Some(vec![
+                143, 174, 68, 241, 186, 39, 106, 238, 129, 15, 181, 102, 112, 130, 239, 96, 106,
+                235, 3, 10, 61, 173, 106, 252, 38, 236, 44, 112, 91, 34, 218, 136, 139, 118, 162,
+                178, 172, 227, 82, 103, 136, 91, 136, 178, 170, 233, 156, 62,
+            ]),
+            pin_retries: None,
+            power_cycle_state: None,
+            uv_retries: None,
+        };
+        let result: ClientPinResponse =
+            from_slice(&reference).expect("could not deserialize reference");
+        assert_eq!(expected, result);
     }
 }
