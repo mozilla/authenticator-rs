@@ -91,6 +91,7 @@ fn get_pin_uv_auth_param<Dev: FidoDevice, T: PinUvAuthCommand + Request<V>, V>(
     permission: PinUvAuthTokenPermission,
     skip_uv: bool,
     uv_req: UserVerificationRequirement,
+    alive: &dyn Fn() -> bool,
 ) -> Result<PinUvAuthResult, AuthenticatorError> {
     // CTAP 2.1 is very specific that the request should either include pinUvAuthParam
     // OR uv=true, but not both at the same time. We now have to decide which (if either)
@@ -149,7 +150,11 @@ fn get_pin_uv_auth_param<Dev: FidoDevice, T: PinUvAuthCommand + Request<V>, V>(
         if !skip_uv && supports_uv {
             // CTAP 2.1 - UV
             let pin_auth_token = dev
-                .get_pin_uv_auth_token_using_uv_with_permissions(permission, cmd.get_rp().id())
+                .get_pin_uv_auth_token_using_uv_with_permissions(
+                    permission,
+                    cmd.get_rp().id(),
+                    alive,
+                )
                 .map_err(|e| repackage_pin_errors(dev, e))?;
             cmd.set_pin_uv_auth_param(Some(pin_auth_token.clone()))?;
             Ok(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingUvWithPermissions(pin_auth_token))
@@ -164,6 +169,7 @@ fn get_pin_uv_auth_param<Dev: FidoDevice, T: PinUvAuthCommand + Request<V>, V>(
                     cmd.pin(),
                     permission,
                     cmd.get_rp().id(),
+                    alive,
                 )
                 .map_err(|e| repackage_pin_errors(dev, e))?;
             cmd.set_pin_uv_auth_param(Some(pin_auth_token.clone()))?;
@@ -178,7 +184,7 @@ fn get_pin_uv_auth_param<Dev: FidoDevice, T: PinUvAuthCommand + Request<V>, V>(
             // We may need the shared secret for HMAC-extension, so we
             // have to establish one
             if info.supports_hmac_secret() {
-                let _shared_secret = dev.establish_shared_secret()?;
+                let _shared_secret = dev.establish_shared_secret(alive)?;
             }
             // CTAP 2.1, Section 6.1.1, Step 1.1.2.1.2.
             cmd.set_uv_option(Some(true));
@@ -186,7 +192,7 @@ fn get_pin_uv_auth_param<Dev: FidoDevice, T: PinUvAuthCommand + Request<V>, V>(
         }
 
         let pin_auth_token = dev
-            .get_pin_token(cmd.pin())
+            .get_pin_token(cmd.pin(), alive)
             .map_err(|e| repackage_pin_errors(dev, e))?;
         cmd.set_pin_uv_auth_param(Some(pin_auth_token.clone()))?;
         Ok(PinUvAuthResult::SuccessGetPinToken(pin_auth_token))
@@ -214,7 +220,7 @@ fn determine_puap_if_needed<Dev: FidoDevice, T: PinUvAuthCommand + Request<V>, U
     while alive() {
         debug!("-----------------------------------------------------------------");
         debug!("Getting pinUvAuthParam");
-        match get_pin_uv_auth_param(cmd, dev, permission, skip_uv, uv_req) {
+        match get_pin_uv_auth_param(cmd, dev, permission, skip_uv, uv_req, alive) {
             Ok(r) => {
                 return Ok(r);
             }
@@ -722,7 +728,7 @@ pub(crate) fn set_or_change_pin_helper(
     callback: StateCallback<crate::Result<crate::ResetResult>>,
     alive: &dyn Fn() -> bool,
 ) {
-    let mut shared_secret = match dev.establish_shared_secret() {
+    let mut shared_secret = match dev.establish_shared_secret(alive) {
         Ok(s) => s,
         Err(e) => {
             callback.call(Err(AuthenticatorError::HIDError(e)));
@@ -781,7 +787,7 @@ pub(crate) fn set_or_change_pin_helper(
                 was_invalid = true;
                 retries = r;
                 // We need to re-establish the shared secret for the next round.
-                match dev.establish_shared_secret() {
+                match dev.establish_shared_secret(alive) {
                     Ok(s) => {
                         shared_secret = s;
                     }

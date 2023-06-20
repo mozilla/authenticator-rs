@@ -203,7 +203,10 @@ where
         }
     }
 
-    fn establish_shared_secret(&mut self) -> Result<SharedSecret, HIDError> {
+    fn establish_shared_secret(
+        &mut self,
+        alive: &dyn Fn() -> bool,
+    ) -> Result<SharedSecret, HIDError> {
         // CTAP1 devices don't support establishing a shared secret
         let info = match (self.get_protocol(), self.get_authenticator_info()) {
             (FidoProtocol::CTAP2, Some(info)) => info,
@@ -215,7 +218,7 @@ where
         // Not reusing the shared secret here, if it exists, since we might start again
         // with a different PIN (e.g. if the last one was wrong)
         let pin_command = GetKeyAgreement::new(pin_protocol.clone());
-        let resp = self.send_cbor(&pin_command)?;
+        let resp = self.send_cbor_cancellable(&pin_command, alive)?;
         if let Some(device_key_agreement_key) = resp.key_agreement {
             let shared_secret = pin_protocol
                 .encapsulate(&device_key_agreement_key)
@@ -231,7 +234,11 @@ where
 
     /// CTAP 2.0-only version:
     /// "Getting pinUvAuthToken using getPinToken (superseded)"
-    fn get_pin_token(&mut self, pin: &Option<Pin>) -> Result<PinUvAuthToken, HIDError> {
+    fn get_pin_token(
+        &mut self,
+        pin: &Option<Pin>,
+        alive: &dyn Fn() -> bool,
+    ) -> Result<PinUvAuthToken, HIDError> {
         // Asking the user for PIN before establishing the shared secret
         let pin = pin
             .as_ref()
@@ -239,10 +246,10 @@ where
 
         // Not reusing the shared secret here, if it exists, since we might start again
         // with a different PIN (e.g. if the last one was wrong)
-        let shared_secret = self.establish_shared_secret()?;
+        let shared_secret = self.establish_shared_secret(alive)?;
 
         let pin_command = GetPinToken::new(&shared_secret, pin);
-        let resp = self.send_cbor(&pin_command)?;
+        let resp = self.send_cbor_cancellable(&pin_command, alive)?;
         if let Some(encrypted_pin_token) = resp.pin_token {
             // CTAP 2.1 spec:
             // If authenticatorClientPIN's getPinToken subcommand is invoked, default permissions
@@ -263,16 +270,17 @@ where
         &mut self,
         permission: PinUvAuthTokenPermission,
         rp_id: Option<&String>,
+        alive: &dyn Fn() -> bool,
     ) -> Result<PinUvAuthToken, HIDError> {
         // Explicitly not reusing the shared secret here
-        let shared_secret = self.establish_shared_secret()?;
+        let shared_secret = self.establish_shared_secret(alive)?;
         let pin_command = GetPinUvAuthTokenUsingUvWithPermissions::new(
             &shared_secret,
             permission,
             rp_id.cloned(),
         );
 
-        let resp = self.send_cbor(&pin_command)?;
+        let resp = self.send_cbor_cancellable(&pin_command, alive)?;
 
         if let Some(encrypted_pin_token) = resp.pin_token {
             let pin_token = shared_secret
@@ -291,6 +299,7 @@ where
         pin: &Option<Pin>,
         permission: PinUvAuthTokenPermission,
         rp_id: Option<&String>,
+        alive: &dyn Fn() -> bool,
     ) -> Result<PinUvAuthToken, HIDError> {
         // Asking the user for PIN before establishing the shared secret
         let pin = pin
@@ -299,7 +308,7 @@ where
 
         // Not reusing the shared secret here, if it exists, since we might start again
         // with a different PIN (e.g. if the last one was wrong)
-        let shared_secret = self.establish_shared_secret()?;
+        let shared_secret = self.establish_shared_secret(alive)?;
         let pin_command = GetPinUvAuthTokenUsingPinWithPermissions::new(
             &shared_secret,
             pin,
@@ -307,7 +316,7 @@ where
             rp_id.cloned(),
         );
 
-        let resp = self.send_cbor(&pin_command)?;
+        let resp = self.send_cbor_cancellable(&pin_command, alive)?;
 
         if let Some(encrypted_pin_token) = resp.pin_token {
             let pin_token = shared_secret
