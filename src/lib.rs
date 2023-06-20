@@ -44,6 +44,7 @@ pub use ctap2::attestation::AttestationObject;
 pub use ctap2::commands::client_pin::{Pin, PinError};
 pub use ctap2::commands::get_assertion::{Assertion, GetAssertionResult};
 pub use ctap2::commands::get_info::AuthenticatorInfo;
+pub use statemachine::StateMachine;
 pub use status_update::{InteractiveRequest, StatusPinUv, StatusUpdate};
 pub use transport::{FidoDevice, FidoDeviceIO, FidoProtocol, VirtualFidoDevice};
 
