@@ -7,20 +7,177 @@ use authenticator::{
     ctap2::commands::authenticator_config::{AuthConfigCommand, SetMinPINLength},
     errors::AuthenticatorError,
     statecallback::StateCallback,
-    BioEnrollmentCmd, CredManagementCmd, InteractiveRequest, InteractiveUpdate, ManageResult, Pin,
-    StatusPinUv, StatusUpdate,
+    AuthenticatorInfo, BioEnrollmentCmd, CredManagementCmd, InteractiveRequest, InteractiveUpdate,
+    ManageResult, Pin, StatusPinUv, StatusUpdate,
 };
 use getopts::Options;
 use log::debug;
 use std::{env, io, thread};
 use std::{
+    fmt::Display,
     io::Write,
     sync::mpsc::{channel, Receiver, RecvError},
 };
 
+#[derive(Debug)]
+enum Operation {
+    Quit,
+    ShowFullInfo,
+    Reset,
+    Pin(PinOperation),
+    Configure(Vec<ConfigureOperation>),
+    Credentials(Vec<CredentialsOperation>),
+    Bio(Vec<BioOperation>),
+}
+
+impl Display for Operation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Operation::Quit => write!(f, "Quit"),
+            Operation::ShowFullInfo => write!(f, "Show full info"),
+            Operation::Reset => write!(f, "Reset"),
+            Operation::Pin(PinOperation::Change) => write!(f, "Change Pin"),
+            Operation::Pin(PinOperation::Set) => write!(f, "Set Pin"),
+            Operation::Configure(_) => write!(f, "Configure Authenticator"),
+            Operation::Credentials(_) => write!(f, "Manage Credentials"),
+            Operation::Bio(_) => write!(f, "Manage BioEnrollments"),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+enum PinOperation {
+    Set,
+    Change,
+}
+
+#[derive(Debug)]
+enum ConfigureOperation {
+    ToggleAlwaysUV,
+    EnableEnterpriseAttestation,
+    SetMinPINLength,
+}
+
+impl Display for ConfigureOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConfigureOperation::ToggleAlwaysUV => write!(f, "Toggle option 'Always UV'"),
+            ConfigureOperation::EnableEnterpriseAttestation => {
+                write!(f, "Enable Enterprise attestation")
+            }
+            ConfigureOperation::SetMinPINLength => write!(f, "Set min. PIN length"),
+        }
+    }
+}
+
+#[derive(Debug)]
+enum CredentialsOperation {
+    List,
+}
+
+impl Display for CredentialsOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CredentialsOperation::List => write!(f, "List credentials"),
+        }
+    }
+}
+
+#[derive(Debug)]
+enum BioOperation {
+    Add,
+    List,
+}
+
+impl Display for BioOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BioOperation::List => write!(f, "List enrollments"),
+            BioOperation::Add => write!(f, "Add enrollment"),
+        }
+    }
+}
+
 fn print_usage(program: &str, opts: Options) {
     let brief = format!("Usage: {program} [options]");
     print!("{}", opts.usage(&brief));
+}
+
+fn parse_possible_operations(info: &AuthenticatorInfo) -> Vec<Operation> {
+    let mut operations = vec![Operation::Quit];
+    operations.push(Operation::Reset);
+    operations.push(Operation::ShowFullInfo);
+
+    // PIN-related
+    match info.options.client_pin {
+        None => {}
+        Some(true) => operations.push(Operation::Pin(PinOperation::Change)),
+        Some(false) => operations.push(Operation::Pin(PinOperation::Set)),
+    }
+
+    // Authenticator-Configuration
+    let mut cfg_operations = vec![];
+    if info.options.authnr_cfg == Some(true) && info.options.always_uv.is_some() {
+        cfg_operations.push(ConfigureOperation::ToggleAlwaysUV);
+    }
+    if info.options.authnr_cfg == Some(true) && info.options.set_min_pin_length.is_some() {
+        cfg_operations.push(ConfigureOperation::SetMinPINLength);
+    }
+    if info.options.ep.is_some() {
+        cfg_operations.push(ConfigureOperation::EnableEnterpriseAttestation);
+    }
+    if !cfg_operations.is_empty() {
+        operations.push(Operation::Configure(cfg_operations));
+    }
+
+    // Credential Management
+    if info.options.cred_mgmt == Some(true) || info.options.credential_mgmt_preview == Some(true) {
+        // TODO: Add more operations
+        operations.push(Operation::Credentials(vec![CredentialsOperation::List]));
+    }
+
+    // Bio Enrollment
+    let mut bio_operations = vec![];
+    if info.options.bio_enroll.is_some() || info.options.user_verification_mgmt_preview.is_some() {
+        bio_operations.push(BioOperation::Add);
+    }
+    if info.options.bio_enroll == Some(true)
+        || info.options.user_verification_mgmt_preview == Some(true)
+    {
+        bio_operations.push(BioOperation::List);
+        // TODO: Add more operations (rename, delete)
+    }
+    if !bio_operations.is_empty() {
+        operations.push(Operation::Bio(bio_operations));
+    }
+    operations
+}
+
+fn ask_user_choice<T: Display>(choices: &[T]) -> usize {
+    println!("What do you wish to do?");
+    for (idx, op) in choices.iter().enumerate() {
+        println!("({idx}) {op}");
+    }
+
+    let mut input = String::new();
+    loop {
+        input.clear();
+        print!("Your choice: ");
+        io::stdout()
+            .lock()
+            .flush()
+            .expect("Failed to flush stdout!");
+        io::stdin()
+            .read_line(&mut input)
+            .expect("error: unable to read user input");
+        if let Ok(idx) = input.trim().parse::<usize>() {
+            if idx < choices.len() {
+                // Add a newline in case of success for better separation of in/output
+                println!();
+                return idx;
+            }
+        }
+    }
 }
 
 fn interactive_status_callback(status_rx: Receiver<StatusUpdate>) {
@@ -30,162 +187,121 @@ fn interactive_status_callback(status_rx: Receiver<StatusUpdate>) {
                 tx,
                 auth_info,
             )))) => {
-                debug!("STATUS: interactive management: {:#?}", auth_info);
-                let mut change_pin = false;
-                if let Some(info) = auth_info {
-                    println!("Authenticator Info {:#?}", info);
-                    println!();
-                    println!("What do you wish to do?");
+                let info = match auth_info {
+                    Some(info) => info,
+                    None => {
+                        println!("Device only supports CTAP1 and can't be managed.");
+                        return;
+                    }
+                };
+                let operations = parse_possible_operations(&info);
+                let choice = ask_user_choice(&operations);
 
-                    let mut choices = vec!["0", "1"];
-                    println!("(0) Quit");
-                    println!("(1) Reset token");
-                    match info.options.client_pin {
-                        None => {}
-                        Some(true) => {
-                            println!("(2) Change PIN");
-                            choices.push("2");
-                            change_pin = true;
+                match &operations[choice] {
+                    Operation::Quit => {
+                        return;
+                    }
+                    Operation::ShowFullInfo => println!("Authenticator Info {:#?}", info),
+                    Operation::Reset => tx
+                        .send(InteractiveRequest::Reset)
+                        .expect("Failed to send Reset request."),
+                    Operation::Pin(op) => {
+                        let raw_new_pin = rpassword::prompt_password_stderr("Enter new PIN: ")
+                            .expect("Failed to read PIN");
+                        let new_pin = Pin::new(&raw_new_pin);
+                        if *op == PinOperation::Change {
+                            let raw_curr_pin =
+                                rpassword::prompt_password_stderr("Enter current PIN: ")
+                                    .expect("Failed to read PIN");
+                            let curr_pin = Pin::new(&raw_curr_pin);
+                            tx.send(InteractiveRequest::ChangePIN(curr_pin, new_pin))
+                                .expect("Failed to send PIN-change request");
+                        } else {
+                            tx.send(InteractiveRequest::SetPIN(new_pin))
+                                .expect("Failed to send PIN-set request");
                         }
-                        Some(false) => {
-                            println!("(2) Set PIN");
-                            choices.push("2");
-                        }
                     }
-                    if info.options.authnr_cfg == Some(true) && info.options.always_uv.is_some() {
-                        println!("(3) Toggle 'Always UV'");
-                        choices.push("3");
-                    }
-                    if info.options.authnr_cfg == Some(true)
-                        && info.options.set_min_pin_length.is_some()
-                    {
-                        println!("(4) Set min. PIN length");
-                        choices.push("4");
-                    }
-                    if info.options.cred_mgmt == Some(true)
-                        || info.options.credential_mgmt_preview == Some(true)
-                    {
-                        println!("(5) Credential Management");
-                        choices.push("5");
-                    }
-                    if info.options.bio_enroll == Some(true)
-                        || info.options.user_verification_mgmt_preview == Some(true)
-                    {
-                        println!("(6) List bio enrollments");
-                        choices.push("6");
-                    }
-                    if info.options.bio_enroll.is_some()
-                        || info.options.user_verification_mgmt_preview.is_some()
-                    {
-                        println!("(7) Add bio enrollment");
-                        choices.push("7");
-                    }
-
-                    let mut input = String::new();
-                    while !choices.contains(&input.trim()) {
-                        input.clear();
-                        print!("Your choice: ");
-                        io::stdout()
-                            .lock()
-                            .flush()
-                            .expect("Failed to flush stdout!");
-                        io::stdin()
-                            .read_line(&mut input)
-                            .expect("error: unable to read user input");
-                    }
-                    input = input.trim().to_string();
-
-                    match input.as_str() {
-                        "0" => {
-                            return;
-                        }
-                        "1" => {
-                            tx.send(InteractiveRequest::Reset)
+                    Operation::Configure(ops) => {
+                        let subchoice = ask_user_choice(&ops);
+                        match ops[subchoice] {
+                            ConfigureOperation::ToggleAlwaysUV => {
+                                tx.send(InteractiveRequest::ChangeConfig(
+                                    AuthConfigCommand::ToggleAlwaysUv,
+                                ))
                                 .expect("Failed to send Reset request.");
-                        }
-                        "2" => {
-                            let raw_new_pin = rpassword::prompt_password_stderr("Enter new PIN: ")
-                                .expect("Failed to read PIN");
-                            let new_pin = Pin::new(&raw_new_pin);
-                            if change_pin {
-                                let raw_curr_pin =
-                                    rpassword::prompt_password_stderr("Enter current PIN: ")
-                                        .expect("Failed to read PIN");
-                                let curr_pin = Pin::new(&raw_curr_pin);
-                                tx.send(InteractiveRequest::ChangePIN(curr_pin, new_pin))
-                                    .expect("Failed to send PIN-change request");
-                            } else {
-                                tx.send(InteractiveRequest::SetPIN(new_pin))
-                                    .expect("Failed to send PIN-set request");
                             }
-                            return;
+                            ConfigureOperation::EnableEnterpriseAttestation => {
+                                tx.send(InteractiveRequest::ChangeConfig(
+                                    AuthConfigCommand::EnableEnterpriseAttestation,
+                                ))
+                                .expect("Failed to send Reset request.");
+                            }
+                            ConfigureOperation::SetMinPINLength => {
+                                let mut length = String::new();
+                                while length.trim().parse::<u64>().is_err() {
+                                    length.clear();
+                                    print!("New minimum PIN length: ");
+                                    io::stdout()
+                                        .lock()
+                                        .flush()
+                                        .expect("Failed to flush stdout!");
+                                    io::stdin()
+                                        .read_line(&mut length)
+                                        .expect("error: unable to read user input");
+                                }
+                                let new_length = length.trim().parse::<u64>().unwrap();
+                                let cmd = SetMinPINLength {
+                                    new_min_pin_length: Some(new_length),
+                                    min_pin_length_rpids: None,
+                                    force_change_pin: None,
+                                };
+
+                                tx.send(InteractiveRequest::ChangeConfig(
+                                    AuthConfigCommand::SetMinPINLength(cmd),
+                                ))
+                                .expect("Failed to send Reset request.");
+                            }
                         }
-                        "3" => {
-                            tx.send(InteractiveRequest::ChangeConfig(
-                                AuthConfigCommand::ToggleAlwaysUv,
-                            ))
-                            .expect("Failed to send Reset request.");
+                    }
+                    Operation::Credentials(ops) => {
+                        let subchoice = ask_user_choice(&ops);
+                        match ops[subchoice] {
+                            CredentialsOperation::List => {
+                                tx.send(InteractiveRequest::CredentialManagement(
+                                    CredManagementCmd::GetCredentials,
+                                ))
+                                .expect("Failed to send Reset request.");
+                            }
                         }
-                        "4" => {
-                            let mut length = String::new();
-                            while length.trim().parse::<u64>().is_err() {
-                                length.clear();
-                                print!("New minimum PIN length: ");
+                    }
+                    Operation::Bio(ops) => {
+                        let subchoice = ask_user_choice(&ops);
+                        match ops[subchoice] {
+                            BioOperation::Add => {
+                                let mut input = String::new();
+                                print!("The name of the new bio enrollment (leave empty if you don't want to name it): ");
                                 io::stdout()
                                     .lock()
                                     .flush()
                                     .expect("Failed to flush stdout!");
                                 io::stdin()
-                                    .read_line(&mut length)
+                                    .read_line(&mut input)
                                     .expect("error: unable to read user input");
+                                input = input.trim().to_string();
+                                let name = if input.is_empty() { None } else { Some(input) };
+                                tx.send(InteractiveRequest::BioEnrollment(
+                                    BioEnrollmentCmd::StartNewEnrollment(name),
+                                ))
+                                .expect("Failed to send Reset request.");
                             }
-                            let new_length = length.trim().parse::<u64>().unwrap();
-                            let cmd = SetMinPINLength {
-                                new_min_pin_length: Some(new_length),
-                                min_pin_length_rpids: None,
-                                force_change_pin: None,
-                            };
-
-                            tx.send(InteractiveRequest::ChangeConfig(
-                                AuthConfigCommand::SetMinPINLength(cmd),
-                            ))
-                            .expect("Failed to send Reset request.");
-                        }
-                        "5" => {
-                            tx.send(InteractiveRequest::CredentialManagement(
-                                CredManagementCmd::GetCredentials,
-                            ))
-                            .expect("Failed to send Reset request.");
-                        }
-                        "6" => {
-                            tx.send(InteractiveRequest::BioEnrollment(
-                                BioEnrollmentCmd::GetEnrollments,
-                            ))
-                            .expect("Failed to send Reset request.");
-                        }
-                        "7" => {
-                            let mut input = String::new();
-                            print!("The name of the new bio enrollment (leave empty if you don't want to name it): ");
-                            io::stdout()
-                                .lock()
-                                .flush()
-                                .expect("Failed to flush stdout!");
-                            io::stdin()
-                                .read_line(&mut input)
-                                .expect("error: unable to read user input");
-                            input = input.trim().to_string();
-                            let name = if input.is_empty() { None } else { Some(input) };
-                            tx.send(InteractiveRequest::BioEnrollment(
-                                BioEnrollmentCmd::StartNewEnrollment(name),
-                            ))
-                            .expect("Failed to send Reset request.");
-                        }
-                        _ => {
-                            panic!("Can't happen");
+                            BioOperation::List => {
+                                tx.send(InteractiveRequest::BioEnrollment(
+                                    BioEnrollmentCmd::GetEnrollments,
+                                ))
+                                .expect("Failed to send Reset request.");
+                            }
                         }
                     }
-                } else {
-                    println!("Device only supports CTAP1 and can't be managed.");
                 }
             }
             Ok(StatusUpdate::InteractiveManagement(InteractiveUpdate::BioEnrollmentUpdate((
