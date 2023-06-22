@@ -1,7 +1,6 @@
 use super::get_info::{AuthenticatorInfo, AuthenticatorVersion};
 use super::{
-    Command, CommandError, PinUvAuthCommand, Request, RequestCtap1, RequestCtap2, Retryable,
-    StatusCode,
+    Command, CommandError, PinUvAuthCommand, RequestCtap1, RequestCtap2, Retryable, StatusCode,
 };
 use crate::consts::{PARAMETER_SIZE, U2F_REGISTER, U2F_REQUEST_USER_PRESENCE};
 use crate::crypto::{
@@ -326,8 +325,6 @@ impl Serialize for MakeCredentials {
         map.end()
     }
 }
-
-impl Request<MakeCredentialsResult> for MakeCredentials {}
 
 impl RequestCtap1 for MakeCredentials {
     type Output = MakeCredentialsResult;

@@ -15,7 +15,7 @@ use serde_cbor::{from_slice, to_vec, Value};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::fmt;
 
-use super::{Command, CommandError, PinUvAuthCommand, Request, RequestCtap2, StatusCode};
+use super::{Command, CommandError, PinUvAuthCommand, RequestCtap2, StatusCode};
 
 #[derive(Debug, Clone, Copy, Serialize_repr, Deserialize_repr)]
 #[repr(u8)]
@@ -175,8 +175,6 @@ impl Serialize for BioEnrollment {
         map.end()
     }
 }
-
-impl Request<()> for BioEnrollment {}
 
 impl PinUvAuthCommand for BioEnrollment {
     fn pin(&self) -> &Option<Pin> {

@@ -1,7 +1,6 @@
 use super::get_info::AuthenticatorInfo;
 use super::{
-    Command, CommandError, PinUvAuthCommand, Request, RequestCtap1, RequestCtap2, Retryable,
-    StatusCode,
+    Command, CommandError, PinUvAuthCommand, RequestCtap1, RequestCtap2, Retryable, StatusCode,
 };
 use crate::consts::{
     PARAMETER_SIZE, U2F_AUTHENTICATE, U2F_DONT_ENFORCE_USER_PRESENCE_AND_SIGN,
@@ -305,8 +304,6 @@ impl Serialize for GetAssertion {
         map.end()
     }
 }
-
-impl Request<GetAssertionResult> for GetAssertion {}
 
 impl RequestCtap1 for GetAssertion {
     type Output = GetAssertionResult;

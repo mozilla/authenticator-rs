@@ -12,7 +12,7 @@ use crate::ctap2::commands::make_credentials::{
 };
 use crate::ctap2::commands::reset::Reset;
 use crate::ctap2::commands::selection::Selection;
-use crate::ctap2::commands::{CommandError, Request, RequestCtap1, RequestCtap2, StatusCode};
+use crate::ctap2::commands::{CommandError, RequestCtap1, RequestCtap2, StatusCode};
 use crate::ctap2::preflight::CheckKeyHandle;
 use crate::transport::device_selector::BlinkResult;
 use crate::transport::errors::HIDError;
@@ -78,10 +78,7 @@ pub enum FidoProtocol {
 }
 
 pub trait FidoDeviceIO {
-    fn send_msg<
-        Out,
-        Req: Request<Out> + RequestCtap1<Output = Out> + RequestCtap2<Output = Out>,
-    >(
+    fn send_msg<Out, Req: RequestCtap1<Output = Out> + RequestCtap2<Output = Out>>(
         &mut self,
         msg: &Req,
     ) -> Result<Out, HIDError> {
@@ -96,10 +93,7 @@ pub trait FidoDeviceIO {
         self.send_ctap1_cancellable(msg, &|| true)
     }
 
-    fn send_msg_cancellable<
-        Out,
-        Req: Request<Out> + RequestCtap1<Output = Out> + RequestCtap2<Output = Out>,
-    >(
+    fn send_msg_cancellable<Out, Req: RequestCtap1<Output = Out> + RequestCtap2<Output = Out>>(
         &mut self,
         msg: &Req,
         keep_alive: &dyn Fn() -> bool,
