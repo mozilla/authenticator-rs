@@ -1,4 +1,4 @@
-use super::{Command, CommandError, PinUvAuthCommand, Request, RequestCtap2, StatusCode};
+use super::{Command, CommandError, PinUvAuthCommand, RequestCtap2, StatusCode};
 use crate::{
     crypto::{PinUvAuthParam, PinUvAuthToken},
     ctap2::server::UserVerificationRequirement,
@@ -104,8 +104,6 @@ impl AuthenticatorConfig {
         }
     }
 }
-
-impl Request<()> for AuthenticatorConfig {}
 
 impl Serialize for AuthenticatorConfig {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>

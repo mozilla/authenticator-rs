@@ -24,12 +24,6 @@ pub mod make_credentials;
 pub mod reset;
 pub mod selection;
 
-pub trait Request<T>
-where
-    Self: fmt::Debug,
-{
-}
-
 /// Retryable wraps an error type and may ask manager to retry sending a
 /// command, this is useful for ctap1 where token will reply with "condition not
 /// sufficient" because user needs to press the button.

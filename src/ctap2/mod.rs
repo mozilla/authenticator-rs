@@ -26,7 +26,7 @@ use crate::ctap2::commands::make_credentials::{
 };
 use crate::ctap2::commands::reset::Reset;
 use crate::ctap2::commands::{
-    repackage_pin_errors, CommandError, PinUvAuthCommand, PinUvAuthResult, Request, StatusCode,
+    repackage_pin_errors, CommandError, PinUvAuthCommand, PinUvAuthResult, RequestCtap2, StatusCode,
 };
 use crate::ctap2::preflight::{
     do_credential_list_filtering_ctap1, do_credential_list_filtering_ctap2,
@@ -168,7 +168,7 @@ fn ask_user_for_pin<U>(
 /// Try to fetch PinUvAuthToken from the device and derive from it PinUvAuthParam.
 /// Prefer UV, fallback to PIN.
 /// Prefer newer pinUvAuth-methods, if supported by the device.
-fn get_pin_uv_auth_param<Dev: FidoDevice, T: PinUvAuthCommand + Request<V>, V>(
+fn get_pin_uv_auth_param<Dev: FidoDevice, T: PinUvAuthCommand + RequestCtap2>(
     cmd: &mut T,
     dev: &mut Dev,
     permission: PinUvAuthTokenPermission,
@@ -286,7 +286,7 @@ fn get_pin_uv_auth_param<Dev: FidoDevice, T: PinUvAuthCommand + Request<V>, V>(
 /// the device, Err() otherwise.
 /// Handles asking the user for a PIN, if needed and sending StatusUpdates
 /// regarding PIN and UV usage.
-fn determine_puap_if_needed<Dev: FidoDevice, T: PinUvAuthCommand + Request<V>, U, V>(
+fn determine_puap_if_needed<Dev: FidoDevice, T: PinUvAuthCommand + RequestCtap2, U>(
     cmd: &mut T,
     dev: &mut Dev,
     mut skip_uv: bool,

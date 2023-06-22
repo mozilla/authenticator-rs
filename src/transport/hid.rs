@@ -1,8 +1,6 @@
 use crate::consts::{HIDCmd, CID_BROADCAST};
 
-use crate::ctap2::commands::{
-    CommandError, Request, RequestCtap1, RequestCtap2, Retryable, StatusCode,
-};
+use crate::ctap2::commands::{CommandError, RequestCtap1, RequestCtap2, Retryable, StatusCode};
 use crate::transport::errors::{ApduErrorStatus, HIDError};
 use crate::transport::{FidoDevice, FidoDeviceIO, FidoProtocol};
 use crate::u2ftypes::{U2FDeviceInfo, U2FHIDCont, U2FHIDInit, U2FHIDInitResp};
@@ -159,10 +157,7 @@ pub trait HIDDevice: FidoDevice + Read + Write {
 }
 
 impl<T: HIDDevice> FidoDeviceIO for T {
-    fn send_msg_cancellable<
-        Out,
-        Req: Request<Out> + RequestCtap1<Output = Out> + RequestCtap2<Output = Out>,
-    >(
+    fn send_msg_cancellable<Out, Req: RequestCtap1<Output = Out> + RequestCtap2<Output = Out>>(
         &mut self,
         msg: &Req,
         keep_alive: &dyn Fn() -> bool,

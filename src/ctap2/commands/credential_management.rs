@@ -1,4 +1,4 @@
-use super::{Command, CommandError, PinUvAuthCommand, Request, RequestCtap2, StatusCode};
+use super::{Command, CommandError, PinUvAuthCommand, RequestCtap2, StatusCode};
 use crate::{
     crypto::{COSEKey, PinUvAuthParam, PinUvAuthToken},
     ctap2::server::{
@@ -120,8 +120,6 @@ impl CredentialManagement {
         self.set_pin_uv_auth_param(token)
     }
 }
-
-impl Request<()> for CredentialManagement {}
 
 impl Serialize for CredentialManagement {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
