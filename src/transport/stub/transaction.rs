@@ -7,10 +7,13 @@ use crate::statecallback::StateCallback;
 use crate::transport::device_selector::{
     DeviceBuildParameters, DeviceSelector, DeviceSelectorEvent,
 };
+use runloop::RunLoop;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 
-pub struct Transaction {}
+pub struct Transaction {
+    thread: RunLoop,
+}
 
 impl Transaction {
     pub fn new<F, T>(
@@ -37,16 +40,25 @@ impl Transaction {
         let _ = device_selector.clone_sender();
         device_selector.stop();
 
-        callback.call(Err(errors::AuthenticatorError::U2FToken(
-            errors::U2FTokenError::NotSupported,
-        )));
+        let thread = RunLoop::new_with_timeout(
+            move |alive| {
+                while alive() {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
 
-        Err(errors::AuthenticatorError::U2FToken(
-            errors::U2FTokenError::NotSupported,
-        ))
+                // Send an error, if the callback wasn't called already.
+                callback.call(Err(errors::AuthenticatorError::U2FToken(
+                    errors::U2FTokenError::NotAllowed,
+                )));
+            },
+            timeout,
+        )
+        .map_err(|_| errors::AuthenticatorError::Platform)?;
+
+        Ok(Self { thread })
     }
 
     pub fn cancel(&mut self) {
-        /* No-op. */
+        self.thread.cancel();
     }
 }
