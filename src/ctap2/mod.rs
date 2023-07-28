@@ -311,15 +311,6 @@ pub fn register<Dev: FidoDevice>(
                 return false;
             }
         };
-        // Check if extensions have been requested that are not supported by the device
-        if let Some(true) = args.extensions.hmac_secret {
-            if !info.supports_hmac_secret() {
-                callback.call(Err(AuthenticatorError::UnsupportedOption(
-                    UnsupportedOption::HmacSecret,
-                )));
-                return false;
-            }
-        }
 
         // Set options based on the arguments and the device info.
         // The user verification option will be set in `determine_puap_if_needed`.
@@ -494,22 +485,7 @@ pub fn sign<Dev: FidoDevice>(
     callback: StateCallback<crate::Result<crate::SignResult>>,
     alive: &dyn Fn() -> bool,
 ) -> bool {
-    if dev.get_protocol() == FidoProtocol::CTAP2 {
-        let info = match dev.get_authenticator_info() {
-            Some(info) => info,
-            None => {
-                callback.call(Err(HIDError::DeviceNotInitialized.into()));
-                return false;
-            }
-        };
-        // Check if extensions have been requested that are not supported by the device
-        if args.extensions.hmac_secret.is_some() && !info.supports_hmac_secret() {
-            callback.call(Err(AuthenticatorError::UnsupportedOption(
-                UnsupportedOption::HmacSecret,
-            )));
-            return false;
-        }
-    } else {
+    if dev.get_protocol() == FidoProtocol::CTAP1 {
         // Check that the request can be processed by a CTAP1 device.
         // See CTAP 2.1 Section 10.3. Some additional checks are performed in
         // GetAssertion::RequestCtap1
