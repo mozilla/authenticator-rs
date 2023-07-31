@@ -1,4 +1,4 @@
-use super::get_info::{AuthenticatorInfo, AuthenticatorVersion};
+use super::get_info::AuthenticatorInfo;
 use super::{
     Command, CommandError, PinUvAuthCommand, Request, RequestCtap1, RequestCtap2, Retryable,
     StatusCode,
@@ -247,20 +247,22 @@ impl PinUvAuthCommand for MakeCredentials {
 
         let supports_uv = info.options.user_verification == Some(true);
         let pin_configured = info.options.client_pin == Some(true);
+
+        // CTAP 2.0 authenticators require user verification if the device is protected
         let device_protected = supports_uv || pin_configured;
-        // make_cred_uv_not_rqd is only relevant for rk = false
+
+        // CTAP 2.1 authenticators may allow the creation of non-discoverable credentials without
+        // user verification. This is only relevant if the relying party has not requested user
+        // verification.
         let make_cred_uv_not_required = info.options.make_cred_uv_not_rqd == Some(true)
-            && self.options.resident_key != Some(true);
-        // For CTAP2.0, UV is always required when doing MakeCredential
-        let always_uv = info.options.always_uv == Some(true)
-            || info.max_supported_version() == AuthenticatorVersion::FIDO_2_0;
-        let uv_discouraged = uv_req == UserVerificationRequirement::Discouraged;
+            && self.options.resident_key != Some(true)
+            && uv_req == UserVerificationRequirement::Discouraged;
 
-        // CTAP 2.1 authenticators can allow MakeCredential without PinUvAuth,
-        // but that is only relevant, if RP also discourages UV.
-        let can_make_cred_without_uv = make_cred_uv_not_required && uv_discouraged;
+        // Alternatively, CTAP 2.1 authenticators may require user verification regardless of the
+        // RP's requirement.
+        let always_uv = info.options.always_uv == Some(true);
 
-        !always_uv && (!device_protected || can_make_cred_without_uv)
+        !always_uv && (!device_protected || make_cred_uv_not_required)
     }
 
     fn get_pin_uv_auth_param(&self) -> Option<&PinUvAuthParam> {
