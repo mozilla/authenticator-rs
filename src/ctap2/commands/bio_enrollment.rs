@@ -156,7 +156,6 @@ pub struct BioEnrollment {
     pub(crate) subcommand: BioEnrollmentCommand,
     /// First 16 bytes of HMAC-SHA-256 of contents using pinUvAuthToken.
     pin_uv_auth_param: Option<PinUvAuthParam>,
-    pin_uv_auth_token: Option<PinUvAuthToken>,
     /// Get the user verification type modality. This MUST be set to true.
     get_modality: Option<bool>,
     pin: Option<Pin>,
@@ -169,16 +168,10 @@ impl BioEnrollment {
             modality: BioEnrollmentModality::Fingerprint, // As per spec: Currently always "Fingerprint"
             subcommand,
             pin_uv_auth_param: None,
-            pin_uv_auth_token: None,
             pin: None,
             use_legacy_preview,
             get_modality: None, // Currently not used
         }
-    }
-
-    pub(crate) fn regenerate_puap(&mut self) -> Result<(), AuthenticatorError> {
-        let token = self.pin_uv_auth_token.take();
-        self.set_pin_uv_auth_param(token)
     }
 }
 
@@ -243,7 +236,6 @@ impl PinUvAuthCommand for BioEnrollment {
                 data.extend(to_vec(&params).map_err(CommandError::Serializing)?);
             }
             param = Some(token.clone().derive(&data).map_err(CommandError::Crypto)?);
-            self.pin_uv_auth_token = Some(token);
         }
         self.pin_uv_auth_param = param;
         Ok(())

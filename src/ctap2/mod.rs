@@ -921,7 +921,14 @@ pub(crate) fn bio_enrollment(
                                     template_id.to_vec(),
                                     name.clone(),
                                 ));
-                                unwrap_result!(bio_cmd.regenerate_puap(), callback);
+                                // We have to regenerate PUAP here. PUAT hasn't changed, but the content
+                                // of the command has changed, and that is part of the PUAP-calculation
+                                unwrap_result!(
+                                    bio_cmd.set_pin_uv_auth_param(
+                                        pin_uv_auth_result.get_pin_uv_auth_token()
+                                    ),
+                                    callback
+                                );
                                 continue;
                             } else {
                                 callback.call(Ok(ManageResult::Success));
@@ -932,7 +939,14 @@ pub(crate) fn bio_enrollment(
                                 template_id,
                                 timeout,
                             ));
-                            unwrap_result!(bio_cmd.regenerate_puap(), callback);
+                            // We have to regenerate PUAP here. PUAT hasn't changed, but the content
+                            // of the command has changed, and that is part of the PUAP-calculation
+                            unwrap_result!(
+                                bio_cmd.set_pin_uv_auth_param(
+                                    pin_uv_auth_result.get_pin_uv_auth_token()
+                                ),
+                                callback
+                            );
                             continue;
                         }
                     }
