@@ -330,7 +330,8 @@ impl<'de> Deserialize<'de> for CredentialManagementResponse {
                             if large_blob_key.is_some() {
                                 return Err(SerdeError::duplicate_field("large_blob_key"));
                             }
-                            large_blob_key = Some(map.next_value::<ByteBuf>()?.to_vec());
+                            // Using into_vec, to avoid any copy of large_blob_key
+                            large_blob_key = Some(map.next_value::<ByteBuf>()?.into_vec());
                         }
 
                         k => {

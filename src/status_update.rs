@@ -82,6 +82,7 @@ pub enum StatusPinUv {
 #[derive(Debug)]
 pub enum InteractiveUpdate {
     StartManagement((Sender<InteractiveRequest>, Option<AuthenticatorInfo>)),
+    // How the collection of fingerprint worked, and how many samples have to still be taken
     BioEnrollmentUpdate((LastEnrollmentSampleStatus, u64)),
 }
 

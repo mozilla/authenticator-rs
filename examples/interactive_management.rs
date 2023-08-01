@@ -230,13 +230,13 @@ fn interactive_status_callback(status_rx: Receiver<StatusUpdate>) {
                                 tx.send(InteractiveRequest::ChangeConfig(
                                     AuthConfigCommand::ToggleAlwaysUv,
                                 ))
-                                .expect("Failed to send Reset request.");
+                                .expect("Failed to send ToggleAlwaysUV request.");
                             }
                             ConfigureOperation::EnableEnterpriseAttestation => {
                                 tx.send(InteractiveRequest::ChangeConfig(
                                     AuthConfigCommand::EnableEnterpriseAttestation,
                                 ))
-                                .expect("Failed to send Reset request.");
+                                .expect("Failed to send EnableEnterpriseAttestation request.");
                             }
                             ConfigureOperation::SetMinPINLength => {
                                 let mut length = String::new();
@@ -261,7 +261,7 @@ fn interactive_status_callback(status_rx: Receiver<StatusUpdate>) {
                                 tx.send(InteractiveRequest::ChangeConfig(
                                     AuthConfigCommand::SetMinPINLength(cmd),
                                 ))
-                                .expect("Failed to send Reset request.");
+                                .expect("Failed to send SetMinPINLength request.");
                             }
                         }
                     }
@@ -272,7 +272,7 @@ fn interactive_status_callback(status_rx: Receiver<StatusUpdate>) {
                                 tx.send(InteractiveRequest::CredentialManagement(
                                     CredManagementCmd::GetCredentials,
                                 ))
-                                .expect("Failed to send Reset request.");
+                                .expect("Failed to send GetCredentials request.");
                             }
                         }
                     }
@@ -294,19 +294,19 @@ fn interactive_status_callback(status_rx: Receiver<StatusUpdate>) {
                                 tx.send(InteractiveRequest::BioEnrollment(
                                     BioEnrollmentCmd::StartNewEnrollment(name),
                                 ))
-                                .expect("Failed to send Reset request.");
+                                .expect("Failed to send StartNewEnrollment request.");
                             }
                             BioOperation::List => {
                                 tx.send(InteractiveRequest::BioEnrollment(
                                     BioEnrollmentCmd::GetEnrollments,
                                 ))
-                                .expect("Failed to send Reset request.");
+                                .expect("Failed to send GetEnrollments request.");
                             }
                             BioOperation::ShowInfo => {
                                 tx.send(InteractiveRequest::BioEnrollment(
                                     BioEnrollmentCmd::GetFingerprintSensorInfo,
                                 ))
-                                .expect("Failed to send Reset request.");
+                                .expect("Failed to send GetFingerprintSensorInfo request.");
                             }
                         }
                     }
