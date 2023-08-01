@@ -162,7 +162,7 @@ pub struct CredentialManagementResponse {
     /// RP Information
     pub rp: Option<RelyingParty>,
     /// RP ID SHA-256 hash
-    pub rp_id_hash: Option<ByteBuf>,
+    pub rp_id_hash: Option<RpIdHash>,
     /// Total number of RPs present on the authenticator
     pub total_rps: Option<u64>,
     /// User Information
@@ -176,7 +176,7 @@ pub struct CredentialManagementResponse {
     /// Credential protection policy.
     pub cred_protect: Option<u64>,
     /// Large blob encryption key.
-    pub large_blob_key: Option<ByteBuf>,
+    pub large_blob_key: Option<Vec<u8>>,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
@@ -286,7 +286,11 @@ impl<'de> Deserialize<'de> for CredentialManagementResponse {
                             if rp_id_hash.is_some() {
                                 return Err(SerdeError::duplicate_field("rp_id_hash"));
                             }
-                            rp_id_hash = Some(map.next_value()?);
+                            let rp_raw = map.next_value::<ByteBuf>()?;
+                            rp_id_hash =
+                                Some(RpIdHash::from(rp_raw.as_slice()).map_err(|_| {
+                                    SerdeError::invalid_length(rp_raw.len(), &"32")
+                                })?);
                         }
                         0x05 => {
                             if total_rps.is_some() {
@@ -328,7 +332,7 @@ impl<'de> Deserialize<'de> for CredentialManagementResponse {
                             if large_blob_key.is_some() {
                                 return Err(SerdeError::duplicate_field("large_blob_key"));
                             }
-                            large_blob_key = Some(map.next_value()?);
+                            large_blob_key = Some(map.next_value::<ByteBuf>()?.to_vec());
                         }
 
                         k => {

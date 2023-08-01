@@ -32,8 +32,7 @@ use crate::ctap2::preflight::{
     do_credential_list_filtering_ctap1, do_credential_list_filtering_ctap2,
 };
 use crate::ctap2::server::{
-    RelyingParty, RelyingPartyWrapper, ResidentKeyRequirement, RpIdHash,
-    UserVerificationRequirement,
+    RelyingParty, RelyingPartyWrapper, ResidentKeyRequirement, UserVerificationRequirement,
 };
 use crate::errors::{AuthenticatorError, UnsupportedOption};
 use crate::statecallback::StateCallback;
@@ -1095,7 +1094,6 @@ pub(crate) fn credential_management(
 
                         let rp = unwrap_option!(result.rp, callback);
                         let rp_id_hash = unwrap_option!(result.rp_id_hash, callback);
-                        let rp_id_hash = unwrap_result!(RpIdHash::from(&rp_id_hash), callback);
                         let rp_res = CredentialRpListEntry {
                             rp,
                             rp_id_hash,
@@ -1159,7 +1157,7 @@ pub(crate) fn credential_management(
                             credential_id,
                             public_key,
                             cred_protect,
-                            large_blob_key: large_blob_key.map(|x| x.into_vec()),
+                            large_blob_key: large_blob_key.clone(),
                         };
                         credential_result.credential_list[current_rp_backup]
                             .credentials
