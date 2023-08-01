@@ -221,9 +221,7 @@ pub struct CredentialList {
 
 impl CredentialList {
     pub fn new() -> Self {
-        Self {
-            ..Default::default()
-        }
+        Default::default()
     }
 }
 

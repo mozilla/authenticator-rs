@@ -11,7 +11,7 @@ use crate::crypto::COSEAlgorithm;
 use crate::ctap2::client_data::ClientDataHash;
 use crate::ctap2::commands::authenticator_config::{AuthConfigCommand, AuthenticatorConfig};
 use crate::ctap2::commands::bio_enrollment::{
-    BioEnrollment, BioEnrollmentCommand, BioEnrollmentResult,
+    BioEnrollment, BioEnrollmentCommand, BioEnrollmentResult, FingerprintSensorInfo,
 };
 use crate::ctap2::commands::client_pin::{
     ChangeExistingPin, Pin, PinError, PinUvAuthTokenPermission, SetNewPin,
@@ -834,6 +834,10 @@ pub(crate) fn bio_enrollment(
             BioEnrollmentCommand::EnumerateEnrollments,
             use_legacy_preview,
         ),
+        BioEnrollmentCmd::GetFingerprintSensorInfo => BioEnrollment::new(
+            BioEnrollmentCommand::GetFingerprintSensorInfo,
+            use_legacy_preview,
+        ),
     };
 
     let mut skip_puap = false;
@@ -938,7 +942,23 @@ pub(crate) fn bio_enrollment(
                         callback.call(Ok(ManageResult::Success));
                         return true;
                     }
-                    BioEnrollmentCommand::GetFingerprintSensorInfo => todo!(),
+                    BioEnrollmentCommand::GetFingerprintSensorInfo => {
+                        let fingerprint_kind = unwrap_option!(result.fingerprint_kind, callback);
+                        let max_capture_samples_required_for_enroll = unwrap_option!(
+                            result.max_capture_samples_required_for_enroll,
+                            callback
+                        );
+                        let max_template_friendly_name =
+                            unwrap_option!(result.max_template_friendly_name, callback);
+                        callback.call(Ok(ManageResult::BioEnrollment(
+                            BioEnrollmentResult::FingerprintSensorInfo(FingerprintSensorInfo {
+                                fingerprint_kind,
+                                max_capture_samples_required_for_enroll,
+                                max_template_friendly_name,
+                            }),
+                        )));
+                        return true;
+                    }
                 };
             }
             Err(e) => {
