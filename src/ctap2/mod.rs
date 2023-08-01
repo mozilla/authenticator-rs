@@ -918,7 +918,7 @@ pub(crate) fn bio_enrollment(
                         if remaining_samples == 0 {
                             if let BioEnrollmentCmd::StartNewEnrollment(Some(ref name)) = command {
                                 bio_cmd.subcommand = BioEnrollmentCommand::SetFriendlyName((
-                                    template_id.into_vec(),
+                                    template_id.to_vec(),
                                     name.clone(),
                                 ));
                                 unwrap_result!(bio_cmd.regenerate_puap(), callback);
