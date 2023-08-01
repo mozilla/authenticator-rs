@@ -1177,7 +1177,7 @@ pub(crate) fn credential_management(
                             credential_id,
                             public_key,
                             cred_protect,
-                            large_blob_key: large_blob_key.clone(),
+                            large_blob_key,
                         };
                         credential_result.credential_list[current_rp_backup]
                             .credentials

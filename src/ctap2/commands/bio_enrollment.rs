@@ -151,7 +151,7 @@ impl BioEnrollmentCommand {
 #[derive(Debug)]
 pub struct BioEnrollment {
     /// The user verification modality being requested
-    pub modality: BioEnrollmentModality,
+    modality: BioEnrollmentModality,
     /// The authenticator user verification sub command currently being requested
     pub(crate) subcommand: BioEnrollmentCommand,
     /// First 16 bytes of HMAC-SHA-256 of contents using pinUvAuthToken.
@@ -567,7 +567,7 @@ impl<'de> Deserialize<'de> for BioEnrollmentResponse {
                             if template_id.is_some() {
                                 return Err(SerdeError::duplicate_field("template_id"));
                             }
-                            template_id = Some(map.next_value()?);
+                            template_id = Some(map.next_value::<ByteBuf>()?.into_vec());
                         }
                         0x05 => {
                             if last_enroll_sample_status.is_some() {
