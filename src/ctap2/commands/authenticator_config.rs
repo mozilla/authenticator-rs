@@ -50,31 +50,11 @@ impl Serialize for SetMinPINLength {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct VendorPrototype {
-    /// Note: If, and only if, this vendorCommandId (0x01) appears in this subCommandParams map
-    ///       and has a non-empty value, then other fields MAY also appear in the map, the map
-    ///       keys and associated values of which are vendor-defined.
-    vendor_command_id: u64, // Vendor-assigned command ID
-}
-
-impl Serialize for VendorPrototype {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut map = serializer.serialize_map(Some(1))?;
-        map.serialize_entry(&0x01, &self.vendor_command_id)?;
-        map.end()
-    }
-}
-
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum AuthConfigCommand {
     EnableEnterpriseAttestation,
     ToggleAlwaysUv,
     SetMinPINLength(SetMinPINLength),
-    VendorPrototype(VendorPrototype),
 }
 
 impl AuthConfigCommand {
@@ -83,7 +63,6 @@ impl AuthConfigCommand {
             AuthConfigCommand::EnableEnterpriseAttestation => false,
             AuthConfigCommand::ToggleAlwaysUv => false,
             AuthConfigCommand::SetMinPINLength(..) => true,
-            AuthConfigCommand::VendorPrototype(..) => true,
         }
     }
 }
@@ -131,10 +110,6 @@ impl Serialize for AuthenticatorConfig {
             }
             AuthConfigCommand::SetMinPINLength(params) => {
                 map.serialize_entry(&0x01, &0x03)?;
-                map.serialize_entry(&0x02, &params)?;
-            }
-            AuthConfigCommand::VendorPrototype(params) => {
-                map.serialize_entry(&0x01, &0xFF)?;
                 map.serialize_entry(&0x02, &params)?;
             }
         }
@@ -220,10 +195,6 @@ impl PinUvAuthCommand for AuthenticatorConfig {
                 }
                 AuthConfigCommand::SetMinPINLength(params) => {
                     data.push(0x03);
-                    data.extend(to_vec(params).map_err(CommandError::Serializing)?);
-                }
-                AuthConfigCommand::VendorPrototype(params) => {
-                    data.push(0xFF);
                     data.extend(to_vec(params).map_err(CommandError::Serializing)?);
                 }
             }
