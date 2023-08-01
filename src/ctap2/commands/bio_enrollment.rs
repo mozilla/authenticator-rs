@@ -396,7 +396,7 @@ impl<'de> Deserialize<'de> for LastEnrollmentSampleStatus {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Serialize)]
 pub enum FingerprintKind {
     TouchSensor,
     SwipeSensor,
@@ -637,8 +637,16 @@ impl From<&BioTemplateInfo> for EnrollmentInfo {
 }
 
 #[derive(Debug, Serialize)]
+pub struct FingerprintSensorInfo {
+    pub fingerprint_kind: FingerprintKind,
+    pub max_capture_samples_required_for_enroll: u64,
+    pub max_template_friendly_name: u64,
+}
+
+#[derive(Debug, Serialize)]
 pub enum BioEnrollmentResult {
     EnrollmentList(Vec<EnrollmentInfo>),
     DeleteSucess,
     UpdateSuccess,
+    FingerprintSensorInfo(FingerprintSensorInfo),
 }

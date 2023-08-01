@@ -19,6 +19,7 @@ pub enum CredManagementCmd {
 
 #[derive(Debug, Deserialize, DeriveSer)]
 pub enum BioEnrollmentCmd {
+    GetFingerprintSensorInfo,
     GetEnrollments,
     StartNewEnrollment(Option<String>),
     DeleteEnrollment(BioTemplateId),

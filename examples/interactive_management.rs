@@ -85,6 +85,7 @@ impl Display for CredentialsOperation {
 
 #[derive(Debug)]
 enum BioOperation {
+    ShowInfo,
     Add,
     List,
 }
@@ -92,6 +93,7 @@ enum BioOperation {
 impl Display for BioOperation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            BioOperation::ShowInfo => write!(f, "Show fingerprint sensor info"),
             BioOperation::List => write!(f, "List enrollments"),
             BioOperation::Add => write!(f, "Add enrollment"),
         }
@@ -139,7 +141,7 @@ fn parse_possible_operations(info: &AuthenticatorInfo) -> Vec<Operation> {
     // Bio Enrollment
     let mut bio_operations = vec![];
     if info.options.bio_enroll.is_some() || info.options.user_verification_mgmt_preview.is_some() {
-        bio_operations.push(BioOperation::Add);
+        bio_operations.extend([BioOperation::ShowInfo, BioOperation::Add]);
     }
     if info.options.bio_enroll == Some(true)
         || info.options.user_verification_mgmt_preview == Some(true)
@@ -297,6 +299,12 @@ fn interactive_status_callback(status_rx: Receiver<StatusUpdate>) {
                             BioOperation::List => {
                                 tx.send(InteractiveRequest::BioEnrollment(
                                     BioEnrollmentCmd::GetEnrollments,
+                                ))
+                                .expect("Failed to send Reset request.");
+                            }
+                            BioOperation::ShowInfo => {
+                                tx.send(InteractiveRequest::BioEnrollment(
+                                    BioEnrollmentCmd::GetFingerprintSensorInfo,
                                 ))
                                 .expect("Failed to send Reset request.");
                             }
