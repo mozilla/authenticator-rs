@@ -12,21 +12,60 @@ use serde::{
 };
 use serde_bytes::ByteBuf;
 use serde_cbor::{from_slice, to_vec, Value};
-use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::fmt;
 
 use super::{Command, CommandError, PinUvAuthCommand, RequestCtap2, StatusCode};
 
-#[derive(Debug, Clone, Copy, Serialize_repr, Deserialize_repr)]
+#[derive(Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum BioEnrollmentModality {
     Fingerprint = 0x01,
 }
 
+impl Serialize for BioEnrollmentModality {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match *self {
+            BioEnrollmentModality::Fingerprint => serializer.serialize_u8(*self as u8),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for BioEnrollmentModality {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct BioEnrollmentModalityVisitor;
+
+        impl<'de> Visitor<'de> for BioEnrollmentModalityVisitor {
+            type Value = BioEnrollmentModality;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("an integer")
+            }
+
+            fn visit_u8<E>(self, v: u8) -> Result<Self::Value, E>
+            where
+                E: SerdeError,
+            {
+                match v {
+                    0x01 => Ok(BioEnrollmentModality::Fingerprint),
+                    _ => Err(E::custom("unexpected enrollment modality")),
+                }
+            }
+        }
+
+        deserializer.deserialize_u8(BioEnrollmentModalityVisitor)
+    }
+}
+
 pub type BioTemplateId = Vec<u8>;
 #[derive(Debug, Clone, Deserialize, Default)]
 struct BioEnrollmentParams {
-    template_id: Option<ByteBuf>,           // Template Identifier.
+    template_id: Option<BioTemplateId>,     // Template Identifier.
     template_friendly_name: Option<String>, // Template Friendly Name.
     timeout_milliseconds: Option<u64>,      // Timeout in milliSeconds.
 }
@@ -72,7 +111,7 @@ impl Serialize for BioEnrollmentParams {
 #[derive(Debug)]
 pub enum BioEnrollmentCommand {
     EnrollBegin(u64),
-    EnrollCaptureNextSample((ByteBuf, u64)),
+    EnrollCaptureNextSample((BioTemplateId, u64)),
     CancelCurrentEnrollment,
     EnumerateEnrollments,
     SetFriendlyName((BioTemplateId, String)),
@@ -96,12 +135,12 @@ impl BioEnrollmentCommand {
             BioEnrollmentCommand::CancelCurrentEnrollment => (0x03, params),
             BioEnrollmentCommand::EnumerateEnrollments => (0x04, params),
             BioEnrollmentCommand::SetFriendlyName((id, name)) => {
-                params.template_id = Some(ByteBuf::from(id.as_slice()));
+                params.template_id = Some(id.clone());
                 params.template_friendly_name = Some(name.clone());
                 (0x05, params)
             }
             BioEnrollmentCommand::RemoveEnrollment(id) => {
-                params.template_id = Some(ByteBuf::from(id.as_slice()));
+                params.template_id = Some(id.clone());
                 (0x06, params)
             }
             BioEnrollmentCommand::GetFingerprintSensorInfo => (0x07, params),
@@ -286,51 +325,124 @@ impl RequestCtap2 for BioEnrollment {
     }
 }
 
-#[derive(Debug, Serialize_repr, Deserialize_repr)]
-#[repr(u8)]
+#[derive(Debug, Copy, Clone)]
 pub enum LastEnrollmentSampleStatus {
     /// Good fingerprint capture.
-    Ctap2EnrollFeedbackFpGood = 0x00,
+    Ctap2EnrollFeedbackFpGood,
     /// Fingerprint was too high.
-    Ctap2EnrollFeedbackFpTooHigh = 0x01,
+    Ctap2EnrollFeedbackFpTooHigh,
     /// Fingerprint was too low.
-    Ctap2EnrollFeedbackFpTooLow = 0x02,
+    Ctap2EnrollFeedbackFpTooLow,
     /// Fingerprint was too left.
-    Ctap2EnrollFeedbackFpTooLeft = 0x03,
+    Ctap2EnrollFeedbackFpTooLeft,
     /// Fingerprint was too right.
-    Ctap2EnrollFeedbackFpTooRight = 0x04,
+    Ctap2EnrollFeedbackFpTooRight,
     /// Fingerprint was too fast.
-    Ctap2EnrollFeedbackFpTooFast = 0x05,
+    Ctap2EnrollFeedbackFpTooFast,
     /// Fingerprint was too slow.
-    Ctap2EnrollFeedbackFpTooSlow = 0x06,
+    Ctap2EnrollFeedbackFpTooSlow,
     /// Fingerprint was of poor quality.
-    Ctap2EnrollFeedbackFpPoorQuality = 0x07,
+    Ctap2EnrollFeedbackFpPoorQuality,
     /// Fingerprint was too skewed.
-    Ctap2EnrollFeedbackFpTooSkewed = 0x08,
+    Ctap2EnrollFeedbackFpTooSkewed,
     /// Fingerprint was too short.
-    Ctap2EnrollFeedbackFpTooShort = 0x09,
+    Ctap2EnrollFeedbackFpTooShort,
     /// Merge failure of the capture.
-    Ctap2EnrollFeedbackFpMergeFailure = 0x0A,
+    Ctap2EnrollFeedbackFpMergeFailure,
     /// Fingerprint already exists.
-    Ctap2EnrollFeedbackFpExists = 0x0B,
+    Ctap2EnrollFeedbackFpExists,
     /// (this error number is available)
-    Unused = 0x0C,
+    Unused,
     /// User did not touch/swipe the authenticator.
-    Ctap2EnrollFeedbackNoUserActivity = 0x0D,
+    Ctap2EnrollFeedbackNoUserActivity,
     /// User did not lift the finger off the sensor.
-    Ctap2EnrollFeedbackNoUserPresenceTransition = 0x0E,
+    Ctap2EnrollFeedbackNoUserPresenceTransition,
 }
 
-#[derive(Debug, Serialize_repr, Deserialize_repr)]
-#[repr(u8)]
+impl<'de> Deserialize<'de> for LastEnrollmentSampleStatus {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct LastEnrollmentSampleStatusVisitor;
+
+        impl<'de> Visitor<'de> for LastEnrollmentSampleStatusVisitor {
+            type Value = LastEnrollmentSampleStatus;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("an integer")
+            }
+
+            fn visit_u8<E>(self, v: u8) -> Result<Self::Value, E>
+            where
+                E: SerdeError,
+            {
+                match v {
+                    0x00 => Ok(LastEnrollmentSampleStatus::Ctap2EnrollFeedbackFpGood),
+                    0x01 => Ok(LastEnrollmentSampleStatus::Ctap2EnrollFeedbackFpTooHigh),
+                    0x02 => Ok(LastEnrollmentSampleStatus::Ctap2EnrollFeedbackFpTooLow),
+                    0x03 => Ok(LastEnrollmentSampleStatus::Ctap2EnrollFeedbackFpTooLeft),
+                    0x04 => Ok(LastEnrollmentSampleStatus::Ctap2EnrollFeedbackFpTooRight),
+                    0x05 => Ok(LastEnrollmentSampleStatus::Ctap2EnrollFeedbackFpTooFast),
+                    0x06 => Ok(LastEnrollmentSampleStatus::Ctap2EnrollFeedbackFpTooSlow),
+                    0x07 => Ok(LastEnrollmentSampleStatus::Ctap2EnrollFeedbackFpPoorQuality),
+                    0x08 => Ok(LastEnrollmentSampleStatus::Ctap2EnrollFeedbackFpTooSkewed),
+                    0x09 => Ok(LastEnrollmentSampleStatus::Ctap2EnrollFeedbackFpTooShort),
+                    0x0A => Ok(LastEnrollmentSampleStatus::Ctap2EnrollFeedbackFpMergeFailure),
+                    0x0B => Ok(LastEnrollmentSampleStatus::Ctap2EnrollFeedbackFpExists),
+                    0x0C => Ok(LastEnrollmentSampleStatus::Unused),
+                    0x0D => Ok(LastEnrollmentSampleStatus::Ctap2EnrollFeedbackNoUserActivity),
+                    0x0E => {
+                        Ok(LastEnrollmentSampleStatus::Ctap2EnrollFeedbackNoUserPresenceTransition)
+                    }
+                    _ => Err(E::custom("unexpected enrollment sample status")),
+                }
+            }
+        }
+
+        deserializer.deserialize_u8(LastEnrollmentSampleStatusVisitor)
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
 pub enum FingerprintKind {
-    TouchSensor = 0x01, // For touch type sensor, its value is 1.
-    SwipeSensor = 0x02, // For swipe type sensor its value is 2.
+    TouchSensor,
+    SwipeSensor,
+}
+
+impl<'de> Deserialize<'de> for FingerprintKind {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct FingerprintKindVisitor;
+
+        impl<'de> Visitor<'de> for FingerprintKindVisitor {
+            type Value = FingerprintKind;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("an integer")
+            }
+
+            fn visit_u8<E>(self, v: u8) -> Result<Self::Value, E>
+            where
+                E: SerdeError,
+            {
+                match v {
+                    0x01 => Ok(FingerprintKind::TouchSensor),
+                    0x02 => Ok(FingerprintKind::SwipeSensor),
+                    _ => Err(E::custom("unexpected fingerprint kind")),
+                }
+            }
+        }
+
+        deserializer.deserialize_u8(FingerprintKindVisitor)
+    }
 }
 
 #[derive(Debug, Serialize)]
 pub(crate) struct BioTemplateInfo {
-    template_id: ByteBuf,
+    template_id: BioTemplateId,
     template_friendly_name: Option<String>,
 }
 
@@ -360,7 +472,7 @@ impl<'de> Deserialize<'de> for BioTemplateInfo {
                             if template_id.is_some() {
                                 return Err(SerdeError::duplicate_field("template_id"));
                             }
-                            template_id = Some(map.next_value()?);
+                            template_id = Some(map.next_value::<ByteBuf>()?.into_vec());
                         }
                         0x02 => {
                             if template_friendly_name.is_some() {
@@ -399,7 +511,7 @@ pub struct BioEnrollmentResponse {
     /// Indicates the maximum good samples required for enrollment.
     pub(crate) max_capture_samples_required_for_enroll: Option<u64>,
     /// Template Identifier.
-    pub(crate) template_id: Option<ByteBuf>,
+    pub(crate) template_id: Option<BioTemplateId>,
     /// Last enrollment sample status.
     pub(crate) last_enroll_sample_status: Option<LastEnrollmentSampleStatus>,
     /// Number of more sample required for enrollment to complete
