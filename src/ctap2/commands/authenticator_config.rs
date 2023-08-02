@@ -206,11 +206,10 @@ impl PinUvAuthCommand for AuthenticatorConfig {
 
     fn can_skip_user_verification(
         &mut self,
-        _info: &AuthenticatorInfo,
+        authinfo: &AuthenticatorInfo,
         _uv_req: UserVerificationRequirement,
     ) -> bool {
-        // "discouraged" does not exist for AuthenticatorConfig
-        false
+        !authinfo.device_is_protected()
     }
 
     fn set_pin(&mut self, pin: Option<Pin>) {

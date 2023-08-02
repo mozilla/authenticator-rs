@@ -1258,29 +1258,26 @@ pub(crate) fn configure_authenticator(
     }
 
     while alive() {
-        let mut pin_uv_auth_result = PinUvAuthResult::NoAuthRequired;
         // We can use the AuthenticatorConfiguration-command only in two cases:
         // 1. The device also supports the uv_acfg-permission (otherwise we can't establish a PUAP)
         // 2. The device is NOT protected by PIN/UV (yet). This allows organizations to configure
         //    the token, before handing them out.
-        if authinfo.device_is_protected() {
-            // If authinfo.options.uv_acfg is not supported, this will return UnauthorizedPermission
-            pin_uv_auth_result = match determine_puap_if_needed(
-                &mut authcfg,
-                dev,
-                skip_uv,
-                PinUvAuthTokenPermission::AuthenticatorConfiguration,
-                UserVerificationRequirement::Preferred,
-                &status,
-                &callback,
-                alive,
-            ) {
-                Ok(r) => r,
-                Err(()) => {
-                    return;
-                }
-            };
-        }
+        // If authinfo.options.uv_acfg is not supported, this will return UnauthorizedPermission
+        let pin_uv_auth_result = match determine_puap_if_needed(
+            &mut authcfg,
+            dev,
+            skip_uv,
+            PinUvAuthTokenPermission::AuthenticatorConfiguration,
+            UserVerificationRequirement::Preferred,
+            &status,
+            &callback,
+            alive,
+        ) {
+            Ok(r) => r,
+            Err(()) => {
+                return;
+            }
+        };
 
         debug!("------------------------------------------------------------------");
         debug!("{authcfg:?} using {pin_uv_auth_result:?}");
