@@ -17,9 +17,27 @@ use std::fmt;
 use super::{Command, CommandError, PinUvAuthCommand, RequestCtap2, StatusCode};
 
 #[derive(Debug, Clone, Copy)]
-#[repr(u8)]
 pub enum BioEnrollmentModality {
-    Fingerprint = 0x01,
+    Fingerprint,
+    Other(u8),
+}
+
+impl From<u8> for BioEnrollmentModality {
+    fn from(value: u8) -> Self {
+        match value {
+            0x01 => BioEnrollmentModality::Fingerprint,
+            x => BioEnrollmentModality::Other(x),
+        }
+    }
+}
+
+impl From<BioEnrollmentModality> for u8 {
+    fn from(value: BioEnrollmentModality) -> Self {
+        match value {
+            BioEnrollmentModality::Fingerprint => 0x01,
+            BioEnrollmentModality::Other(x) => x,
+        }
+    }
 }
 
 impl Serialize for BioEnrollmentModality {
@@ -27,9 +45,7 @@ impl Serialize for BioEnrollmentModality {
     where
         S: Serializer,
     {
-        match *self {
-            BioEnrollmentModality::Fingerprint => serializer.serialize_u8(*self as u8),
-        }
+        serializer.serialize_u8((*self).into())
     }
 }
 
@@ -51,10 +67,7 @@ impl<'de> Deserialize<'de> for BioEnrollmentModality {
             where
                 E: SerdeError,
             {
-                match v {
-                    0x01 => Ok(BioEnrollmentModality::Fingerprint),
-                    _ => Err(E::custom("unexpected enrollment modality")),
-                }
+                Ok(BioEnrollmentModality::from(v))
             }
         }
 
@@ -156,8 +169,6 @@ pub struct BioEnrollment {
     pub(crate) subcommand: BioEnrollmentCommand,
     /// First 16 bytes of HMAC-SHA-256 of contents using pinUvAuthToken.
     pin_uv_auth_param: Option<PinUvAuthParam>,
-    /// Get the user verification type modality. This MUST be set to true.
-    get_modality: Option<bool>,
     pin: Option<Pin>,
     use_legacy_preview: bool,
 }
@@ -170,7 +181,6 @@ impl BioEnrollment {
             pin_uv_auth_param: None,
             pin: None,
             use_legacy_preview,
-            get_modality: None, // Currently not used
         }
     }
 }
@@ -230,7 +240,7 @@ impl PinUvAuthCommand for BioEnrollment {
             // pinUvAuthParam (0x04): the result of calling
             // authenticate(pinUvAuthToken, fingerprint (0x01) || uint8(subCommand) || subCommandParams).
             let (id, params) = self.subcommand.to_id_and_param();
-            let modality = self.modality as u8;
+            let modality = self.modality.into();
             let mut data = vec![modality, id];
             if params.has_some() {
                 data.extend(to_vec(&params).map_err(CommandError::Serializing)?);
@@ -349,6 +359,8 @@ pub enum LastEnrollmentSampleStatus {
     Ctap2EnrollFeedbackNoUserActivity,
     /// User did not lift the finger off the sensor.
     Ctap2EnrollFeedbackNoUserPresenceTransition,
+    /// Other possible failure cases that are not (yet) defined by the spec
+    Ctap2EnrollFeedbackOther(u8),
 }
 
 impl<'de> Deserialize<'de> for LastEnrollmentSampleStatus {
@@ -387,7 +399,7 @@ impl<'de> Deserialize<'de> for LastEnrollmentSampleStatus {
                     0x0E => {
                         Ok(LastEnrollmentSampleStatus::Ctap2EnrollFeedbackNoUserPresenceTransition)
                     }
-                    _ => Err(E::custom("unexpected enrollment sample status")),
+                    x => Ok(LastEnrollmentSampleStatus::Ctap2EnrollFeedbackOther(x)),
                 }
             }
         }
@@ -400,6 +412,8 @@ impl<'de> Deserialize<'de> for LastEnrollmentSampleStatus {
 pub enum FingerprintKind {
     TouchSensor,
     SwipeSensor,
+    // Not (yet) defined by the spec
+    Other(u8),
 }
 
 impl<'de> Deserialize<'de> for FingerprintKind {
@@ -423,7 +437,7 @@ impl<'de> Deserialize<'de> for FingerprintKind {
                 match v {
                     0x01 => Ok(FingerprintKind::TouchSensor),
                     0x02 => Ok(FingerprintKind::SwipeSensor),
-                    _ => Err(E::custom("unexpected fingerprint kind")),
+                    x => Ok(FingerprintKind::Other(x)),
                 }
             }
         }
