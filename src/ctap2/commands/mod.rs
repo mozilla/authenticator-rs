@@ -1,6 +1,6 @@
 use crate::crypto::{CryptoError, PinUvAuthParam, PinUvAuthToken};
 use crate::ctap2::commands::client_pin::{
-    ClientPinResponse, GetPinRetries, GetUvRetries, Pin, PinError,
+    ClientPinResponse, GetPinRetries, GetUvRetries, PinError,
 };
 use crate::ctap2::commands::get_info::AuthenticatorInfo;
 use crate::ctap2::server::UserVerificationRequirement;
@@ -133,8 +133,6 @@ impl PinUvAuthResult {
 
 /// Helper-trait to determine pin_uv_auth_param from PIN or UV.
 pub(crate) trait PinUvAuthCommand: RequestCtap2 {
-    fn pin(&self) -> &Option<Pin>;
-    fn set_pin(&mut self, pin: Option<Pin>);
     fn set_pin_uv_auth_param(
         &mut self,
         pin_uv_auth_token: Option<PinUvAuthToken>,

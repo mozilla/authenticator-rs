@@ -4,7 +4,7 @@ use crate::{
     ctap2::server::UserVerificationRequirement,
     errors::AuthenticatorError,
     transport::errors::HIDError,
-    AuthenticatorInfo, FidoDevice, Pin,
+    AuthenticatorInfo, FidoDevice,
 };
 use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 use serde_cbor::{de::from_slice, to_vec, Value};
@@ -71,7 +71,6 @@ impl AuthConfigCommand {
 pub struct AuthenticatorConfig {
     subcommand: AuthConfigCommand, // subCommand currently being requested
     pin_uv_auth_param: Option<PinUvAuthParam>, // First 16 bytes of HMAC-SHA-256 of contents using pinUvAuthToken.
-    pin: Option<Pin>,
 }
 
 impl AuthenticatorConfig {
@@ -79,7 +78,6 @@ impl AuthenticatorConfig {
         Self {
             subcommand,
             pin_uv_auth_param: None,
-            pin: None,
         }
     }
 }
@@ -172,10 +170,6 @@ impl RequestCtap2 for AuthenticatorConfig {
 }
 
 impl PinUvAuthCommand for AuthenticatorConfig {
-    fn pin(&self) -> &Option<Pin> {
-        &self.pin
-    }
-
     fn set_pin_uv_auth_param(
         &mut self,
         pin_uv_auth_token: Option<PinUvAuthToken>,
@@ -210,10 +204,6 @@ impl PinUvAuthCommand for AuthenticatorConfig {
         _uv_req: UserVerificationRequirement,
     ) -> bool {
         !authinfo.device_is_protected()
-    }
-
-    fn set_pin(&mut self, pin: Option<Pin>) {
-        self.pin = pin;
     }
 
     fn set_uv_option(&mut self, _uv: Option<bool>) {

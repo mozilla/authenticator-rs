@@ -9,7 +9,6 @@ use crate::consts::{
 use crate::crypto::{COSEKey, CryptoError, PinUvAuthParam, PinUvAuthToken, SharedSecret};
 use crate::ctap2::attestation::{AuthenticatorData, AuthenticatorDataFlags};
 use crate::ctap2::client_data::ClientDataHash;
-use crate::ctap2::commands::client_pin::Pin;
 use crate::ctap2::commands::get_next_assertion::GetNextAssertion;
 use crate::ctap2::commands::make_credentials::UserVerification;
 use crate::ctap2::server::{
@@ -168,7 +167,6 @@ pub struct GetAssertion {
     // the processing of these calls.
     pub extensions: GetAssertionExtensions,
     pub options: GetAssertionOptions,
-    pub pin: Option<Pin>,
     pub pin_uv_auth_param: Option<PinUvAuthParam>,
 
     // This is used to implement the FIDO AppID extension.
@@ -182,7 +180,6 @@ impl GetAssertion {
         allow_list: Vec<PublicKeyCredentialDescriptor>,
         options: GetAssertionOptions,
         extensions: GetAssertionExtensions,
-        pin: Option<Pin>,
         alternate_rp_id: Option<String>,
     ) -> Self {
         Self {
@@ -191,7 +188,6 @@ impl GetAssertion {
             allow_list,
             extensions,
             options,
-            pin,
             pin_uv_auth_param: None,
             alternate_rp_id,
         }
@@ -199,14 +195,6 @@ impl GetAssertion {
 }
 
 impl PinUvAuthCommand for GetAssertion {
-    fn pin(&self) -> &Option<Pin> {
-        &self.pin
-    }
-
-    fn set_pin(&mut self, pin: Option<Pin>) {
-        self.pin = pin;
-    }
-
     fn set_pin_uv_auth_param(
         &mut self,
         pin_uv_auth_token: Option<PinUvAuthToken>,
@@ -650,7 +638,6 @@ pub mod test {
             },
             Default::default(),
             None,
-            None,
         );
         let mut device = Device::new("commands/get_assertion").unwrap();
         assert_eq!(device.get_protocol(), FidoProtocol::CTAP2);
@@ -852,7 +839,6 @@ pub mod test {
             },
             Default::default(),
             None,
-            None,
         );
         let mut device = Device::new("commands/get_assertion").unwrap(); // not really used (all functions ignore it)
                                                                          // channel id
@@ -943,7 +929,6 @@ pub mod test {
                 user_verification: None,
             },
             Default::default(),
-            None,
             None,
         );
 
@@ -1126,7 +1111,6 @@ pub mod test {
                 user_verification: None,
             },
             Default::default(),
-            None,
             None,
         );
         let mut device = Device::new("commands/get_assertion").unwrap();

@@ -7,7 +7,7 @@ use crate::{
     },
     errors::AuthenticatorError,
     transport::errors::HIDError,
-    FidoDevice, Pin,
+    FidoDevice,
 };
 use serde::{
     de::{Error as SerdeError, IgnoredAny, MapAccess, Visitor},
@@ -100,7 +100,6 @@ impl CredManagementCommand {
 pub struct CredentialManagement {
     pub(crate) subcommand: CredManagementCommand, // subCommand currently being requested
     pin_uv_auth_param: Option<PinUvAuthParam>, // First 16 bytes of HMAC-SHA-256 of contents using pinUvAuthToken.
-    pin: Option<Pin>,
     use_legacy_preview: bool,
 }
 
@@ -109,7 +108,6 @@ impl CredentialManagement {
         Self {
             subcommand,
             pin_uv_auth_param: None,
-            pin: None,
             use_legacy_preview,
         }
     }
@@ -415,14 +413,6 @@ impl RequestCtap2 for CredentialManagement {
 }
 
 impl PinUvAuthCommand for CredentialManagement {
-    fn pin(&self) -> &Option<Pin> {
-        &self.pin
-    }
-
-    fn set_pin(&mut self, pin: Option<Pin>) {
-        self.pin = pin;
-    }
-
     fn get_rp_id(&self) -> Option<&String> {
         None
     }

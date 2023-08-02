@@ -174,6 +174,7 @@ fn get_pin_uv_auth_param<Dev: FidoDevice, T: PinUvAuthCommand + RequestCtap2>(
     skip_uv: bool,
     uv_req: UserVerificationRequirement,
     alive: &dyn Fn() -> bool,
+    pin: &Option<Pin>,
 ) -> Result<PinUvAuthResult, AuthenticatorError> {
     // CTAP 2.1 is very specific that the request should either include pinUvAuthParam
     // OR uv=true, but not both at the same time. We now have to decide which (if either)
@@ -244,7 +245,7 @@ fn get_pin_uv_auth_param<Dev: FidoDevice, T: PinUvAuthCommand + RequestCtap2>(
             // `pin_configured`.
             let pin_auth_token = dev
                 .get_pin_uv_auth_token_using_pin_with_permissions(
-                    cmd.pin(),
+                    pin,
                     permission,
                     cmd.get_rp_id(),
                     alive,
@@ -255,7 +256,7 @@ fn get_pin_uv_auth_param<Dev: FidoDevice, T: PinUvAuthCommand + RequestCtap2>(
         }
     } else {
         // CTAP 2.0 fallback
-        if !skip_uv && supports_uv && cmd.pin().is_none() {
+        if !skip_uv && supports_uv && pin.is_none() {
             // If the device supports internal user-verification (e.g. fingerprints),
             // skip PIN-stuff
 
@@ -270,7 +271,7 @@ fn get_pin_uv_auth_param<Dev: FidoDevice, T: PinUvAuthCommand + RequestCtap2>(
         }
 
         let pin_auth_token = dev
-            .get_pin_token(cmd.pin(), alive)
+            .get_pin_token(pin, alive)
             .map_err(|e| repackage_pin_errors(dev, e))?;
         cmd.set_pin_uv_auth_param(Some(pin_auth_token.clone()))?;
         Ok(PinUvAuthResult::SuccessGetPinToken(pin_auth_token))
@@ -294,18 +295,19 @@ fn determine_puap_if_needed<Dev: FidoDevice, T: PinUvAuthCommand + RequestCtap2,
     status: &Sender<StatusUpdate>,
     callback: &StateCallback<crate::Result<U>>,
     alive: &dyn Fn() -> bool,
+    pin: &mut Option<Pin>,
 ) -> Result<PinUvAuthResult, ()> {
     while alive() {
         debug!("-----------------------------------------------------------------");
         debug!("Getting pinUvAuthParam");
-        match get_pin_uv_auth_param(cmd, dev, permission, skip_uv, uv_req, alive) {
+        match get_pin_uv_auth_param(cmd, dev, permission, skip_uv, uv_req, alive, pin) {
             Ok(r) => {
                 return Ok(r);
             }
 
             Err(AuthenticatorError::PinError(PinError::PinRequired)) => {
-                if let Ok(pin) = ask_user_for_pin(false, None, status, callback) {
-                    cmd.set_pin(Some(pin));
+                if let Ok(new_pin) = ask_user_for_pin(false, None, status, callback) {
+                    *pin = Some(new_pin);
                     skip_uv = true;
                     continue;
                 } else {
@@ -313,8 +315,8 @@ fn determine_puap_if_needed<Dev: FidoDevice, T: PinUvAuthCommand + RequestCtap2,
                 }
             }
             Err(AuthenticatorError::PinError(PinError::InvalidPin(retries))) => {
-                if let Ok(pin) = ask_user_for_pin(true, retries, status, callback) {
-                    cmd.set_pin(Some(pin));
+                if let Ok(new_pin) = ask_user_for_pin(true, retries, status, callback) {
+                    *pin = Some(new_pin);
                     continue;
                 } else {
                     return Err(());
@@ -445,10 +447,10 @@ pub fn register<Dev: FidoDevice>(
         args.exclude_list,
         options,
         args.extensions,
-        args.pin,
     );
 
     let mut skip_uv = false;
+    let mut pin = args.pin;
     while alive() {
         // Requesting both because pre-flighting (credential list filtering)
         // can potentially send GetAssertion-commands
@@ -464,6 +466,7 @@ pub fn register<Dev: FidoDevice>(
             &status,
             &callback,
             alive,
+            &mut pin,
         ) {
             Ok(r) => r,
             Err(()) => {
@@ -577,11 +580,11 @@ pub fn sign<Dev: FidoDevice>(
             user_verification: None,
         },
         args.extensions,
-        args.pin,
         args.alternate_rp_id,
     );
 
     let mut skip_uv = false;
+    let mut pin = args.pin;
     while alive() {
         let pin_uv_auth_result = match determine_puap_if_needed(
             &mut get_assertion,
@@ -592,6 +595,7 @@ pub fn sign<Dev: FidoDevice>(
             &status,
             &callback,
             alive,
+            &mut pin,
         ) {
             Ok(r) => r,
             Err(()) => {
@@ -867,6 +871,7 @@ pub(crate) fn bio_enrollment(
 
     let mut skip_puap = false;
     let mut pin_uv_auth_result = PinUvAuthResult::NoAuthRequired;
+    let mut pin = None;
     while alive() {
         if !skip_puap {
             pin_uv_auth_result = match determine_puap_if_needed(
@@ -878,6 +883,7 @@ pub(crate) fn bio_enrollment(
                 &status,
                 &callback,
                 alive,
+                &mut pin,
             ) {
                 Ok(r) => r,
                 Err(()) => {
@@ -1041,6 +1047,7 @@ pub(crate) fn credential_management(
     let mut current_rp = 0;
     let mut skip_puap = false;
     let mut pin_uv_auth_result = PinUvAuthResult::NoAuthRequired;
+    let mut pin = None;
     while alive() {
         if !skip_puap {
             pin_uv_auth_result = match determine_puap_if_needed(
@@ -1052,6 +1059,7 @@ pub(crate) fn credential_management(
                 &status,
                 &callback,
                 alive,
+                &mut pin,
             ) {
                 Ok(r) => r,
                 Err(()) => {
@@ -1258,6 +1266,7 @@ pub(crate) fn configure_authenticator(
         return;
     }
 
+    let mut pin = None;
     while alive() {
         // We can use the AuthenticatorConfiguration-command only in two cases:
         // 1. The device also supports the uv_acfg-permission (otherwise we can't establish a PUAP)
@@ -1273,6 +1282,7 @@ pub(crate) fn configure_authenticator(
             &status,
             &callback,
             alive,
+            &mut pin,
         ) {
             Ok(r) => r,
             Err(()) => {

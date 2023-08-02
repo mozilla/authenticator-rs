@@ -12,7 +12,6 @@ use crate::ctap2::attestation::{
     AttestedCredentialData, AuthenticatorData, AuthenticatorDataFlags,
 };
 use crate::ctap2::client_data::ClientDataHash;
-use crate::ctap2::commands::client_pin::Pin;
 use crate::ctap2::server::{
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty,
     RelyingPartyWrapper, RpIdHash, User, UserVerificationRequirement,
@@ -167,7 +166,6 @@ pub struct MakeCredentials {
     // the processing of these calls.
     pub extensions: MakeCredentialsExtensions,
     pub options: MakeCredentialsOptions,
-    pub pin: Option<Pin>,
     pub pin_uv_auth_param: Option<PinUvAuthParam>,
     pub enterprise_attestation: Option<u64>,
 }
@@ -182,7 +180,6 @@ impl MakeCredentials {
         exclude_list: Vec<PublicKeyCredentialDescriptor>,
         options: MakeCredentialsOptions,
         extensions: MakeCredentialsExtensions,
-        pin: Option<Pin>,
     ) -> Self {
         Self {
             client_data_hash,
@@ -192,7 +189,6 @@ impl MakeCredentials {
             exclude_list,
             extensions,
             options,
-            pin,
             pin_uv_auth_param: None,
             enterprise_attestation: None,
         }
@@ -200,14 +196,6 @@ impl MakeCredentials {
 }
 
 impl PinUvAuthCommand for MakeCredentials {
-    fn pin(&self) -> &Option<Pin> {
-        &self.pin
-    }
-
-    fn set_pin(&mut self, pin: Option<Pin>) {
-        self.pin = pin;
-    }
-
     fn set_pin_uv_auth_param(
         &mut self,
         pin_uv_auth_token: Option<PinUvAuthToken>,
@@ -445,7 +433,6 @@ pub(crate) fn dummy_make_credentials_cmd() -> MakeCredentials {
         vec![],
         MakeCredentialsOptions::default(),
         MakeCredentialsExtensions::default(),
-        None,
     );
     // Using a zero-length pinAuth will trigger the device to blink.
     // For CTAP1, this gets ignored anyways and we do a 'normal' register
@@ -602,7 +589,6 @@ pub mod test {
                 user_verification: None,
             },
             Default::default(),
-            None,
         );
 
         let mut device = Device::new("commands/make_credentials").unwrap(); // not really used (all functions ignore it)
@@ -661,7 +647,6 @@ pub mod test {
                 user_verification: None,
             },
             Default::default(),
-            None,
         );
 
         let (req_serialized, _) = req
