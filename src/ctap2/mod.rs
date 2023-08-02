@@ -1081,7 +1081,14 @@ pub(crate) fn credential_management(
                             max_possible_remaining_resident_credentials_count;
                         if existing_resident_credentials_count > 0 {
                             cred_management.subcommand = CredManagementCommand::EnumerateRPsBegin;
-                            unwrap_result!(cred_management.regenerate_puap(), callback);
+                            // We have to regenerate PUAP here. PUAT hasn't changed, but the content
+                            // of the command has changed, and that is part of the PUAP-calculation
+                            unwrap_result!(
+                                cred_management.set_pin_uv_auth_param(
+                                    pin_uv_auth_result.get_pin_uv_auth_token()
+                                ),
+                                callback
+                            );
                             continue;
                         } else {
                             // This token doesn't have any resident keys, but its not an error,
@@ -1130,7 +1137,13 @@ pub(crate) fn credential_management(
                                     credential_result.credential_list[0].rp_id_hash.clone(),
                                 );
                         }
-                        unwrap_result!(cred_management.regenerate_puap(), callback);
+                        // We have to regenerate PUAP here. PUAT hasn't changed, but the content
+                        // of the command has changed, and that is part of the PUAP-calculation
+                        unwrap_result!(
+                            cred_management
+                                .set_pin_uv_auth_param(pin_uv_auth_result.get_pin_uv_auth_token()),
+                            callback
+                        );
                         continue;
                     }
                     CredManagementCommand::EnumerateCredentialsBegin(..)
@@ -1166,7 +1179,14 @@ pub(crate) fn credential_management(
                                             .rp_id_hash
                                             .clone(),
                                     );
-                                unwrap_result!(cred_management.regenerate_puap(), callback);
+                                // We have to regenerate PUAP here. PUAT hasn't changed, but the content
+                                // of the command has changed, and that is part of the PUAP-calculation
+                                unwrap_result!(
+                                    cred_management.set_pin_uv_auth_param(
+                                        pin_uv_auth_result.get_pin_uv_auth_token()
+                                    ),
+                                    callback
+                                );
                             } else {
                                 // Finally done iterating over all RPs and their Credentials
                                 we_are_done = true;
