@@ -123,8 +123,8 @@ impl Serialize for BioEnrollmentParams {
 
 #[derive(Debug)]
 pub enum BioEnrollmentCommand {
-    EnrollBegin(u64),
-    EnrollCaptureNextSample((BioTemplateId, u64)),
+    EnrollBegin(Option<u64>),
+    EnrollCaptureNextSample((BioTemplateId, Option<u64>)),
     CancelCurrentEnrollment,
     EnumerateEnrollments,
     SetFriendlyName((BioTemplateId, String)),
@@ -137,12 +137,12 @@ impl BioEnrollmentCommand {
         let mut params = BioEnrollmentParams::default();
         match &self {
             BioEnrollmentCommand::EnrollBegin(timeout) => {
-                params.timeout_milliseconds = Some(*timeout);
+                params.timeout_milliseconds = *timeout;
                 (0x01, params)
             }
             BioEnrollmentCommand::EnrollCaptureNextSample((id, timeout)) => {
                 params.template_id = Some(id.clone());
-                params.timeout_milliseconds = Some(*timeout);
+                params.timeout_milliseconds = *timeout;
                 (0x02, params)
             }
             BioEnrollmentCommand::CancelCurrentEnrollment => (0x03, params),

@@ -839,7 +839,8 @@ pub(crate) fn bio_enrollment(
 
     // We are not allowed to request the BE-permission using UV, so we have to skip UV
     let mut skip_uv = authinfo.options.uv_bio_enroll != Some(true);
-    let timeout = 30 * 1000;
+    // Currently not used, but if we want, we can just set the value here.
+    let timeout = None;
 
     let mut bio_cmd = match &command {
         BioEnrollmentCmd::StartNewEnrollment(_name) => BioEnrollment::new(
