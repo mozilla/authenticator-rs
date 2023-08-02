@@ -819,7 +819,7 @@ pub(crate) fn bio_enrollment(
     alive: &dyn Fn() -> bool,
 ) -> bool {
     let authinfo = match dev.get_authenticator_info() {
-        Some(i) => i.clone(),
+        Some(i) => i,
         None => {
             callback.call(Err(HIDError::DeviceNotInitialized.into()));
             return false;
