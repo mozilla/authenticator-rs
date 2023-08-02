@@ -286,6 +286,7 @@ fn get_pin_uv_auth_param<Dev: FidoDevice, T: PinUvAuthCommand + RequestCtap2>(
 /// the device, Err() otherwise.
 /// Handles asking the user for a PIN, if needed and sending StatusUpdates
 /// regarding PIN and UV usage.
+#[allow(clippy::too_many_arguments)]
 fn determine_puap_if_needed<Dev: FidoDevice, T: PinUvAuthCommand + RequestCtap2, U>(
     cmd: &mut T,
     dev: &mut Dev,
