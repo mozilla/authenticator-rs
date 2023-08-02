@@ -430,7 +430,7 @@ impl PinUvAuthCommand for CredentialManagement {
             if params.has_some() {
                 data.extend(to_vec(&params).map_err(CommandError::Serializing)?);
             }
-            param = Some(token.clone().derive(&data).map_err(CommandError::Crypto)?);
+            param = Some(token.derive(&data).map_err(CommandError::Crypto)?);
         }
         self.pin_uv_auth_param = param;
         Ok(())
