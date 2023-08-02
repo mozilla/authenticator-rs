@@ -100,7 +100,6 @@ impl CredManagementCommand {
 pub struct CredentialManagement {
     pub(crate) subcommand: CredManagementCommand, // subCommand currently being requested
     pin_uv_auth_param: Option<PinUvAuthParam>, // First 16 bytes of HMAC-SHA-256 of contents using pinUvAuthToken.
-    pin_uv_auth_token: Option<PinUvAuthToken>,
     pin: Option<Pin>,
     use_legacy_preview: bool,
 }
@@ -110,14 +109,9 @@ impl CredentialManagement {
         Self {
             subcommand,
             pin_uv_auth_param: None,
-            pin_uv_auth_token: None,
             pin: None,
             use_legacy_preview,
         }
-    }
-    pub(crate) fn regenerate_puap(&mut self) -> Result<(), AuthenticatorError> {
-        let token = self.pin_uv_auth_token.take();
-        self.set_pin_uv_auth_param(token)
     }
 }
 
@@ -447,7 +441,6 @@ impl PinUvAuthCommand for CredentialManagement {
                 data.extend(to_vec(&params).map_err(CommandError::Serializing)?);
             }
             param = Some(token.clone().derive(&data).map_err(CommandError::Crypto)?);
-            self.pin_uv_auth_token = Some(token);
         }
         self.pin_uv_auth_param = param;
         Ok(())
