@@ -3,7 +3,7 @@ use crate::{
     ctap2::server::UserVerificationRequirement,
     errors::AuthenticatorError,
     transport::errors::HIDError,
-    FidoDevice, Pin,
+    FidoDevice,
 };
 use serde::{
     de::{Error as SerdeError, IgnoredAny, MapAccess, Visitor},
@@ -169,7 +169,6 @@ pub struct BioEnrollment {
     pub(crate) subcommand: BioEnrollmentCommand,
     /// First 16 bytes of HMAC-SHA-256 of contents using pinUvAuthToken.
     pin_uv_auth_param: Option<PinUvAuthParam>,
-    pin: Option<Pin>,
     use_legacy_preview: bool,
 }
 
@@ -179,7 +178,6 @@ impl BioEnrollment {
             modality: BioEnrollmentModality::Fingerprint, // As per spec: Currently always "Fingerprint"
             subcommand,
             pin_uv_auth_param: None,
-            pin: None,
             use_legacy_preview,
         }
     }
@@ -219,14 +217,6 @@ impl Serialize for BioEnrollment {
 }
 
 impl PinUvAuthCommand for BioEnrollment {
-    fn pin(&self) -> &Option<Pin> {
-        &self.pin
-    }
-
-    fn set_pin(&mut self, pin: Option<Pin>) {
-        self.pin = pin;
-    }
-
     fn get_rp_id(&self) -> Option<&String> {
         None
     }
