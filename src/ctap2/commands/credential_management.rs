@@ -2,8 +2,7 @@ use super::{Command, CommandError, PinUvAuthCommand, RequestCtap2, StatusCode};
 use crate::{
     crypto::{COSEKey, PinUvAuthParam, PinUvAuthToken},
     ctap2::server::{
-        PublicKeyCredentialDescriptor, PublicKeyCredentialId, RelyingParty, RpIdHash, User,
-        UserVerificationRequirement,
+        PublicKeyCredentialDescriptor, RelyingParty, RpIdHash, User, UserVerificationRequirement,
     },
     errors::AuthenticatorError,
     transport::errors::HIDError,
@@ -20,9 +19,9 @@ use std::fmt;
 
 #[derive(Debug, Clone, Deserialize, Default)]
 struct CredManagementParams {
-    rp_id_hash: Option<RpIdHash>,                 // RP ID SHA-256 hash
-    credential_id: Option<PublicKeyCredentialId>, // Credential Identifier
-    user: Option<User>,                           // User Entity
+    rp_id_hash: Option<RpIdHash>, // RP ID SHA-256 hash
+    credential_id: Option<PublicKeyCredentialDescriptor>, // Credential Identifier
+    user: Option<User>,           // User Entity
 }
 
 impl CredManagementParams {
@@ -68,8 +67,8 @@ pub(crate) enum CredManagementCommand {
     EnumerateRPsGetNextRP,
     EnumerateCredentialsBegin(RpIdHash),
     EnumerateCredentialsGetNextCredential,
-    DeleteCredential(PublicKeyCredentialId),
-    UpdateUserInformation((PublicKeyCredentialId, User)),
+    DeleteCredential(PublicKeyCredentialDescriptor),
+    UpdateUserInformation((PublicKeyCredentialDescriptor, User)),
 }
 
 impl CredManagementCommand {
