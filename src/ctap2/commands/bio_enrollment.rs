@@ -627,8 +627,8 @@ impl<'de> Deserialize<'de> for BioEnrollmentResponse {
 
 #[derive(Debug, Serialize)]
 pub struct EnrollmentInfo {
-    template_id: Vec<u8>,
-    template_friendly_name: Option<String>,
+    pub template_id: Vec<u8>,
+    pub template_friendly_name: Option<String>,
 }
 
 impl From<&BioTemplateInfo> for EnrollmentInfo {

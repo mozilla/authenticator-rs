@@ -5,7 +5,7 @@ use crate::ctap2::{
         bio_enrollment::{BioTemplateId, LastEnrollmentSampleStatus},
         get_info::AuthenticatorInfo,
     },
-    server::{PublicKeyCredentialId, User},
+    server::{PublicKeyCredentialDescriptor, User},
 };
 use serde::{Deserialize, Serialize as DeriveSer, Serializer};
 use std::sync::mpsc::Sender;
@@ -13,8 +13,8 @@ use std::sync::mpsc::Sender;
 #[derive(Debug, Deserialize, DeriveSer)]
 pub enum CredManagementCmd {
     GetCredentials,
-    DeleteCredential(PublicKeyCredentialId),
-    UpdateUserInformation((PublicKeyCredentialId, User)),
+    DeleteCredential(PublicKeyCredentialDescriptor),
+    UpdateUserInformation((PublicKeyCredentialDescriptor, User)),
 }
 
 #[derive(Debug, Deserialize, DeriveSer)]
