@@ -24,7 +24,7 @@ use crate::ctap2::commands::credential_management::{
 };
 use crate::ctap2::commands::get_assertion::{GetAssertion, GetAssertionOptions};
 use crate::ctap2::commands::make_credentials::{
-    dummy_make_credentials_cmd, MakeCredentials, MakeCredentialsOptions, MakeCredentialsResult,
+    dummy_make_credentials_cmd, MakeCredentials, MakeCredentialsOptions,
 };
 use crate::ctap2::commands::reset::Reset;
 use crate::ctap2::commands::{
@@ -41,7 +41,7 @@ use crate::statecallback::StateCallback;
 use crate::status_update::{send_status, BioEnrollmentCmd, CredManagementCmd, InteractiveUpdate};
 use crate::transport::device_selector::{Device, DeviceSelectorEvent};
 use crate::transport::{errors::HIDError, hid::HIDDevice, FidoDevice, FidoDeviceIO, FidoProtocol};
-use crate::{ManageResult, RegisterResult, ResetResult, SignResult, StatusPinUv, StatusUpdate};
+use crate::{ManageResult, ResetResult, StatusPinUv, StatusUpdate};
 use std::sync::mpsc::{channel, RecvError, Sender};
 use std::thread;
 use std::time::Duration;
@@ -511,8 +511,8 @@ pub fn register<Dev: FidoDevice>(
         send_status(&status, crate::StatusUpdate::PresenceRequired);
         let resp = dev.send_msg_cancellable(&makecred, alive);
         match resp {
-            Ok(MakeCredentialsResult(attestation)) => {
-                callback.call(Ok(RegisterResult::CTAP2(attestation)));
+            Ok(result) => {
+                callback.call(Ok(result));
                 return true;
             }
             Err(e) => {
@@ -658,8 +658,8 @@ pub fn sign<Dev: FidoDevice>(
             }
         }
         match resp {
-            Ok(assertions) => {
-                callback.call(Ok(SignResult::CTAP2(assertions)));
+            Ok(result) => {
+                callback.call(Ok(result));
                 return true;
             }
             Err(e) => {

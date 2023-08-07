@@ -22,10 +22,9 @@ use crate::transport::device_selector::{
 use crate::transport::platform::transaction::Transaction;
 use crate::transport::{hid::HIDDevice, FidoDevice, FidoProtocol};
 use crate::u2fprotocol::{u2f_init_device, u2f_is_keyhandle_valid, u2f_register, u2f_sign};
-use crate::{ctap2, ManageResult};
+use crate::ctap2;
 use crate::{
-    AuthenticatorTransports, InteractiveRequest, KeyHandle, RegisterFlags, RegisterResult,
-    SignFlags, SignResult,
+    AuthenticatorTransports, InteractiveRequest, KeyHandle, ManageResult, RegisterFlags, SignFlags,
 };
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::thread;
@@ -443,16 +442,11 @@ impl StateMachine {
                     } else if let Ok(bytes) = u2f_register(dev, challenge.as_ref(), &application) {
                         let mut rp_id_hash: RpIdHash = RpIdHash([0u8; 32]);
                         rp_id_hash.0.copy_from_slice(&application);
-                        let result = match MakeCredentialsResult::from_ctap1(&bytes, &rp_id_hash) {
-                            Ok(MakeCredentialsResult(att_obj)) => att_obj,
-                            Err(_) => {
-                                callback.call(Err(errors::AuthenticatorError::U2FToken(
-                                    errors::U2FTokenError::Unknown,
-                                )));
-                                break;
-                            }
-                        };
-                        callback.call(Ok(RegisterResult::CTAP2(result)));
+                        callback.call(
+                            MakeCredentialsResult::from_ctap1(&bytes, &rp_id_hash).map_err(|_| {
+                                errors::AuthenticatorError::U2FToken(errors::U2FTokenError::Unknown)
+                            }),
+                        );
                         break;
                     }
 
@@ -575,7 +569,7 @@ impl StateMachine {
                                         break 'outer;
                                     }
                                 };
-                                callback.call(Ok(SignResult::CTAP2(result)));
+                                callback.call(Ok(result));
                                 break 'outer;
                             }
                         }
