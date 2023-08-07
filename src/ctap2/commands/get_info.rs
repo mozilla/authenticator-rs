@@ -1036,7 +1036,7 @@ pub mod tests {
         assert_eq!(authenticator_info, expected);
 
         // Both 1 and 2
-        let mut raw_list = raw_data.clone();
+        let mut raw_list = raw_data;
         let raw_list_len = raw_list.len();
         raw_list[raw_list_len - 2] = 0x82; // array(2) instead of array(1)
         raw_list.push(0x02);
