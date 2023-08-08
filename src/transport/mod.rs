@@ -125,6 +125,14 @@ where
     fn should_try_ctap2(&self) -> bool;
     fn get_authenticator_info(&self) -> Option<&AuthenticatorInfo>;
     fn set_authenticator_info(&mut self, authenticator_info: AuthenticatorInfo);
+    fn refresh_authenticator_info(&mut self) -> Option<&AuthenticatorInfo> {
+        let command = GetInfo::default();
+        if let Ok(info) = self.send_cbor(&command) {
+            debug!("Refreshed authenticator info: {:?}", info);
+            self.set_authenticator_info(info);
+        }
+        self.get_authenticator_info()
+    }
 
     // `get_protocol()` indicates whether we're using CTAP1 or CTAP2.
     // Prior to initializing the device, `get_protocol()` should return CTAP2 unless

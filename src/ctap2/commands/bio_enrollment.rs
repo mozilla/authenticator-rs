@@ -3,7 +3,7 @@ use crate::{
     ctap2::server::UserVerificationRequirement,
     errors::AuthenticatorError,
     transport::errors::HIDError,
-    FidoDevice,
+    AuthenticatorInfo, FidoDevice,
 };
 use serde::{
     de::{Error as SerdeError, IgnoredAny, MapAccess, Visitor},
@@ -317,7 +317,7 @@ impl RequestCtap2 for BioEnrollment {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Serialize)]
 pub enum LastEnrollmentSampleStatus {
     /// Good fingerprint capture.
     Ctap2EnrollFeedbackFpGood,
@@ -650,7 +650,9 @@ pub struct FingerprintSensorInfo {
 #[derive(Debug, Serialize)]
 pub enum BioEnrollmentResult {
     EnrollmentList(Vec<EnrollmentInfo>),
-    DeleteSucess,
+    DeleteSucess(AuthenticatorInfo),
     UpdateSuccess,
+    AddSuccess(AuthenticatorInfo),
     FingerprintSensorInfo(FingerprintSensorInfo),
+    SampleStatus(LastEnrollmentSampleStatus, u64),
 }

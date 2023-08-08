@@ -661,32 +661,38 @@ impl StateMachine {
                                 alive,
                             );
                         }
-                        Ok(InteractiveRequest::ChangeConfig(authcfg)) => {
+                        Ok(InteractiveRequest::ChangeConfig(authcfg, puat)) => {
                             ctap2::configure_authenticator(
                                 &mut dev,
+                                puat,
                                 authcfg,
-                                status,
+                                status.clone(),
                                 callback.clone(),
                                 alive,
                             );
+                            continue;
                         }
-                        Ok(InteractiveRequest::CredentialManagement(cred_management)) => {
+                        Ok(InteractiveRequest::CredentialManagement(cred_management, puat)) => {
                             ctap2::credential_management(
                                 &mut dev,
+                                puat,
                                 cred_management,
-                                status,
+                                status.clone(),
                                 callback.clone(),
                                 alive,
                             );
+                            continue;
                         }
-                        Ok(InteractiveRequest::BioEnrollment(bio_enrollment)) => {
+                        Ok(InteractiveRequest::BioEnrollment(bio_enrollment, puat)) => {
                             ctap2::bio_enrollment(
                                 &mut dev,
+                                puat,
                                 bio_enrollment,
-                                status,
+                                status.clone(),
                                 callback.clone(),
                                 alive,
                             );
+                            continue;
                         }
                         Err(RecvTimeoutError::Timeout) => {
                             if !alive() {

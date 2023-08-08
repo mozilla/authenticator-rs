@@ -67,6 +67,11 @@ impl AuthConfigCommand {
     }
 }
 
+#[derive(Debug, Serialize)]
+pub enum AuthConfigResult {
+    Success(AuthenticatorInfo),
+}
+
 #[derive(Debug)]
 pub struct AuthenticatorConfig {
     subcommand: AuthConfigCommand, // subCommand currently being requested

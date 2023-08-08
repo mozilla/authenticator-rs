@@ -9,7 +9,9 @@ pub(crate) mod utils;
 use crate::authenticatorservice::{RegisterArgs, SignArgs};
 use crate::crypto::COSEAlgorithm;
 use crate::ctap2::client_data::ClientDataHash;
-use crate::ctap2::commands::authenticator_config::{AuthConfigCommand, AuthenticatorConfig};
+use crate::ctap2::commands::authenticator_config::{
+    AuthConfigCommand, AuthConfigResult, AuthenticatorConfig,
+};
 use crate::ctap2::commands::bio_enrollment::{
     BioEnrollment, BioEnrollmentCommand, BioEnrollmentResult, FingerprintSensorInfo,
 };
@@ -818,6 +820,7 @@ pub(crate) fn set_or_change_pin_helper<T: From<()>>(
 
 pub(crate) fn bio_enrollment(
     dev: &mut Device,
+    puat_result: Option<PinUvAuthResult>,
     command: BioEnrollmentCmd,
     status: Sender<crate::StatusUpdate>,
     callback: StateCallback<crate::Result<crate::ManageResult>>,
@@ -856,7 +859,7 @@ pub(crate) fn bio_enrollment(
             BioEnrollmentCommand::RemoveEnrollment(id.clone()),
             use_legacy_preview,
         ),
-        BioEnrollmentCmd::ChangeName((id, name)) => BioEnrollment::new(
+        BioEnrollmentCmd::ChangeName(id, name) => BioEnrollment::new(
             BioEnrollmentCommand::SetFriendlyName((id.clone(), name.clone())),
             use_legacy_preview,
         ),
@@ -871,7 +874,20 @@ pub(crate) fn bio_enrollment(
     };
 
     let mut skip_puap = false;
-    let mut pin_uv_auth_result = PinUvAuthResult::NoAuthRequired;
+    let mut pin_uv_auth_result = puat_result
+        .clone()
+        .unwrap_or(PinUvAuthResult::NoAuthRequired);
+    match puat_result {
+        Some(PinUvAuthResult::SuccessGetPinToken(t))
+        | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingUvWithPermissions(t))
+        | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingPinWithPermissions(t)) => {
+            skip_puap = true;
+            if bio_cmd.set_pin_uv_auth_param(Some(t)).is_err() {
+                return false;
+            }
+        }
+        _ => {}
+    }
     let mut pin = None;
     while alive() {
         if !skip_puap {
@@ -920,8 +936,11 @@ pub(crate) fn bio_enrollment(
                             &status,
                             StatusUpdate::InteractiveManagement(
                                 InteractiveUpdate::BioEnrollmentUpdate((
-                                    last_enroll_sample_status,
-                                    remaining_samples,
+                                    BioEnrollmentResult::SampleStatus(
+                                        last_enroll_sample_status,
+                                        remaining_samples,
+                                    ),
+                                    Some(pin_uv_auth_result.clone()),
                                 )),
                             ),
                         );
@@ -942,7 +961,17 @@ pub(crate) fn bio_enrollment(
                                 );
                                 continue;
                             } else {
-                                callback.call(Ok(ManageResult::Success));
+                                let auth_info =
+                                    unwrap_option!(dev.refresh_authenticator_info(), callback);
+                                send_status(
+                                    &status,
+                                    StatusUpdate::InteractiveManagement(
+                                        InteractiveUpdate::BioEnrollmentUpdate((
+                                            BioEnrollmentResult::AddSuccess(auth_info.clone()),
+                                            Some(pin_uv_auth_result),
+                                        )),
+                                    ),
+                                );
                                 return true;
                             }
                         } else {
@@ -963,14 +992,43 @@ pub(crate) fn bio_enrollment(
                     }
                     BioEnrollmentCommand::EnumerateEnrollments => {
                         let list = result.template_infos.iter().map(|x| x.into()).collect();
-                        callback.call(Ok(ManageResult::BioEnrollment(
-                            BioEnrollmentResult::EnrollmentList(list),
-                        )));
+                        send_status(
+                            &status,
+                            StatusUpdate::InteractiveManagement(
+                                InteractiveUpdate::BioEnrollmentUpdate((
+                                    BioEnrollmentResult::EnrollmentList(list),
+                                    Some(pin_uv_auth_result),
+                                )),
+                            ),
+                        );
                         return true;
                     }
-                    BioEnrollmentCommand::SetFriendlyName(_)
-                    | BioEnrollmentCommand::RemoveEnrollment(_)
-                    | BioEnrollmentCommand::CancelCurrentEnrollment => {
+                    BioEnrollmentCommand::SetFriendlyName(_) => {
+                        send_status(
+                            &status,
+                            StatusUpdate::InteractiveManagement(
+                                InteractiveUpdate::BioEnrollmentUpdate((
+                                    BioEnrollmentResult::UpdateSuccess,
+                                    Some(pin_uv_auth_result),
+                                )),
+                            ),
+                        );
+                        return true;
+                    }
+                    BioEnrollmentCommand::RemoveEnrollment(_) => {
+                        let auth_info = unwrap_option!(dev.refresh_authenticator_info(), callback);
+                        send_status(
+                            &status,
+                            StatusUpdate::InteractiveManagement(
+                                InteractiveUpdate::BioEnrollmentUpdate((
+                                    BioEnrollmentResult::DeleteSucess(auth_info.clone()),
+                                    Some(pin_uv_auth_result),
+                                )),
+                            ),
+                        );
+                        return true;
+                    }
+                    BioEnrollmentCommand::CancelCurrentEnrollment => {
                         callback.call(Ok(ManageResult::Success));
                         return true;
                     }
@@ -982,13 +1040,21 @@ pub(crate) fn bio_enrollment(
                         );
                         let max_template_friendly_name =
                             unwrap_option!(result.max_template_friendly_name, callback);
-                        callback.call(Ok(ManageResult::BioEnrollment(
-                            BioEnrollmentResult::FingerprintSensorInfo(FingerprintSensorInfo {
-                                fingerprint_kind,
-                                max_capture_samples_required_for_enroll,
-                                max_template_friendly_name,
-                            }),
-                        )));
+                        send_status(
+                            &status,
+                            StatusUpdate::InteractiveManagement(
+                                InteractiveUpdate::BioEnrollmentUpdate((
+                                    BioEnrollmentResult::FingerprintSensorInfo(
+                                        FingerprintSensorInfo {
+                                            fingerprint_kind,
+                                            max_capture_samples_required_for_enroll,
+                                            max_template_friendly_name,
+                                        },
+                                    ),
+                                    Some(pin_uv_auth_result),
+                                )),
+                            ),
+                        );
                         return true;
                     }
                 };
@@ -1003,6 +1069,7 @@ pub(crate) fn bio_enrollment(
 
 pub(crate) fn credential_management(
     dev: &mut Device,
+    puat_result: Option<PinUvAuthResult>,
     command: CredManagementCmd,
     status: Sender<crate::StatusUpdate>,
     callback: StateCallback<crate::Result<crate::ManageResult>>,
@@ -1028,6 +1095,7 @@ pub(crate) fn credential_management(
 
     let use_legacy_preview = authinfo.options.cred_mgmt != Some(true);
 
+    // If puap is provided, we can skip puap-determination (i.e. PIN entry)
     let mut cred_management = match command {
         CredManagementCmd::GetCredentials => {
             CredentialManagement::new(CredManagementCommand::GetCredsMetadata, use_legacy_preview)
@@ -1036,18 +1104,30 @@ pub(crate) fn credential_management(
             CredManagementCommand::DeleteCredential(cred_id),
             use_legacy_preview,
         ),
-        CredManagementCmd::UpdateUserInformation((cred_id, user)) => CredentialManagement::new(
+        CredManagementCmd::UpdateUserInformation(cred_id, user) => CredentialManagement::new(
             CredManagementCommand::UpdateUserInformation((cred_id, user)),
             use_legacy_preview,
         ),
     };
-
     let mut credential_result = CredentialList::new();
     let mut remaining_rps = 0;
     let mut remaining_cred_ids = 0;
     let mut current_rp = 0;
     let mut skip_puap = false;
-    let mut pin_uv_auth_result = PinUvAuthResult::NoAuthRequired;
+    let mut pin_uv_auth_result = puat_result
+        .clone()
+        .unwrap_or(PinUvAuthResult::NoAuthRequired);
+    match puat_result {
+        Some(PinUvAuthResult::SuccessGetPinToken(t))
+        | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingUvWithPermissions(t))
+        | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingPinWithPermissions(t)) => {
+            skip_puap = true;
+            if cred_management.set_pin_uv_auth_param(Some(t)).is_err() {
+                return false;
+            }
+        }
+        _ => {}
+    }
     let mut pin = None;
     while alive() {
         if !skip_puap {
@@ -1102,10 +1182,18 @@ pub(crate) fn credential_management(
                             continue;
                         } else {
                             // This token doesn't have any resident keys, but its not an error,
-                            // so we return an Ok with an empty list.
-                            callback.call(Ok(ManageResult::CredManagement(
-                                CredentialManagementResult::CredentialList(credential_result),
-                            )));
+                            // so we send an empty list.
+                            send_status(
+                                &status,
+                                StatusUpdate::InteractiveManagement(
+                                    InteractiveUpdate::CredentialManagementUpdate((
+                                        CredentialManagementResult::CredentialList(
+                                            credential_result,
+                                        ),
+                                        Some(pin_uv_auth_result),
+                                    )),
+                                ),
+                            );
                             return true;
                         }
                     }
@@ -1119,9 +1207,17 @@ pub(crate) fn credential_management(
                             if total_rps == 0 {
                                 // This token doesn't have any RPs, but its not an error,
                                 // so we return an Ok with an empty list.
-                                callback.call(Ok(ManageResult::CredManagement(
-                                    CredentialManagementResult::CredentialList(credential_result),
-                                )));
+                                send_status(
+                                    &status,
+                                    StatusUpdate::InteractiveManagement(
+                                        InteractiveUpdate::CredentialManagementUpdate((
+                                            CredentialManagementResult::CredentialList(
+                                                credential_result,
+                                            ),
+                                            Some(pin_uv_auth_result),
+                                        )),
+                                    ),
+                                );
                                 return true;
                             }
                             remaining_rps = total_rps - 1;
@@ -1213,24 +1309,44 @@ pub(crate) fn credential_management(
                             .credentials
                             .push(key);
                         if we_are_done {
-                            callback.call(Ok(ManageResult::CredManagement(
-                                CredentialManagementResult::CredentialList(credential_result),
-                            )));
+                            send_status(
+                                &status,
+                                StatusUpdate::InteractiveManagement(
+                                    InteractiveUpdate::CredentialManagementUpdate((
+                                        CredentialManagementResult::CredentialList(
+                                            credential_result,
+                                        ),
+                                        Some(pin_uv_auth_result),
+                                    )),
+                                ),
+                            );
                             return true;
                         } else {
                             continue;
                         }
                     }
                     CredManagementCommand::DeleteCredential(_) => {
-                        callback.call(Ok(ManageResult::CredManagement(
-                            CredentialManagementResult::DeleteSucess,
-                        )));
+                        send_status(
+                            &status,
+                            StatusUpdate::InteractiveManagement(
+                                InteractiveUpdate::CredentialManagementUpdate((
+                                    CredentialManagementResult::DeleteSucess,
+                                    Some(pin_uv_auth_result),
+                                )),
+                            ),
+                        );
                         return true;
                     }
                     CredManagementCommand::UpdateUserInformation(_) => {
-                        callback.call(Ok(ManageResult::CredManagement(
-                            CredentialManagementResult::UpdateSuccess,
-                        )));
+                        send_status(
+                            &status,
+                            StatusUpdate::InteractiveManagement(
+                                InteractiveUpdate::CredentialManagementUpdate((
+                                    CredentialManagementResult::UpdateSuccess,
+                                    Some(pin_uv_auth_result),
+                                )),
+                            ),
+                        );
                         return true;
                     }
                 };
@@ -1245,18 +1361,19 @@ pub(crate) fn credential_management(
 
 pub(crate) fn configure_authenticator(
     dev: &mut Device,
+    puat_result: Option<PinUvAuthResult>,
     cfg_subcommand: AuthConfigCommand,
     status: Sender<crate::StatusUpdate>,
     callback: StateCallback<crate::Result<crate::ManageResult>>,
     alive: &dyn Fn() -> bool,
-) {
+) -> bool {
     let mut authcfg = AuthenticatorConfig::new(cfg_subcommand);
     let mut skip_uv = false;
     let authinfo = match dev.get_authenticator_info() {
         Some(i) => i.clone(),
         None => {
             callback.call(Err(HIDError::DeviceNotInitialized.into()));
-            return;
+            return false;
         }
     };
 
@@ -1264,9 +1381,24 @@ pub(crate) fn configure_authenticator(
         callback.call(Err(AuthenticatorError::HIDError(
             HIDError::UnsupportedCommand,
         )));
-        return;
+        return false;
     }
 
+    let mut skip_puap = false;
+    let mut pin_uv_auth_result = puat_result
+        .clone()
+        .unwrap_or(PinUvAuthResult::NoAuthRequired);
+    match puat_result {
+        Some(PinUvAuthResult::SuccessGetPinToken(t))
+        | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingUvWithPermissions(t))
+        | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingPinWithPermissions(t)) => {
+            skip_puap = true;
+            if authcfg.set_pin_uv_auth_param(Some(t)).is_err() {
+                return false;
+            }
+        }
+        _ => {}
+    }
     let mut pin = None;
     while alive() {
         // We can use the AuthenticatorConfiguration-command only in two cases:
@@ -1274,22 +1406,24 @@ pub(crate) fn configure_authenticator(
         // 2. The device is NOT protected by PIN/UV (yet). This allows organizations to configure
         //    the token, before handing them out.
         // If authinfo.options.uv_acfg is not supported, this will return UnauthorizedPermission
-        let pin_uv_auth_result = match determine_puap_if_needed(
-            &mut authcfg,
-            dev,
-            skip_uv,
-            PinUvAuthTokenPermission::AuthenticatorConfiguration,
-            UserVerificationRequirement::Preferred,
-            &status,
-            &callback,
-            alive,
-            &mut pin,
-        ) {
-            Ok(r) => r,
-            Err(()) => {
-                return;
-            }
-        };
+        if !skip_puap {
+            pin_uv_auth_result = match determine_puap_if_needed(
+                &mut authcfg,
+                dev,
+                skip_uv,
+                PinUvAuthTokenPermission::AuthenticatorConfiguration,
+                UserVerificationRequirement::Preferred,
+                &status,
+                &callback,
+                alive,
+                &mut pin,
+            ) {
+                Ok(r) => r,
+                Err(()) => {
+                    return false;
+                }
+            };
+        }
 
         debug!("------------------------------------------------------------------");
         debug!("{authcfg:?} using {pin_uv_auth_result:?}");
@@ -1298,12 +1432,20 @@ pub(crate) fn configure_authenticator(
         let resp = dev.send_cbor_cancellable(&authcfg, alive);
         match resp {
             Ok(()) => {
-                callback.call(Ok(ManageResult::Success));
-                break;
+                let auth_info = unwrap_option!(dev.refresh_authenticator_info(), callback);
+                send_status(
+                    &status,
+                    StatusUpdate::InteractiveManagement(InteractiveUpdate::AuthConfigUpdate((
+                        AuthConfigResult::Success(auth_info.clone()),
+                        Some(pin_uv_auth_result),
+                    ))),
+                );
+                return true;
             }
             Err(e) => {
                 handle_errors!(e, status, callback, pin_uv_auth_result, skip_uv);
             }
         }
     }
+    false
 }
