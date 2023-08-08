@@ -93,7 +93,7 @@ pub trait RequestCtap2: fmt::Debug {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum PinUvAuthResult {
+pub enum PinUvAuthResult {
     /// Request is CTAP1 and does not need PinUvAuth
     RequestIsCtap1,
     /// Device is not capable of CTAP2

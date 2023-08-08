@@ -1,11 +1,15 @@
 use super::Pin;
-use crate::ctap2::{
-    commands::{
-        authenticator_config::AuthConfigCommand,
-        bio_enrollment::{BioTemplateId, LastEnrollmentSampleStatus},
-        get_info::AuthenticatorInfo,
+use crate::{
+    ctap2::{
+        commands::{
+            authenticator_config::{AuthConfigCommand, AuthConfigResult},
+            bio_enrollment::BioTemplateId,
+            get_info::AuthenticatorInfo,
+            PinUvAuthResult,
+        },
+        server::{PublicKeyCredentialDescriptor, User},
     },
-    server::{PublicKeyCredentialDescriptor, User},
+    BioEnrollmentResult, CredentialManagementResult,
 };
 use serde::{Deserialize, Serialize as DeriveSer, Serializer};
 use std::sync::mpsc::Sender;
@@ -14,7 +18,7 @@ use std::sync::mpsc::Sender;
 pub enum CredManagementCmd {
     GetCredentials,
     DeleteCredential(PublicKeyCredentialDescriptor),
-    UpdateUserInformation((PublicKeyCredentialDescriptor, User)),
+    UpdateUserInformation(PublicKeyCredentialDescriptor, User),
 }
 
 #[derive(Debug, Deserialize, DeriveSer)]
@@ -23,17 +27,17 @@ pub enum BioEnrollmentCmd {
     GetEnrollments,
     StartNewEnrollment(Option<String>),
     DeleteEnrollment(BioTemplateId),
-    ChangeName((BioTemplateId, String)),
+    ChangeName(BioTemplateId, String),
 }
 
-#[derive(Debug, Deserialize, DeriveSer)]
+#[derive(Debug)]
 pub enum InteractiveRequest {
     Reset,
     ChangePIN(Pin, Pin),
     SetPIN(Pin),
-    ChangeConfig(AuthConfigCommand),
-    CredentialManagement(CredManagementCmd),
-    BioEnrollment(BioEnrollmentCmd),
+    ChangeConfig(AuthConfigCommand, Option<PinUvAuthResult>),
+    CredentialManagement(CredManagementCmd, Option<PinUvAuthResult>),
+    BioEnrollment(BioEnrollmentCmd, Option<PinUvAuthResult>),
 }
 
 // Simply ignoring the Sender when serializing
@@ -82,8 +86,11 @@ pub enum StatusPinUv {
 #[derive(Debug)]
 pub enum InteractiveUpdate {
     StartManagement((Sender<InteractiveRequest>, Option<AuthenticatorInfo>)),
-    // How the collection of fingerprint worked, and how many samples have to still be taken
-    BioEnrollmentUpdate((LastEnrollmentSampleStatus, u64)),
+    // We provide the already determined PUAT to be able to issue more requests without
+    // forcing the user to enter another PIN.
+    BioEnrollmentUpdate((BioEnrollmentResult, Option<PinUvAuthResult>)),
+    CredentialManagementUpdate((CredentialManagementResult, Option<PinUvAuthResult>)),
+    AuthConfigUpdate((AuthConfigResult, Option<PinUvAuthResult>)),
 }
 
 #[derive(Debug)]

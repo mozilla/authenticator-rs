@@ -4,12 +4,11 @@
 
 use authenticator::{
     authenticatorservice::AuthenticatorService,
-    ctap2::{
-        commands::{
-            authenticator_config::{AuthConfigCommand, SetMinPINLength},
-            bio_enrollment::BioTemplateId,
-        },
-        server::{PublicKeyCredentialDescriptor, User},
+    ctap2::commands::{
+        authenticator_config::{AuthConfigCommand, AuthConfigResult, SetMinPINLength},
+        bio_enrollment::EnrollmentInfo,
+        credential_management::CredentialList,
+        PinUvAuthResult,
     },
     errors::AuthenticatorError,
     statecallback::StateCallback,
@@ -19,42 +18,12 @@ use authenticator::{
 };
 use getopts::Options;
 use log::debug;
-use std::{
-    env, io,
-    sync::{mpsc::Sender, Arc, Mutex},
-    thread,
-};
+use std::{env, io, sync::mpsc::Sender, thread};
 use std::{
     fmt::Display,
     io::Write,
     sync::mpsc::{channel, Receiver, RecvError},
 };
-
-#[derive(Debug, Clone, PartialEq)]
-enum Operation {
-    Quit,
-    ShowFullInfo(AuthenticatorInfo),
-    Reset,
-    Pin(PinOperation),
-    Configure(ConfigureOperation),
-    Credentials(CredentialsOperation),
-    Bio(BioOperation),
-}
-
-impl Display for Operation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Operation::Quit => write!(f, "Quit"),
-            Operation::ShowFullInfo(_) => write!(f, "Show full info"),
-            Operation::Reset => write!(f, "Reset"),
-            Operation::Pin(PinOperation::Change) => write!(f, "Change Pin"),
-            Operation::Pin(PinOperation::Set) => write!(f, "Set Pin"),
-            Operation::Configure(_) => write!(f, "Configure Authenticator"),
-            Operation::Credentials(_) => write!(f, "Manage Credentials"),
-            Operation::Bio(_) => write!(f, "Manage BioEnrollments"),
-        }
-    }
-}
 
 #[derive(Debug, PartialEq, Clone)]
 enum PinOperation {
@@ -67,6 +36,30 @@ enum ConfigureOperation {
     ToggleAlwaysUV,
     EnableEnterpriseAttestation,
     SetMinPINLength,
+}
+
+impl ConfigureOperation {
+    fn ask_user(info: &AuthenticatorInfo) -> Self {
+        let sub_level = Self::parse_possible_operations(info);
+        println!();
+        println!("What do you wish to do?");
+        let choice = ask_user_choice(&sub_level);
+        sub_level[choice].clone()
+    }
+
+    fn parse_possible_operations(info: &AuthenticatorInfo) -> Vec<Self> {
+        let mut configure_ops = vec![];
+        if info.options.authnr_cfg == Some(true) && info.options.always_uv.is_some() {
+            configure_ops.push(ConfigureOperation::ToggleAlwaysUV);
+        }
+        if info.options.authnr_cfg == Some(true) && info.options.set_min_pin_length.is_some() {
+            configure_ops.push(ConfigureOperation::SetMinPINLength);
+        }
+        if info.options.ep.is_some() {
+            configure_ops.push(ConfigureOperation::EnableEnterpriseAttestation);
+        }
+        configure_ops
+    }
 }
 
 impl Display for ConfigureOperation {
@@ -84,16 +77,42 @@ impl Display for ConfigureOperation {
 #[derive(Debug, Clone, PartialEq)]
 enum CredentialsOperation {
     List,
-    Delete(Option<PublicKeyCredentialDescriptor>),
-    UpdateUser(Option<(PublicKeyCredentialDescriptor, User)>),
+    Delete,
+    UpdateUser,
+}
+
+impl CredentialsOperation {
+    fn ask_user(info: &AuthenticatorInfo, creds: &CredentialList) -> Self {
+        let sub_level = Self::parse_possible_operations(info, creds);
+        println!();
+        println!("What do you wish to do?");
+        let choice = ask_user_choice(&sub_level);
+        sub_level[choice].clone()
+    }
+
+    fn parse_possible_operations(info: &AuthenticatorInfo, creds: &CredentialList) -> Vec<Self> {
+        let mut credentials_ops = vec![];
+        if info.options.cred_mgmt == Some(true)
+            || info.options.credential_mgmt_preview == Some(true)
+        {
+            credentials_ops.push(CredentialsOperation::List);
+        }
+        if creds.existing_resident_credentials_count > 0 {
+            credentials_ops.extend([
+                CredentialsOperation::Delete,
+                CredentialsOperation::UpdateUser,
+            ]);
+        }
+        credentials_ops
+    }
 }
 
 impl Display for CredentialsOperation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             CredentialsOperation::List => write!(f, "List credentials"),
-            CredentialsOperation::Delete(_) => write!(f, "Delete credentials"),
-            CredentialsOperation::UpdateUser(_) => write!(f, "Update user info"),
+            CredentialsOperation::Delete => write!(f, "Delete credentials"),
+            CredentialsOperation::UpdateUser => write!(f, "Update user info"),
         }
     }
 }
@@ -103,8 +122,37 @@ enum BioOperation {
     ShowInfo,
     Add,
     List,
-    Delete(Option<BioTemplateId>),
-    Rename(Option<(BioTemplateId, String)>),
+    Delete,
+    Rename,
+}
+
+impl BioOperation {
+    fn ask_user(info: &AuthenticatorInfo) -> Self {
+        let sub_level = Self::parse_possible_operations(info);
+        println!();
+        println!("What do you wish to do?");
+        let choice = ask_user_choice(&sub_level);
+        sub_level[choice].clone()
+    }
+
+    fn parse_possible_operations(info: &AuthenticatorInfo) -> Vec<Self> {
+        let mut bio_ops = vec![];
+        if info.options.bio_enroll.is_some()
+            || info.options.user_verification_mgmt_preview.is_some()
+        {
+            bio_ops.extend([BioOperation::ShowInfo, BioOperation::Add]);
+        }
+        if info.options.bio_enroll == Some(true)
+            || info.options.user_verification_mgmt_preview == Some(true)
+        {
+            bio_ops.extend([
+                BioOperation::Delete,
+                BioOperation::List,
+                BioOperation::Rename,
+            ]);
+        }
+        bio_ops
+    }
 }
 
 impl Display for BioOperation {
@@ -113,56 +161,84 @@ impl Display for BioOperation {
             BioOperation::ShowInfo => write!(f, "Show fingerprint sensor info"),
             BioOperation::List => write!(f, "List enrollments"),
             BioOperation::Add => write!(f, "Add enrollment"),
-            BioOperation::Delete(_) => write!(f, "Delete enrollment"),
-            BioOperation::Rename(_) => write!(f, "Rename enrollment"),
+            BioOperation::Delete => write!(f, "Delete enrollment"),
+            BioOperation::Rename => write!(f, "Rename enrollment"),
         }
     }
 }
 
-struct PossibleOperations {
-    general_ops: Vec<Operation>,
-    configure_ops: Vec<ConfigureOperation>,
-    credentials_ops: Vec<CredentialsOperation>,
-    bio_ops: Vec<BioOperation>,
+#[derive(Debug, Clone, PartialEq)]
+enum TopLevelOperation {
+    Quit,
+    Reset,
+    ShowFullInfo,
+    Pin(PinOperation),
+    Configure,
+    Credentials,
+    Bio,
 }
 
-impl PossibleOperations {
-    fn ask_user(&self) -> Operation {
-        let top_level = self.get_top_level_ops();
+impl Display for TopLevelOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TopLevelOperation::Quit => write!(f, "Quit"),
+            TopLevelOperation::Reset => write!(f, "Reset"),
+            TopLevelOperation::ShowFullInfo => write!(f, "Show full info"),
+            TopLevelOperation::Pin(PinOperation::Change) => write!(f, "Change Pin"),
+            TopLevelOperation::Pin(PinOperation::Set) => write!(f, "Set Pin"),
+            TopLevelOperation::Configure => write!(f, "Configure Authenticator"),
+            TopLevelOperation::Credentials => write!(f, "Manage Credentials"),
+            TopLevelOperation::Bio => write!(f, "Manage BioEnrollments"),
+        }
+    }
+}
+
+impl TopLevelOperation {
+    fn ask_user(info: &AuthenticatorInfo) -> TopLevelOperation {
+        let top_level = Self::parse_possible_operations(info);
+        println!();
         println!("What do you wish to do?");
         let choice = ask_user_choice(&top_level);
-        match &top_level[choice] {
-            Operation::Configure(_) => {
-                println!("Which configure operation?");
-                let subchoice = ask_user_choice(&self.configure_ops);
-                Operation::Configure(self.configure_ops[subchoice].clone())
-            }
-            Operation::Credentials(_) => {
-                println!("Which credential management operation?");
-                let subchoice = ask_user_choice(&self.credentials_ops);
-                Operation::Credentials(self.credentials_ops[subchoice].clone())
-            }
-            Operation::Bio(_) => {
-                println!("Which bio enrollment operation?");
-                let subchoice = ask_user_choice(&self.bio_ops);
-                Operation::Bio(self.bio_ops[subchoice].clone())
-            }
-            x => x.clone(),
-        }
+        top_level[choice].clone()
     }
 
-    fn get_top_level_ops(&self) -> Vec<Operation> {
-        let mut ops = self.general_ops.clone();
-        if !self.configure_ops.is_empty() {
-            // We don't really care what specific Operation this is
-            ops.push(Operation::Configure(ConfigureOperation::ToggleAlwaysUV));
+    fn parse_possible_operations(info: &AuthenticatorInfo) -> Vec<TopLevelOperation> {
+        let mut ops = vec![
+            TopLevelOperation::Quit,
+            TopLevelOperation::Reset,
+            TopLevelOperation::ShowFullInfo,
+        ];
+
+        // PIN-related
+        match info.options.client_pin {
+            None => {}
+            Some(true) => ops.push(TopLevelOperation::Pin(PinOperation::Change)),
+            Some(false) => ops.push(TopLevelOperation::Pin(PinOperation::Set)),
         }
-        if !self.credentials_ops.is_empty() {
-            ops.push(Operation::Credentials(CredentialsOperation::List));
+
+        // Authenticator-Configuration
+        if info.options.authnr_cfg == Some(true)
+            && (info.options.always_uv.is_some()
+                || info.options.set_min_pin_length.is_some()
+                || info.options.ep.is_some())
+        {
+            ops.push(TopLevelOperation::Configure);
         }
-        if !self.bio_ops.is_empty() {
-            ops.push(Operation::Bio(BioOperation::Add));
+
+        // Credential Management
+        if info.options.cred_mgmt == Some(true)
+            || info.options.credential_mgmt_preview == Some(true)
+        {
+            ops.push(TopLevelOperation::Credentials);
         }
+
+        // Bio Enrollment
+        if info.options.bio_enroll.is_some()
+            || info.options.user_verification_mgmt_preview.is_some()
+        {
+            ops.push(TopLevelOperation::Bio);
+        }
+
         ops
     }
 }
@@ -170,62 +246,6 @@ impl PossibleOperations {
 fn print_usage(program: &str, opts: Options) {
     let brief = format!("Usage: {program} [options]");
     print!("{}", opts.usage(&brief));
-}
-
-fn parse_possible_operations(info: &AuthenticatorInfo) -> PossibleOperations {
-    let mut general_ops = vec![Operation::Quit];
-    general_ops.push(Operation::Reset);
-    general_ops.push(Operation::ShowFullInfo(info.clone()));
-
-    // PIN-related
-    match info.options.client_pin {
-        None => {}
-        Some(true) => general_ops.push(Operation::Pin(PinOperation::Change)),
-        Some(false) => general_ops.push(Operation::Pin(PinOperation::Set)),
-    }
-
-    // Authenticator-Configuration
-    let mut configure_ops = vec![];
-    if info.options.authnr_cfg == Some(true) && info.options.always_uv.is_some() {
-        configure_ops.push(ConfigureOperation::ToggleAlwaysUV);
-    }
-    if info.options.authnr_cfg == Some(true) && info.options.set_min_pin_length.is_some() {
-        configure_ops.push(ConfigureOperation::SetMinPINLength);
-    }
-    if info.options.ep.is_some() {
-        configure_ops.push(ConfigureOperation::EnableEnterpriseAttestation);
-    }
-
-    // Credential Management
-    let mut credentials_ops = vec![];
-    if info.options.cred_mgmt == Some(true) || info.options.credential_mgmt_preview == Some(true) {
-        credentials_ops.extend([
-            CredentialsOperation::List,
-            CredentialsOperation::Delete(None),
-            CredentialsOperation::UpdateUser(None),
-        ]);
-    }
-
-    // Bio Enrollment
-    let mut bio_ops = vec![];
-    if info.options.bio_enroll.is_some() || info.options.user_verification_mgmt_preview.is_some() {
-        bio_ops.extend([BioOperation::ShowInfo, BioOperation::Add]);
-    }
-    if info.options.bio_enroll == Some(true)
-        || info.options.user_verification_mgmt_preview == Some(true)
-    {
-        bio_ops.extend([
-            BioOperation::Delete(None),
-            BioOperation::List,
-            BioOperation::Rename(None),
-        ]);
-    }
-    PossibleOperations {
-        general_ops,
-        configure_ops,
-        credentials_ops,
-        bio_ops,
-    }
 }
 
 fn ask_user_choice<T: Display>(choices: &[T]) -> usize {
@@ -254,43 +274,33 @@ fn ask_user_choice<T: Display>(choices: &[T]) -> usize {
     }
 }
 
-fn execute_chosen_operation(operation: &Operation, tx: Sender<InteractiveRequest>) {
-    match operation {
-        Operation::Quit => {
-            return;
-        }
-        Operation::ShowFullInfo(info) => println!("Authenticator Info {:#?}", info),
-        Operation::Reset => tx
-            .send(InteractiveRequest::Reset)
-            .expect("Failed to send Reset request."),
-        Operation::Pin(op) => {
-            let raw_new_pin =
-                rpassword::prompt_password_stderr("Enter new PIN: ").expect("Failed to read PIN");
-            let new_pin = Pin::new(&raw_new_pin);
-            if *op == PinOperation::Change {
-                let raw_curr_pin = rpassword::prompt_password_stderr("Enter current PIN: ")
-                    .expect("Failed to read PIN");
-                let curr_pin = Pin::new(&raw_curr_pin);
-                tx.send(InteractiveRequest::ChangePIN(curr_pin, new_pin))
-                    .expect("Failed to send PIN-change request");
-            } else {
-                tx.send(InteractiveRequest::SetPIN(new_pin))
-                    .expect("Failed to send PIN-set request");
-            }
-        }
-        Operation::Configure(ConfigureOperation::ToggleAlwaysUV) => {
+fn handle_authenticator_config(
+    res: Option<AuthConfigResult>,
+    puat: Option<PinUvAuthResult>,
+    auth_info: &mut Option<AuthenticatorInfo>,
+    tx: &Sender<InteractiveRequest>,
+) {
+    if let Some(AuthConfigResult::Success(info)) = res {
+        println!("{:#?}", info.options);
+        *auth_info = Some(info);
+    }
+    let choice = ConfigureOperation::ask_user(auth_info.as_ref().unwrap());
+    match choice {
+        ConfigureOperation::ToggleAlwaysUV => {
             tx.send(InteractiveRequest::ChangeConfig(
                 AuthConfigCommand::ToggleAlwaysUv,
+                puat,
             ))
             .expect("Failed to send ToggleAlwaysUV request.");
         }
-        Operation::Configure(ConfigureOperation::EnableEnterpriseAttestation) => {
+        ConfigureOperation::EnableEnterpriseAttestation => {
             tx.send(InteractiveRequest::ChangeConfig(
                 AuthConfigCommand::EnableEnterpriseAttestation,
+                puat,
             ))
             .expect("Failed to send EnableEnterpriseAttestation request.");
         }
-        Operation::Configure(ConfigureOperation::SetMinPINLength) => {
+        ConfigureOperation::SetMinPINLength => {
             let mut length = String::new();
             while length.trim().parse::<u64>().is_err() {
                 length.clear();
@@ -312,111 +322,355 @@ fn execute_chosen_operation(operation: &Operation, tx: Sender<InteractiveRequest
 
             tx.send(InteractiveRequest::ChangeConfig(
                 AuthConfigCommand::SetMinPINLength(cmd),
+                puat,
             ))
             .expect("Failed to send SetMinPINLength request.");
-        }
-        Operation::Credentials(CredentialsOperation::List)
-        | Operation::Credentials(CredentialsOperation::Delete(None))
-        | Operation::Credentials(CredentialsOperation::UpdateUser(None)) => {
-            tx.send(InteractiveRequest::CredentialManagement(
-                CredManagementCmd::GetCredentials,
-            ))
-            .expect("Failed to send GetCredentials request.");
-        }
-        Operation::Credentials(CredentialsOperation::Delete(Some(id))) => {
-            tx.send(InteractiveRequest::CredentialManagement(
-                CredManagementCmd::DeleteCredential(id.clone()),
-            ))
-            .expect("Failed to send DeleteCredentials request.");
-        }
-        Operation::Credentials(CredentialsOperation::UpdateUser(Some((id, user)))) => {
-            tx.send(InteractiveRequest::CredentialManagement(
-                CredManagementCmd::UpdateUserInformation((id.clone(), user.clone())),
-            ))
-            .expect("Failed to send UpdateUserinformation request.");
-        }
-        Operation::Bio(BioOperation::Add) => {
-            let mut input = String::new();
-            print!(
-                "The name of the new bio enrollment (leave empty if you don't want to name it): "
-            );
-            io::stdout()
-                .lock()
-                .flush()
-                .expect("Failed to flush stdout!");
-            io::stdin()
-                .read_line(&mut input)
-                .expect("error: unable to read user input");
-            input = input.trim().to_string();
-            let name = if input.is_empty() { None } else { Some(input) };
-            tx.send(InteractiveRequest::BioEnrollment(
-                BioEnrollmentCmd::StartNewEnrollment(name),
-            ))
-            .expect("Failed to send StartNewEnrollment request.");
-        }
-        Operation::Bio(BioOperation::List)
-        | Operation::Bio(BioOperation::Delete(None))
-        | Operation::Bio(BioOperation::Rename(None)) => {
-            tx.send(InteractiveRequest::BioEnrollment(
-                BioEnrollmentCmd::GetEnrollments,
-            ))
-            .expect("Failed to send GetEnrollments request.");
-        }
-        Operation::Bio(BioOperation::Delete(Some(id))) => {
-            tx.send(InteractiveRequest::BioEnrollment(
-                BioEnrollmentCmd::DeleteEnrollment(id.clone()),
-            ))
-            .expect("Failed to send GetEnrollments request.");
-        }
-        Operation::Bio(BioOperation::Rename(Some((id, name)))) => {
-            tx.send(InteractiveRequest::BioEnrollment(
-                BioEnrollmentCmd::ChangeName((id.clone(), name.clone())),
-            ))
-            .expect("Failed to send GetEnrollments request.");
-        }
-        Operation::Bio(BioOperation::ShowInfo) => {
-            tx.send(InteractiveRequest::BioEnrollment(
-                BioEnrollmentCmd::GetFingerprintSensorInfo,
-            ))
-            .expect("Failed to send GetFingerprintSensorInfo request.");
         }
     }
 }
 
-fn interactive_status_callback(
-    status_rx: Receiver<StatusUpdate>,
-    last_user_choice: Arc<Mutex<Operation>>,
+fn handle_credential_management(
+    res: Option<CredentialManagementResult>,
+    puat: Option<PinUvAuthResult>,
+    auth_info: &mut Option<AuthenticatorInfo>,
+    tx: &Sender<InteractiveRequest>,
 ) {
+    match res {
+        Some(CredentialManagementResult::CredentialList(credlist)) => {
+            let mut creds = vec![];
+            for rp in &credlist.credential_list {
+                for cred in &rp.credentials {
+                    creds.push((
+                        rp.rp.name.clone(),
+                        cred.user.clone(),
+                        cred.credential_id.clone(),
+                    ));
+                }
+            }
+            let display_creds: Vec<_> = creds
+                .iter()
+                .map(|(rp, user, id)| format!("{:?} - {:?} - {:?}", rp, user, id))
+                .collect();
+            for (idx, op) in display_creds.iter().enumerate() {
+                println!("({idx}) {op}");
+            }
+
+            loop {
+                match CredentialsOperation::ask_user(auth_info.as_ref().unwrap(), &credlist) {
+                    CredentialsOperation::List => {
+                        let mut idx = 0;
+                        for rp in credlist.credential_list.iter() {
+                            for cred in &rp.credentials {
+                                println!("({idx}) - {:?}: {:?}", rp.rp.name, cred);
+                                idx += 1;
+                            }
+                        }
+                        continue;
+                    }
+                    CredentialsOperation::Delete => {
+                        let choice = ask_user_choice(&display_creds);
+                        tx.send(InteractiveRequest::CredentialManagement(
+                            CredManagementCmd::DeleteCredential(creds[choice].2.clone()),
+                            puat,
+                        ))
+                        .expect("Failed to send DeleteCredentials request.");
+                        break;
+                    }
+                    CredentialsOperation::UpdateUser => {
+                        let choice = ask_user_choice(&display_creds);
+                        // Updating username. Asking for the new one.
+                        let mut input = String::new();
+                        print!("New username: ");
+                        io::stdout()
+                            .lock()
+                            .flush()
+                            .expect("Failed to flush stdout!");
+                        io::stdin()
+                            .read_line(&mut input)
+                            .expect("error: unable to read user input");
+                        input = input.trim().to_string();
+                        let name = if input.is_empty() { None } else { Some(input) };
+                        let mut new_user = creds[choice].1.clone();
+                        new_user.name = name;
+                        tx.send(InteractiveRequest::CredentialManagement(
+                            CredManagementCmd::UpdateUserInformation(
+                                creds[choice].2.clone(),
+                                new_user,
+                            ),
+                            puat,
+                        ))
+                        .expect("Failed to send UpdateUserinformation request.");
+                        break;
+                    }
+                }
+            }
+        }
+        None
+        | Some(CredentialManagementResult::DeleteSucess)
+        | Some(CredentialManagementResult::UpdateSuccess) => {
+            tx.send(InteractiveRequest::CredentialManagement(
+                CredManagementCmd::GetCredentials,
+                puat,
+            ))
+            .expect("Failed to send GetCredentials request.");
+        }
+    }
+}
+
+fn ask_user_bio_options(
+    biolist: Vec<EnrollmentInfo>,
+    puat: Option<PinUvAuthResult>,
+    auth_info: &mut Option<AuthenticatorInfo>,
+    tx: &Sender<InteractiveRequest>,
+) {
+    let display_bios: Vec<_> = biolist
+        .iter()
+        .map(|x| format!("{:?}: {:?}", x.template_friendly_name, x.template_id))
+        .collect();
+    loop {
+        match BioOperation::ask_user(auth_info.as_ref().unwrap()) {
+            BioOperation::List => {
+                for (idx, bio) in display_bios.iter().enumerate() {
+                    println!("({idx}) - {bio}");
+                }
+                continue;
+            }
+            BioOperation::ShowInfo => {
+                tx.send(InteractiveRequest::BioEnrollment(
+                    BioEnrollmentCmd::GetFingerprintSensorInfo,
+                    puat,
+                ))
+                .expect("Failed to send GetFingerprintSensorInfo request.");
+                break;
+            }
+            BioOperation::Delete => {
+                let choice = ask_user_choice(&display_bios);
+                tx.send(InteractiveRequest::BioEnrollment(
+                    BioEnrollmentCmd::DeleteEnrollment(biolist[choice].template_id.clone()),
+                    puat,
+                ))
+                .expect("Failed to send GetEnrollments request.");
+                break;
+            }
+            BioOperation::Rename => {
+                let choice = ask_user_choice(&display_bios);
+                let chosen_id = biolist[choice].template_id.clone();
+                // Updating enrollment name. Asking for the new one.
+                let mut input = String::new();
+                print!("New name: ");
+                io::stdout()
+                    .lock()
+                    .flush()
+                    .expect("Failed to flush stdout!");
+                io::stdin()
+                    .read_line(&mut input)
+                    .expect("error: unable to read user input");
+                let name = input.trim().to_string();
+                tx.send(InteractiveRequest::BioEnrollment(
+                    BioEnrollmentCmd::ChangeName(chosen_id, name.clone()),
+                    puat,
+                ))
+                .expect("Failed to send GetEnrollments request.");
+                break;
+            }
+            BioOperation::Add => {
+                let mut input = String::new();
+                print!(
+                "The name of the new bio enrollment (leave empty if you don't want to name it): "
+            );
+                io::stdout()
+                    .lock()
+                    .flush()
+                    .expect("Failed to flush stdout!");
+                io::stdin()
+                    .read_line(&mut input)
+                    .expect("error: unable to read user input");
+                input = input.trim().to_string();
+                let name = if input.is_empty() { None } else { Some(input) };
+                tx.send(InteractiveRequest::BioEnrollment(
+                    BioEnrollmentCmd::StartNewEnrollment(name),
+                    puat,
+                ))
+                .expect("Failed to send StartNewEnrollment request.");
+                break;
+            }
+        }
+    }
+}
+
+fn handle_bio_enrollments(
+    res: Option<BioEnrollmentResult>,
+    puat: Option<PinUvAuthResult>,
+    auth_info: &mut Option<AuthenticatorInfo>,
+    tx: &Sender<InteractiveRequest>,
+) {
+    match res {
+        Some(BioEnrollmentResult::EnrollmentList(biolist)) => {
+            ask_user_bio_options(biolist, puat, auth_info, tx);
+        }
+        None => {
+            if BioOperation::parse_possible_operations(auth_info.as_ref().unwrap())
+                .contains(&BioOperation::List)
+            {
+                tx.send(InteractiveRequest::BioEnrollment(
+                    BioEnrollmentCmd::GetEnrollments,
+                    puat,
+                ))
+                .expect("Failed to send GetEnrollments request.");
+            } else {
+                ask_user_bio_options(vec![], puat, auth_info, tx);
+            }
+        }
+        Some(BioEnrollmentResult::UpdateSuccess) => {
+            tx.send(InteractiveRequest::BioEnrollment(
+                BioEnrollmentCmd::GetEnrollments,
+                puat,
+            ))
+            .expect("Failed to send GetEnrollments request.");
+        }
+        Some(BioEnrollmentResult::DeleteSucess(info)) => {
+            *auth_info = Some(info.clone());
+            if BioOperation::parse_possible_operations(&info).contains(&BioOperation::List) {
+                tx.send(InteractiveRequest::BioEnrollment(
+                    BioEnrollmentCmd::GetEnrollments,
+                    puat,
+                ))
+                .expect("Failed to send GetEnrollments request.");
+            } else {
+                ask_user_bio_options(vec![], puat, auth_info, tx);
+            }
+        }
+        Some(BioEnrollmentResult::AddSuccess(info)) => {
+            *auth_info = Some(info);
+            tx.send(InteractiveRequest::BioEnrollment(
+                BioEnrollmentCmd::GetEnrollments,
+                puat,
+            ))
+            .expect("Failed to send GetEnrollments request.");
+        }
+        Some(BioEnrollmentResult::FingerprintSensorInfo(info)) => {
+            println!("{info:#?}");
+            if BioOperation::parse_possible_operations(auth_info.as_ref().unwrap())
+                .contains(&BioOperation::List)
+            {
+                tx.send(InteractiveRequest::BioEnrollment(
+                    BioEnrollmentCmd::GetEnrollments,
+                    puat,
+                ))
+                .expect("Failed to send GetEnrollments request.");
+            } else {
+                ask_user_bio_options(vec![], puat, auth_info, tx);
+            }
+        }
+        Some(BioEnrollmentResult::SampleStatus(last_sample_status, remaining_samples)) => {
+            println!("Last sample status: {last_sample_status:?}, remaining samples: {remaining_samples:?}");
+        }
+    }
+}
+
+fn interactive_status_callback(status_rx: Receiver<StatusUpdate>) {
+    let mut tx = None;
+    let mut auth_info = None;
     loop {
         match status_rx.recv() {
             Ok(StatusUpdate::InteractiveManagement(InteractiveUpdate::StartManagement((
-                tx,
-                auth_info,
+                tx_new,
+                auth_info_new,
             )))) => {
-                let info = match auth_info {
+                let info = match auth_info_new {
                     Some(info) => info,
                     None => {
                         println!("Device only supports CTAP1 and can't be managed.");
                         return;
                     }
                 };
-                let last_choice = last_user_choice.lock().unwrap().clone();
-                let operation = match last_choice {
-                    Operation::Quit => {
-                        let operations = parse_possible_operations(&info);
-                        let choice = operations.ask_user();
-                        *last_user_choice.lock().unwrap() = choice.clone();
-                        choice
+                auth_info = Some(info.clone());
+                tx = Some(tx_new);
+                match TopLevelOperation::ask_user(&info) {
+                    TopLevelOperation::Quit => {
+                        return;
                     }
-                    operation => operation.clone(),
-                };
-                execute_chosen_operation(&operation, tx);
+                    TopLevelOperation::Reset => tx
+                        .as_ref()
+                        .unwrap()
+                        .send(InteractiveRequest::Reset)
+                        .expect("Failed to send Reset request."),
+                    TopLevelOperation::ShowFullInfo => {
+                        println!("Authenticator Info {:#?}", info);
+                        return;
+                    }
+                    TopLevelOperation::Pin(op) => {
+                        let raw_new_pin = rpassword::prompt_password_stderr("Enter new PIN: ")
+                            .expect("Failed to read PIN");
+                        let new_pin = Pin::new(&raw_new_pin);
+                        if op == PinOperation::Change {
+                            let raw_curr_pin =
+                                rpassword::prompt_password_stderr("Enter current PIN: ")
+                                    .expect("Failed to read PIN");
+                            let curr_pin = Pin::new(&raw_curr_pin);
+                            tx.as_ref()
+                                .unwrap()
+                                .send(InteractiveRequest::ChangePIN(curr_pin, new_pin))
+                                .expect("Failed to send PIN-change request");
+                        } else {
+                            tx.as_ref()
+                                .unwrap()
+                                .send(InteractiveRequest::SetPIN(new_pin))
+                                .expect("Failed to send PIN-set request");
+                        }
+                    }
+                    TopLevelOperation::Configure => handle_authenticator_config(
+                        None,
+                        None,
+                        &mut auth_info,
+                        tx.as_ref().unwrap(),
+                    ),
+                    TopLevelOperation::Credentials => handle_credential_management(
+                        None,
+                        None,
+                        &mut auth_info,
+                        tx.as_ref().unwrap(),
+                    ),
+                    TopLevelOperation::Bio => {
+                        handle_bio_enrollments(None, None, &mut auth_info, tx.as_ref().unwrap())
+                    }
+                }
+                continue;
+            }
+            Ok(StatusUpdate::InteractiveManagement(InteractiveUpdate::AuthConfigUpdate((
+                cfg_result,
+                puat_res,
+            )))) => {
+                handle_authenticator_config(
+                    Some(cfg_result),
+                    puat_res,
+                    &mut auth_info,
+                    tx.as_ref().unwrap(),
+                );
+                continue;
+            }
+            Ok(StatusUpdate::InteractiveManagement(
+                InteractiveUpdate::CredentialManagementUpdate((cfg_result, puat_res)),
+            )) => {
+                handle_credential_management(
+                    Some(cfg_result),
+                    puat_res,
+                    &mut auth_info,
+                    tx.as_ref().unwrap(),
+                );
+                continue;
             }
             Ok(StatusUpdate::InteractiveManagement(InteractiveUpdate::BioEnrollmentUpdate((
-                last_sample_status,
-                remaining_samples,
+                bio_res,
+                puat_res,
             )))) => {
-                println!("Last sample status: {last_sample_status:?}, remaining samples: {remaining_samples:?}");
+                handle_bio_enrollments(
+                    Some(bio_res),
+                    puat_res,
+                    &mut auth_info,
+                    tx.as_ref().unwrap(),
+                );
+                continue;
             }
             Ok(StatusUpdate::SelectDeviceNotice) => {
                 println!("STATUS: Please select a device by touching one of them.");
@@ -516,116 +770,34 @@ fn main() {
         }
     };
 
-    let last_user_choice = Arc::new(Mutex::new(Operation::Quit));
-    loop {
-        let user_choice_clone = last_user_choice.clone();
-        let (status_tx, status_rx) = channel::<StatusUpdate>();
-        thread::spawn(move || interactive_status_callback(status_rx, user_choice_clone));
+    let (status_tx, status_rx) = channel::<StatusUpdate>();
+    thread::spawn(move || interactive_status_callback(status_rx));
 
-        let (manage_tx, manage_rx) = channel();
-        let state_callback =
-            StateCallback::<Result<ManageResult, AuthenticatorError>>::new(Box::new(move |rv| {
-                manage_tx.send(rv).unwrap();
-            }));
+    let (manage_tx, manage_rx) = channel();
+    let state_callback =
+        StateCallback::<Result<ManageResult, AuthenticatorError>>::new(Box::new(move |rv| {
+            manage_tx.send(rv).unwrap();
+        }));
 
-        match manager.manage(timeout_ms, status_tx, state_callback) {
-            Ok(_) => {
-                debug!("Started management");
-            }
-            Err(e) => {
-                println!("Error! Failed to start interactive management: {:?}", e);
-                return;
-            }
+    match manager.manage(timeout_ms, status_tx, state_callback) {
+        Ok(_) => {
+            debug!("Started management");
         }
-        let manage_result = manage_rx
-            .recv()
-            .expect("Problem receiving, unable to continue");
-        let last_choice = last_user_choice.lock().unwrap().clone();
-        match manage_result {
-            Ok(ManageResult::CredManagement(CredentialManagementResult::CredentialList(
-                credlist,
-            ))) if last_choice == Operation::Credentials(CredentialsOperation::Delete(None))
-                || last_choice
-                    == Operation::Credentials(CredentialsOperation::UpdateUser(None)) =>
-            {
-                let mut creds = vec![];
-                for rp in credlist.credential_list {
-                    for cred in rp.credentials {
-                        creds.push((rp.rp.name.clone(), cred.user, cred.credential_id));
-                    }
-                }
-                let display_creds: Vec<_> = creds
-                    .iter()
-                    .map(|(rp, user, id)| format!("{:?} - {:?} - {:?}", rp, user, id))
-                    .collect();
-                let choice = ask_user_choice(&display_creds);
-                if last_choice == Operation::Credentials(CredentialsOperation::Delete(None)) {
-                    *last_user_choice.lock().unwrap() = Operation::Credentials(
-                        CredentialsOperation::Delete(Some(creds[choice].2.clone())),
-                    );
-                    continue;
-                } else {
-                    // Updating username. Asking for the new one.
-                    let mut input = String::new();
-                    print!("New username: ");
-                    io::stdout()
-                        .lock()
-                        .flush()
-                        .expect("Failed to flush stdout!");
-                    io::stdin()
-                        .read_line(&mut input)
-                        .expect("error: unable to read user input");
-                    input = input.trim().to_string();
-                    let name = if input.is_empty() { None } else { Some(input) };
-                    let mut new_user = creds[choice].1.clone();
-                    new_user.name = name;
-                    *last_user_choice.lock().unwrap() = Operation::Credentials(
-                        CredentialsOperation::UpdateUser(Some((creds[choice].2.clone(), new_user))),
-                    );
-                    continue;
-                }
-            }
-            Ok(ManageResult::BioEnrollment(BioEnrollmentResult::EnrollmentList(biolist)))
-                if last_choice == Operation::Bio(BioOperation::Delete(None))
-                    || last_choice == Operation::Bio(BioOperation::Rename(None)) =>
-            {
-                let display_bios: Vec<_> = biolist
-                    .iter()
-                    .map(|x| format!("{:?} - {:?}", x.template_friendly_name, x.template_id))
-                    .collect();
-                let choice = ask_user_choice(&display_bios);
-                if last_choice == Operation::Bio(BioOperation::Delete(None)) {
-                    *last_user_choice.lock().unwrap() = Operation::Bio(BioOperation::Delete(Some(
-                        biolist[choice].template_id.clone(),
-                    )));
-                    continue;
-                } else {
-                    // Updating enrollment name. Asking for the new one.
-                    let mut input = String::new();
-                    print!("New name: ");
-                    io::stdout()
-                        .lock()
-                        .flush()
-                        .expect("Failed to flush stdout!");
-                    io::stdin()
-                        .read_line(&mut input)
-                        .expect("error: unable to read user input");
-                    let name = input.trim().to_string();
-                    *last_user_choice.lock().unwrap() = Operation::Bio(BioOperation::Rename(Some(
-                        (biolist[choice].template_id.clone(), name),
-                    )));
-                    continue;
-                }
-            }
-            Ok(r) => {
-                println!("Success! Result = {r:?}");
-                break;
-            }
-            Err(e) => {
-                println!("Error! {:?}", e);
-                break;
-            }
-        };
+        Err(e) => {
+            println!("Error! Failed to start interactive management: {:?}", e);
+            return;
+        }
     }
+    let manage_result = manage_rx
+        .recv()
+        .expect("Problem receiving, unable to continue");
+    match manage_result {
+        Ok(r) => {
+            println!("Success! Result = {r:?}");
+        }
+        Err(e) => {
+            println!("Error! {:?}", e);
+        }
+    };
     println!("Done");
 }
