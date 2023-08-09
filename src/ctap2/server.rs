@@ -1,5 +1,6 @@
 use crate::crypto::COSEAlgorithm;
 use crate::{errors::AuthenticatorError, AuthenticatorTransports, KeyHandle};
+use base64::Engine;
 use serde::de::MapAccess;
 use serde::{
     de::{Error as SerdeError, Visitor},
@@ -16,7 +17,7 @@ pub struct RpIdHash(pub [u8; 32]);
 
 impl fmt::Debug for RpIdHash {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let value = base64::encode_config(self.0, base64::URL_SAFE_NO_PAD);
+        let value = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(self.0);
         write!(f, "RpIdHash({value})")
     }
 }
