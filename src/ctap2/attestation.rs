@@ -462,6 +462,16 @@ pub struct AttestationObject {
     pub att_stmt: AttestationStatement,
 }
 
+impl AttestationObject {
+    pub fn anonymize(&mut self) {
+        // Remove the attestation statement and the AAGUID from the authenticator data.
+        self.att_stmt = AttestationStatement::None;
+        if let Some(credential_data) = self.auth_data.credential_data.as_mut() {
+            credential_data.aaguid = AAGuid::default();
+        }
+    }
+}
+
 impl Serialize for AttestationObject {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -488,7 +498,6 @@ impl Serialize for AttestationObject {
                 map.serialize_entry(&"attStmt", v)?; // (2) "attStmt"
             }
         }
-
         map.serialize_entry(&"authData", &self.auth_data)?; // (3) "authData"
         map.end()
     }
@@ -499,7 +508,7 @@ pub mod test {
     use super::super::utils::from_slice_stream;
     use super::*;
     use crate::crypto::{COSEAlgorithm, COSEEC2Key, COSEKey, COSEKeyType, Curve};
-    use serde_cbor::from_slice;
+    use serde_cbor::{from_slice, to_vec};
 
     const SAMPLE_ATTESTATION_STMT_NONE: [u8; 19] = [
         0xa2, // map(2)
@@ -951,6 +960,44 @@ pub mod test {
         let expected = create_attestation_obj();
 
         assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn test_anonymize_att_obj() {
+        // Anonymize should prevent identifying data in the attestation statement from being
+        // serialized.
+        let mut att_obj = create_attestation_obj();
+
+        // This test assumes that the sample attestation object contains identifying information
+        assert_ne!(att_obj.att_stmt, AttestationStatement::None);
+        assert_ne!(
+            att_obj
+                .auth_data
+                .credential_data
+                .as_ref()
+                .expect("credential_data should be Some")
+                .aaguid,
+            AAGuid::default()
+        );
+
+        att_obj.anonymize();
+
+        // Write the attestation object out to bytes and read it back. The result should not
+        // have an attestation statement, and it should have the default AAGUID.
+        let encoded_att_obj = to_vec(&att_obj).expect("could not serialize anonymized att_obj");
+        let att_obj: AttestationObject =
+            from_slice(&encoded_att_obj).expect("could not deserialize anonymized att_obj");
+
+        assert_eq!(att_obj.att_stmt, AttestationStatement::None);
+        assert_eq!(
+            att_obj
+                .auth_data
+                .credential_data
+                .as_ref()
+                .expect("credential_data should be Some")
+                .aaguid,
+            AAGuid::default()
+        );
     }
 
     #[test]
