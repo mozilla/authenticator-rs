@@ -477,6 +477,7 @@ pub mod test {
     use crate::transport::device_selector::Device;
     use crate::transport::hid::HIDDevice;
     use crate::transport::{FidoDevice, FidoProtocol};
+    use base64::Engine;
 
     fn create_attestation_obj() -> AttestationObject {
         AttestationObject {
@@ -584,11 +585,9 @@ pub mod test {
                 icon: None,
             }),
             Some(User {
-                id: base64::decode_config(
-                    "MIIBkzCCATigAwIBAjCCAZMwggE4oAMCAQIwggGTMII=",
-                    base64::URL_SAFE_NO_PAD,
-                )
-                .unwrap(),
+                id: base64::engine::general_purpose::URL_SAFE
+                    .decode("MIIBkzCCATigAwIBAjCCAZMwggE4oAMCAQIwggGTMII=")
+                    .unwrap(),
                 icon: Some("https://pics.example.com/00/p/aBjjjpqPb.png".to_string()),
                 name: Some(String::from("johnpsmith@example.com")),
                 display_name: Some(String::from("John P. Smith")),
@@ -643,11 +642,9 @@ pub mod test {
                 icon: None,
             }),
             Some(User {
-                id: base64::decode_config(
-                    "MIIBkzCCATigAwIBAjCCAZMwggE4oAMCAQIwggGTMII=",
-                    base64::URL_SAFE_NO_PAD,
-                )
-                .unwrap(),
+                id: base64::engine::general_purpose::URL_SAFE
+                    .decode("MIIBkzCCATigAwIBAjCCAZMwggE4oAMCAQIwggGTMII=")
+                    .unwrap(),
                 icon: Some("https://pics.example.com/00/p/aBjjjpqPb.png".to_string()),
                 name: Some(String::from("johnpsmith@example.com")),
                 display_name: Some(String::from("John P. Smith")),

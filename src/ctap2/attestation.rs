@@ -4,6 +4,7 @@ use crate::ctap2::commands::CommandError;
 use crate::ctap2::server::RpIdHash;
 use crate::ctap2::utils::serde_parse_err;
 use crate::{crypto::COSEKey, errors::AuthenticatorError};
+use base64::Engine;
 use serde::ser::{Error as SerError, SerializeMap, Serializer};
 use serde::{
     de::{Error as SerdeError, MapAccess, Visitor},
@@ -321,7 +322,7 @@ pub struct Signature(#[serde(with = "serde_bytes")] pub Vec<u8>);
 
 impl fmt::Debug for Signature {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let value = base64::encode_config(&self.0, base64::URL_SAFE_NO_PAD);
+        let value = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&self.0);
         write!(f, "Signature({value})")
     }
 }
