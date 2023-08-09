@@ -344,6 +344,8 @@ impl From<&[u8]> for Signature {
 }
 
 #[derive(Debug, PartialEq, Eq, Deserialize)]
+// The tag and content attributes here are really for AttestationObject, which contains an
+// "internally tagged" AttestationStatement.
 #[serde(tag = "fmt", content = "attStmt", rename_all = "lowercase")]
 pub enum AttestationStatement {
     #[serde(deserialize_with = "deserialize_none_att_stmt")]
