@@ -8,8 +8,8 @@ use crate::crypto::{
     PinUvAuthParam, PinUvAuthToken,
 };
 use crate::ctap2::attestation::{
-    AAGuid, AttestationStatement, AttestationStatementFidoU2F, AttestedCredentialData,
-    AuthenticatorData, AuthenticatorDataFlags,
+    AAGuid, AttestationObject, AttestationStatement, AttestationStatementFidoU2F,
+    AttestedCredentialData, AuthenticatorData, AuthenticatorDataFlags,
 };
 use crate::ctap2::client_data::ClientDataHash;
 use crate::ctap2::server::{
@@ -32,8 +32,7 @@ use std::io::{Cursor, Read};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct MakeCredentialsResult {
-    pub auth_data: AuthenticatorData,
-    pub att_stmt: AttestationStatement,
+    pub att_obj: AttestationObject,
 }
 
 impl MakeCredentialsResult {
@@ -94,10 +93,12 @@ impl MakeCredentialsResult {
             cert_and_sig.signature,
         ));
 
-        Ok(Self {
+        let att_obj = AttestationObject {
             auth_data,
             att_stmt,
-        })
+        };
+
+        Ok(Self { att_obj })
     }
 }
 
@@ -176,8 +177,10 @@ impl<'de> Deserialize<'de> for MakeCredentialsResult {
                     .ok_or_else(|| M::Error::custom("found no attStmt (0x03)".to_string()))?;
 
                 Ok(MakeCredentialsResult {
-                    auth_data,
-                    att_stmt,
+                    att_obj: AttestationObject {
+                        auth_data,
+                        att_stmt,
+                    },
                 })
             }
         }
@@ -530,8 +533,9 @@ pub mod test {
     use crate::crypto::{COSEAlgorithm, COSEEC2Key, COSEKey, COSEKeyType, Curve};
     use crate::ctap2::attestation::test::create_attestation_obj;
     use crate::ctap2::attestation::{
-        AAGuid, AttestationCertificate, AttestationStatement, AttestationStatementFidoU2F,
-        AttestedCredentialData, AuthenticatorData, AuthenticatorDataFlags, Signature,
+        AAGuid, AttestationCertificate, AttestationObject, AttestationStatement,
+        AttestationStatementFidoU2F, AttestedCredentialData, AuthenticatorData,
+        AuthenticatorDataFlags, Signature,
     };
     use crate::ctap2::client_data::{Challenge, CollectedClientData, TokenBinding, WebauthnType};
     use crate::ctap2::commands::{RequestCtap1, RequestCtap2};
@@ -594,10 +598,9 @@ pub mod test {
         let make_cred_result = req
             .handle_response_ctap2(&mut device, &MAKE_CREDENTIALS_SAMPLE_RESPONSE_CTAP2)
             .expect("Failed to handle CTAP2 response");
-        let att_obj = create_attestation_obj();
+
         let expected = MakeCredentialsResult {
-            auth_data: att_obj.auth_data,
-            att_stmt: att_obj.att_stmt,
+            att_obj: create_attestation_obj(),
         };
 
         assert_eq!(make_cred_result, expected);
@@ -651,11 +654,11 @@ pub mod test {
             req_serialized, MAKE_CREDENTIALS_SAMPLE_REQUEST_CTAP1,
             "\nGot:      {req_serialized:X?}\nExpected: {MAKE_CREDENTIALS_SAMPLE_REQUEST_CTAP1:X?}"
         );
-        let attestation_object = req
+        let make_cred_result = req
             .handle_response_ctap1(Ok(()), &MAKE_CREDENTIALS_SAMPLE_RESPONSE_CTAP1, &())
             .expect("Failed to handle CTAP1 response");
 
-        let expected = MakeCredentialsResult {
+        let att_obj = AttestationObject {
             auth_data: AuthenticatorData {
                 rp_id_hash: RpIdHash::from(&[
                     0xA3, 0x79, 0xA6, 0xF6, 0xEE, 0xAF, 0xB9, 0xA5, 0x5E, 0x37, 0x8C, 0x11, 0x80,
@@ -754,7 +757,9 @@ pub mod test {
             }),
         };
 
-        assert_eq!(attestation_object, expected);
+        let expected = MakeCredentialsResult { att_obj };
+
+        assert_eq!(make_cred_result, expected);
     }
 
     // This includes a CTAP2 encoded attestation object that is identical to

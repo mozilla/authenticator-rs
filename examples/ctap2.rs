@@ -219,7 +219,7 @@ fn main() {
     println!("*********************************************************************");
 
     let allow_list;
-    if let Some(cred_data) = attestation_object.auth_data.credential_data {
+    if let Some(cred_data) = attestation_object.att_obj.auth_data.credential_data {
         allow_list = vec![PublicKeyCredentialDescriptor {
             id: cred_data.credential_id,
             transports: vec![Transport::USB],

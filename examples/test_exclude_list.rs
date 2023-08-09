@@ -185,7 +185,7 @@ fn main() {
             Ok(a) => {
                 println!("Ok!");
                 println!("Registering again with the key_handle we just got back. This should result in a 'already registered' error.");
-                let key_handle = a.auth_data.credential_data.unwrap().credential_id.clone();
+                let key_handle = a.att_obj.auth_data.credential_data.unwrap().credential_id.clone();
                 let pub_key = PublicKeyCredentialDescriptor {
                     id: key_handle,
                     transports: vec![Transport::USB],
