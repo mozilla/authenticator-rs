@@ -98,10 +98,15 @@ impl CredentialsOperation {
             credentials_ops.push(CredentialsOperation::List);
         }
         if creds.existing_resident_credentials_count > 0 {
-            credentials_ops.extend([
-                CredentialsOperation::Delete,
-                CredentialsOperation::UpdateUser,
-            ]);
+            credentials_ops.push(CredentialsOperation::Delete);
+            // FIDO_2_1_PRE devices do not (all?) support UpdateUser.
+            // So we require devices to support full 2.1 for this.
+            if info
+                .versions
+                .contains(&authenticator::ctap2::commands::get_info::AuthenticatorVersion::FIDO_2_1)
+            {
+                credentials_ops.push(CredentialsOperation::UpdateUser);
+            }
         }
         credentials_ops
     }
