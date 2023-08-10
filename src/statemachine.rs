@@ -5,7 +5,6 @@
 use crate::authenticatorservice::{RegisterArgs, SignArgs};
 use crate::consts::PARAMETER_SIZE;
 
-use crate::ctap2;
 use crate::ctap2::client_data::ClientDataHash;
 use crate::ctap2::commands::client_pin::Pin;
 use crate::ctap2::commands::get_assertion::GetAssertionResult;
@@ -23,6 +22,7 @@ use crate::transport::device_selector::{
 use crate::transport::platform::transaction::Transaction;
 use crate::transport::{hid::HIDDevice, FidoDevice, FidoProtocol};
 use crate::u2fprotocol::{u2f_init_device, u2f_is_keyhandle_valid, u2f_register, u2f_sign};
+use crate::{ctap2, ManageResult};
 use crate::{
     AuthenticatorTransports, InteractiveRequest, KeyHandle, RegisterFlags, RegisterResult,
     SignFlags, SignResult,
@@ -632,6 +632,10 @@ impl StateMachine {
                 );
                 while alive() {
                     match rx.recv_timeout(Duration::from_millis(400)) {
+                        Ok(InteractiveRequest::Quit) => {
+                            callback.call(Ok(ManageResult::Success));
+                            break;
+                        }
                         Ok(InteractiveRequest::Reset) => {
                             ctap2::reset_helper(
                                 &mut dev,
