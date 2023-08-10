@@ -46,6 +46,8 @@ use std::sync::mpsc::{channel, RecvError, Sender};
 use std::thread;
 use std::time::Duration;
 
+use self::commands::get_info::AuthenticatorVersion;
+
 macro_rules! unwrap_option {
     ($item: expr, $callback: expr) => {
         match $item {
@@ -882,9 +884,7 @@ pub(crate) fn bio_enrollment(
         | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingUvWithPermissions(t))
         | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingPinWithPermissions(t)) => {
             skip_puap = true;
-            if bio_cmd.set_pin_uv_auth_param(Some(t)).is_err() {
-                return false;
-            }
+            unwrap_result!(bio_cmd.set_pin_uv_auth_param(Some(t)), callback);
         }
         _ => {}
     }
@@ -1095,6 +1095,17 @@ pub(crate) fn credential_management(
 
     let use_legacy_preview = authinfo.options.cred_mgmt != Some(true);
 
+    // FIDO_2_1_PRE-devices do not support UpdateUserInformation.
+    if use_legacy_preview
+        && !authinfo.versions.contains(&AuthenticatorVersion::FIDO_2_1)
+        && matches!(command, CredManagementCmd::UpdateUserInformation(..))
+    {
+        callback.call(Err(AuthenticatorError::HIDError(
+            HIDError::UnsupportedCommand,
+        )));
+        return false;
+    }
+
     // If puap is provided, we can skip puap-determination (i.e. PIN entry)
     let mut cred_management = match command {
         CredManagementCmd::GetCredentials => {
@@ -1122,9 +1133,7 @@ pub(crate) fn credential_management(
         | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingUvWithPermissions(t))
         | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingPinWithPermissions(t)) => {
             skip_puap = true;
-            if cred_management.set_pin_uv_auth_param(Some(t)).is_err() {
-                return false;
-            }
+            unwrap_result!(cred_management.set_pin_uv_auth_param(Some(t)), callback);
         }
         _ => {}
     }
@@ -1393,9 +1402,7 @@ pub(crate) fn configure_authenticator(
         | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingUvWithPermissions(t))
         | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingPinWithPermissions(t)) => {
             skip_puap = true;
-            if authcfg.set_pin_uv_auth_param(Some(t)).is_err() {
-                return false;
-            }
+            unwrap_result!(authcfg.set_pin_uv_auth_param(Some(t)), callback);
         }
         _ => {}
     }
