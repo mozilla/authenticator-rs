@@ -32,6 +32,7 @@ pub enum BioEnrollmentCmd {
 
 #[derive(Debug)]
 pub enum InteractiveRequest {
+    Quit,
     Reset,
     ChangePIN(Pin, Pin),
     SetPIN(Pin),

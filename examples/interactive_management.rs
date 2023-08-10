@@ -593,7 +593,10 @@ fn interactive_status_callback(status_rx: Receiver<StatusUpdate>) {
                 tx = Some(tx_new);
                 match TopLevelOperation::ask_user(&info) {
                     TopLevelOperation::Quit => {
-                        return;
+                        tx.as_ref()
+                            .unwrap()
+                            .send(InteractiveRequest::Quit)
+                            .expect("Failed to send PIN-set request");
                     }
                     TopLevelOperation::Reset => tx
                         .as_ref()
