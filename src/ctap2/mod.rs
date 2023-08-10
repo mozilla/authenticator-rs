@@ -1014,8 +1014,8 @@ pub(crate) fn bio_enrollment(
                             result.max_capture_samples_required_for_enroll,
                             callback
                         );
-                        let max_template_friendly_name =
-                            unwrap_option!(result.max_template_friendly_name, callback);
+                        // FIDO_2_1_PRE-devices do not report this field. So we leave it optional.
+                        let max_template_friendly_name = result.max_template_friendly_name;
                         send_status(
                             &status,
                             StatusUpdate::InteractiveManagement(

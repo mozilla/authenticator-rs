@@ -644,7 +644,7 @@ impl From<&BioTemplateInfo> for EnrollmentInfo {
 pub struct FingerprintSensorInfo {
     pub fingerprint_kind: FingerprintKind,
     pub max_capture_samples_required_for_enroll: u64,
-    pub max_template_friendly_name: u64,
+    pub max_template_friendly_name: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
