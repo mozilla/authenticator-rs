@@ -750,7 +750,7 @@ impl COSEEC2Key {
         })
     }
 
-    fn der_spki(&self) -> Result<Vec<u8>, CryptoError> {
+    pub fn der_spki(&self) -> Result<Vec<u8>, CryptoError> {
         let (curve_oid, seq_len, alg_len, spk_len) = match self.curve {
             Curve::SECP256R1 => (
                 DER_OID_P256_BYTES,
