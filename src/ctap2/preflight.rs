@@ -18,9 +18,9 @@ use sha2::{Digest, Sha256};
 /// if this token is already registered or not.
 #[derive(Debug)]
 pub struct CheckKeyHandle<'assertion> {
-    pub(crate) key_handle: &'assertion [u8],
-    pub(crate) client_data_hash: &'assertion [u8],
-    pub(crate) rp: &'assertion RelyingPartyWrapper,
+    pub key_handle: &'assertion [u8],
+    pub client_data_hash: &'assertion [u8],
+    pub rp: &'assertion RelyingPartyWrapper,
 }
 
 impl<'assertion> RequestCtap1 for CheckKeyHandle<'assertion> {
