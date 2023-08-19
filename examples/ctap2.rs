@@ -143,7 +143,6 @@ fn main() {
 
     let user = User {
         id: "user_id".as_bytes().to_vec(),
-        icon: None,
         name: Some("A. User".to_string()),
         display_name: None,
     };
@@ -153,7 +152,6 @@ fn main() {
         relying_party: RelyingParty {
             id: "example.com".to_string(),
             name: None,
-            icon: None,
         },
         origin: origin.clone(),
         user,

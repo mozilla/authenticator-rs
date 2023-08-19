@@ -106,7 +106,6 @@ fn register_user(manager: &mut AuthenticatorService, username: &str, timeout_ms:
 
     let user = User {
         id: username.as_bytes().to_vec(),
-        icon: None,
         name: Some(username.to_string()),
         display_name: None,
     };
@@ -116,7 +115,6 @@ fn register_user(manager: &mut AuthenticatorService, username: &str, timeout_ms:
         relying_party: RelyingParty {
             id: "example.com".to_string(),
             name: None,
-            icon: None,
         },
         origin,
         user,
