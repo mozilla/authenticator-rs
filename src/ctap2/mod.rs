@@ -536,7 +536,6 @@ pub fn sign<Dev: FidoDevice>(
         RelyingPartyWrapper::Data(RelyingParty {
             id: args.relying_party_id,
             name: None,
-            icon: None,
         }),
         args.allow_list,
         GetAssertionOptions {
