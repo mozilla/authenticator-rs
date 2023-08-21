@@ -205,6 +205,15 @@ pub struct AuthenticatorData {
     pub extensions: Extension,
 }
 
+impl AuthenticatorData {
+    pub fn to_vec(&self) -> Vec<u8> {
+        match serde_cbor::value::to_value(self) {
+            Ok(serde_cbor::value::Value::Bytes(out)) => out,
+            _ => unreachable!(), // Serialize is guaranteed to produce bytes
+        }
+    }
+}
+
 impl<'de> Deserialize<'de> for AuthenticatorData {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
