@@ -1037,7 +1037,7 @@ impl Serialize for COSEKey {
         let mut map = serializer.serialize_map(Some(map_len))?;
         match &self.key {
             COSEKeyType::OKP(key) => {
-                map.serialize_entry(&1, &COSEKeyTypeId::OKP)?;
+                map.serialize_entry(&1, &(COSEKeyTypeId::OKP as u8))?;
                 map.serialize_entry(&3, &self.alg)?;
                 map.serialize_entry(&-1, &key.curve)?;
                 map.serialize_entry(&-2, &key.x)?;
@@ -1050,13 +1050,13 @@ impl Serialize for COSEKey {
                 map.serialize_entry(&-3, &serde_bytes::Bytes::new(&key.y))?;
             }
             COSEKeyType::RSA(key) => {
-                map.serialize_entry(&1, &COSEKeyTypeId::RSA)?;
+                map.serialize_entry(&1, &(COSEKeyTypeId::RSA as u8))?;
                 map.serialize_entry(&3, &self.alg)?;
                 map.serialize_entry(&-1, &key.n)?;
                 map.serialize_entry(&-2, &key.e)?;
             }
             COSEKeyType::Symmetric(key) => {
-                map.serialize_entry(&1, &COSEKeyTypeId::Symmetric)?;
+                map.serialize_entry(&1, &(COSEKeyTypeId::Symmetric as u8))?;
                 map.serialize_entry(&3, &self.alg)?;
                 map.serialize_entry(&-1, &key.key)?;
             }
