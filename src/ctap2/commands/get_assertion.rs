@@ -1155,7 +1155,7 @@ pub mod test {
 
         // Sending first GetAssertion with first allow_list-entry, that will return an error
         let mut msg = cid.to_vec();
-        msg.extend(vec![HIDCmd::Cbor.into(), 0x00, 0x94]);
+        msg.extend(vec![HIDCmd::Cbor.into(), 0x00, 0x90]);
         msg.extend(vec![0x2]); // u2f command
         msg.extend(vec![
             0xa4, // map(4)
@@ -1191,10 +1191,7 @@ pub mod test {
             0x6a, // text(10)
             0x70, 0x75, 0x62, 0x6C, 0x69, 0x63, 0x2D, 0x6B, 0x65, 0x79, // public-key
             0x5,  // options
-            0xa2, // map(2)
-            0x62, // text(2)
-            0x75, 0x76, // uv
-            0xf4, // false
+            0xa1, // map(1)
             0x62, // text(2)
             0x75, 0x70, // up
             0xf4, // false
@@ -1210,7 +1207,7 @@ pub mod test {
 
         // Sending second GetAssertion with first allow_list-entry, that will return a success
         let mut msg = cid.to_vec();
-        msg.extend(vec![HIDCmd::Cbor.into(), 0x00, 0x94]);
+        msg.extend(vec![HIDCmd::Cbor.into(), 0x00, 0x90]);
         msg.extend(vec![0x2]); // u2f command
         msg.extend(vec![
             0xa4, // map(4)
@@ -1246,10 +1243,7 @@ pub mod test {
             0x6a, // text(10)
             0x70, 0x75, 0x62, 0x6C, 0x69, 0x63, 0x2D, 0x6B, 0x65, 0x79, // public-key
             0x5,  // options
-            0xa2, // map(2)
-            0x62, // text(2)
-            0x75, 0x76, // uv
-            0xf4, // false
+            0xa1, // map(1)
             0x62, // text(2)
             0x75, 0x70, // up
             0xf4, // false
