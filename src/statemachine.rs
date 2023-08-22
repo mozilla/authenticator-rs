@@ -10,6 +10,7 @@ use crate::ctap2::client_data::ClientDataHash;
 use crate::ctap2::commands::client_pin::Pin;
 use crate::ctap2::commands::get_assertion::GetAssertionResult;
 use crate::ctap2::commands::make_credentials::MakeCredentialsResult;
+use crate::ctap2::preflight::silently_discover_credentials;
 use crate::ctap2::server::{
     PublicKeyCredentialDescriptor, RelyingParty, RelyingPartyWrapper, ResidentKeyRequirement,
     RpIdHash, UserVerificationRequirement,
@@ -294,19 +295,40 @@ impl StateMachine {
                     None => return,
                 };
 
-                if !Self::wait_for_device_selector(
+                let args = args.clone();
+
+                // Attempt to silently discover credentials. If we find useful credentials, then we
+                // can potentially skip a device selection tap. We may find acceptable credentials
+                // on several devices. In that case, the first device to ask for automatic
+                // selection will be selected.
+                let silent_creds = silently_discover_credentials(
                     &mut dev,
-                    &selector,
-                    &status,
-                    auto_select,
-                    alive,
-                ) {
+                    &args.allow_list,
+                    &RelyingPartyWrapper::from(args.relying_party_id.as_str()),
+                    &ClientDataHash(args.client_data_hash),
+                );
+                let mut auto_select = !silent_creds.is_empty();
+                if !auto_select && !args.allow_list.is_empty() {
+                    // Check if we have (U2F / server-side) credentials bound to the alternate RP ID.
+                    if let Some(ref alt_rp_id) = args.alternate_rp_id {
+                        let silent_creds = silently_discover_credentials(
+                            &mut dev,
+                            &args.allow_list,
+                            &RelyingPartyWrapper::from(alt_rp_id.as_str()),
+                            &ClientDataHash(args.client_data_hash),
+                        );
+                        auto_select = !silent_creds.is_empty();
+                    }
+                }
+
+                if !Self::wait_for_device_selector(&mut dev, &selector, &status, auto_select, alive)
+                {
                     return;
                 };
 
                 info!("Device {:?} continues with the signing process", dev.id());
 
-                if ctap2::sign(&mut dev, args.clone(), status, callback.clone(), alive) {
+                if ctap2::sign(&mut dev, args, status, callback.clone(), alive) {
                     // ctap2::sign returns true if it called the callback with Ok(..).  Cancel all
                     // other tokens in case we skipped the "blinking"-action and went straight for
                     // the actual request.

@@ -60,6 +60,15 @@ pub enum RelyingPartyWrapper {
     Hash(RpIdHash),
 }
 
+impl From<&str> for RelyingPartyWrapper {
+    fn from(rp_id: &str) -> Self {
+        Self::Data(RelyingParty {
+            id: rp_id.to_string(),
+            name: None,
+        })
+    }
+}
+
 impl RelyingPartyWrapper {
     pub fn hash(&self) -> RpIdHash {
         match *self {
