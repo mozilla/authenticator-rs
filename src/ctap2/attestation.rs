@@ -353,6 +353,15 @@ pub enum AttestationStatement {
     Packed(AttestationStatementPacked),
     #[serde(rename = "fido-u2f")]
     FidoU2F(AttestationStatementFidoU2F),
+    // The remaining attestation statement formats are deserialized as serde_cbor::Values---we do
+    // not perform any validation of their contents. These are expected to be used primarily when
+    // anonymizing attestation objects that contain attestation statements in these formats.
+    #[serde(rename = "android-key")]
+    AndroidKey(serde_cbor::Value),
+    #[serde(rename = "android-safetynet")]
+    AndroidSafetyNet(serde_cbor::Value),
+    Apple(serde_cbor::Value),
+    Tpm(serde_cbor::Value),
 }
 
 // AttestationStatement::None is serialized as the empty map. We need to enforce
@@ -495,6 +504,22 @@ impl Serialize for AttestationObject {
             }
             AttestationStatement::FidoU2F(ref v) => {
                 map.serialize_entry(&"fmt", &"fido-u2f")?; // (1) "fmt"
+                map.serialize_entry(&"attStmt", v)?; // (2) "attStmt"
+            }
+            AttestationStatement::AndroidKey(ref v) => {
+                map.serialize_entry(&"fmt", &"android-key")?; // (1) "fmt"
+                map.serialize_entry(&"attStmt", v)?; // (2) "attStmt"
+            }
+            AttestationStatement::AndroidSafetyNet(ref v) => {
+                map.serialize_entry(&"fmt", &"android-safetynet")?; // (1) "fmt"
+                map.serialize_entry(&"attStmt", v)?; // (2) "attStmt"
+            }
+            AttestationStatement::Apple(ref v) => {
+                map.serialize_entry(&"fmt", &"apple")?; // (1) "fmt"
+                map.serialize_entry(&"attStmt", v)?; // (2) "attStmt"
+            }
+            AttestationStatement::Tpm(ref v) => {
+                map.serialize_entry(&"fmt", &"tpm")?; // (1) "fmt"
                 map.serialize_entry(&"attStmt", v)?; // (2) "attStmt"
             }
         }
