@@ -1,6 +1,6 @@
 use super::client_data::ClientDataHash;
 use super::commands::get_assertion::{GetAssertion, GetAssertionOptions};
-use super::commands::{CommandError, PinUvAuthCommand, RequestCtap1, Retryable, StatusCode};
+use super::commands::{PinUvAuthCommand, RequestCtap1, Retryable};
 use crate::authenticatorservice::GetAssertionExtensions;
 use crate::consts::{PARAMETER_SIZE, U2F_AUTHENTICATE, U2F_CHECK_IS_REGISTERED};
 use crate::crypto::PinUvAuthToken;
@@ -171,8 +171,7 @@ pub(crate) fn do_credential_list_filtering_ctap2<Dev: FidoDevice>(
             None,
         );
         silent_assert.set_pin_uv_auth_param(pin_uv_auth_token.clone())?;
-        let res = dev.send_msg(&silent_assert);
-        match res {
+        match dev.send_msg(&silent_assert) {
             Ok(response) => {
                 // This chunk contains a key_handle that is already known to the device.
                 // Filter out all credentials the device returned. Those are valid.
@@ -185,12 +184,11 @@ pub(crate) fn do_credential_list_filtering_ctap2<Dev: FidoDevice>(
                 final_list = credential_ids;
                 break;
             }
-            Err(HIDError::Command(CommandError::StatusCode(StatusCode::NoCredentials, _))) => {
+            Err(_) => {
                 // No-op: Go to next chunk.
-            }
-            Err(e) => {
-                // Some unexpected error
-                return Err(e.into());
+                // NOTE: while we expect a StatusCode::NoCredentials error here, some tokens return
+                // other values.
+                continue;
             }
         }
     }
