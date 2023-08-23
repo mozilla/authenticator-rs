@@ -237,7 +237,7 @@ fn main() {
     let ctap_args = SignArgs {
         client_data_hash: chall_bytes,
         origin: format!("https://{rp_id}"),
-        relying_party_id: rp_id.clone(),
+        relying_party_id: rp_id,
         allow_list,
         user_verification_req: UserVerificationRequirement::Preferred,
         user_presence_req: true,

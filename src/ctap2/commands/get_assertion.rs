@@ -168,9 +168,6 @@ pub struct GetAssertion {
     pub extensions: GetAssertionExtensions,
     pub options: GetAssertionOptions,
     pub pin_uv_auth_param: Option<PinUvAuthParam>,
-
-    // This is used to implement the FIDO AppID extension.
-    pub alternate_rp_id: Option<String>,
 }
 
 impl GetAssertion {
@@ -180,7 +177,6 @@ impl GetAssertion {
         allow_list: Vec<PublicKeyCredentialDescriptor>,
         options: GetAssertionOptions,
         extensions: GetAssertionExtensions,
-        alternate_rp_id: Option<String>,
     ) -> Self {
         Self {
             client_data_hash,
@@ -189,7 +185,6 @@ impl GetAssertion {
             extensions,
             options,
             pin_uv_auth_param: None,
-            alternate_rp_id,
         }
     }
 }
@@ -636,7 +631,6 @@ pub mod test {
                 user_verification: None,
             },
             Default::default(),
-            None,
         );
         let mut device = Device::new("commands/get_assertion").unwrap();
         assert_eq!(device.get_protocol(), FidoProtocol::CTAP2);
@@ -835,7 +829,6 @@ pub mod test {
                 user_verification: None,
             },
             Default::default(),
-            None,
         );
         let mut device = Device::new("commands/get_assertion").unwrap(); // not really used (all functions ignore it)
                                                                          // channel id
@@ -925,7 +918,6 @@ pub mod test {
                 user_verification: None,
             },
             Default::default(),
-            None,
         );
 
         let mut device = Device::new("commands/get_assertion").unwrap(); // not really used (all functions ignore it)
@@ -1106,7 +1098,6 @@ pub mod test {
                 user_verification: None,
             },
             Default::default(),
-            None,
         );
         let mut device = Device::new("commands/get_assertion").unwrap();
         assert_eq!(device.get_protocol(), FidoProtocol::CTAP2);

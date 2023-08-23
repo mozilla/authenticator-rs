@@ -32,9 +32,10 @@ use crate::ctap2::commands::{
 };
 use crate::ctap2::preflight::{
     do_credential_list_filtering_ctap1, do_credential_list_filtering_ctap2,
+    silently_discover_credentials,
 };
 use crate::ctap2::server::{
-    RelyingParty, RelyingPartyWrapper, ResidentKeyRequirement, UserVerificationRequirement,
+    RelyingPartyWrapper, ResidentKeyRequirement, UserVerificationRequirement,
 };
 use crate::errors::{AuthenticatorError, UnsupportedOption};
 use crate::statecallback::StateCallback;
@@ -531,19 +532,35 @@ pub fn sign<Dev: FidoDevice>(
         }
     }
 
+    let mut allow_list = args.allow_list;
+    let mut rp_id = args.relying_party_id;
+    let client_data_hash = ClientDataHash(args.client_data_hash);
+    if let Some(alt_rp_id) = args.alternate_rp_id {
+        if !allow_list.is_empty() {
+            // Try to silently discover U2F credentials that require the FIDO App ID extension. If
+            // any are found, we should use the alternate RP ID instead of the provided RP ID.
+            let silent_creds = silently_discover_credentials(
+                dev,
+                &allow_list,
+                &RelyingPartyWrapper::from(alt_rp_id.as_str()),
+                &client_data_hash,
+            );
+            if !silent_creds.is_empty() {
+                allow_list = silent_creds;
+                rp_id = alt_rp_id;
+            }
+        }
+    }
+
     let mut get_assertion = GetAssertion::new(
-        ClientDataHash(args.client_data_hash),
-        RelyingPartyWrapper::Data(RelyingParty {
-            id: args.relying_party_id,
-            name: None,
-        }),
-        args.allow_list,
+        client_data_hash,
+        RelyingPartyWrapper::from(rp_id.as_str()),
+        allow_list,
         GetAssertionOptions {
             user_presence: Some(args.user_presence_req),
             user_verification: None,
         },
         args.extensions,
-        args.alternate_rp_id,
     );
 
     let mut skip_uv = false;
@@ -622,19 +639,7 @@ pub fn sign<Dev: FidoDevice>(
         debug!("{get_assertion:?} using {pin_uv_auth_result:?}");
         debug!("------------------------------------------------------------------");
         send_status(&status, crate::StatusUpdate::PresenceRequired);
-        let mut resp = dev.send_msg_cancellable(&get_assertion, alive);
-        if resp.is_err() {
-            // Retry with a different RP ID if one was supplied. This is intended to be
-            // used with the AppID provided in the WebAuthn FIDO AppID extension.
-            if let Some(alternate_rp_id) = get_assertion.alternate_rp_id {
-                get_assertion.rp = RelyingPartyWrapper::Data(RelyingParty {
-                    id: alternate_rp_id,
-                    ..Default::default()
-                });
-                get_assertion.alternate_rp_id = None;
-                resp = dev.send_msg_cancellable(&get_assertion, alive);
-            }
-        }
+        let resp = dev.send_msg_cancellable(&get_assertion, alive);
         match resp {
             Ok(result) => {
                 callback.call(Ok(result));
