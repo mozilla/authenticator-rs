@@ -308,7 +308,7 @@ impl StateMachine {
                     &ClientDataHash(args.client_data_hash),
                 );
                 let mut auto_select = !silent_creds.is_empty();
-                if !auto_select && !args.allow_list.is_empty() {
+                if silent_creds.is_empty() && !args.allow_list.is_empty() {
                     // Check if we have (U2F / server-side) credentials bound to the alternate RP ID.
                     if let Some(ref alt_rp_id) = args.alternate_rp_id {
                         let silent_creds = silently_discover_credentials(
