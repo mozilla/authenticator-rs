@@ -472,7 +472,7 @@ fn ask_user_bio_options(
                     .expect("error: unable to read user input");
                 let name = input.trim().to_string();
                 tx.send(InteractiveRequest::BioEnrollment(
-                    BioEnrollmentCmd::ChangeName(chosen_id, name.clone()),
+                    BioEnrollmentCmd::ChangeName(chosen_id, name),
                     puat,
                 ))
                 .expect("Failed to send GetEnrollments request.");
