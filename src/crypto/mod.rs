@@ -403,7 +403,7 @@ impl Serialize for PinUvAuthParam {
 
 /// A Curve identifier. You probably will never need to alter
 /// or use this value, as it is set inside the Credential for you.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Curve {
     // +---------+-------+----------+------------------------------------+
     // | Name    | Value | Key Type | Description                        |
@@ -432,17 +432,27 @@ pub enum Curve {
     Ed448 = 7,
 }
 
-impl TryFrom<u64> for Curve {
+impl Serialize for Curve {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_i64(*self as i64)
+    }
+}
+
+
+impl TryFrom<i64> for Curve {
     type Error = CryptoError;
-    fn try_from(i: u64) -> Result<Self, Self::Error> {
+    fn try_from(i: i64) -> Result<Self, Self::Error> {
         match i {
-            1 => Ok(Curve::SECP256R1),
-            2 => Ok(Curve::SECP384R1),
-            3 => Ok(Curve::SECP521R1),
-            4 => Ok(Curve::X25519),
-            5 => Ok(Curve::X448),
-            6 => Ok(Curve::Ed25519),
-            7 => Ok(Curve::Ed448),
+            i if i == Curve::SECP256R1 as i64 => Ok(Curve::SECP256R1),
+            i if i == Curve::SECP384R1 as i64 => Ok(Curve::SECP384R1),
+            i if i == Curve::SECP521R1 as i64 => Ok(Curve::SECP521R1),
+            i if i == Curve::X25519 as i64 => Ok(Curve::X25519),
+            i if i == Curve::X448 as i64 => Ok(Curve::X448),
+            i if i == Curve::Ed25519 as i64 => Ok(Curve::Ed25519),
+            i if i == Curve::Ed448 as i64 => Ok(Curve::Ed448),
             _ => Err(CryptoError::UnknownKeyType),
         }
     }
@@ -550,71 +560,7 @@ impl Serialize for COSEAlgorithm {
     where
         S: Serializer,
     {
-        match *self {
-            COSEAlgorithm::RS512 => serializer.serialize_i16(-259),
-            COSEAlgorithm::RS384 => serializer.serialize_i16(-258),
-            COSEAlgorithm::RS256 => serializer.serialize_i16(-257),
-            COSEAlgorithm::ES256K => serializer.serialize_i8(-47),
-            COSEAlgorithm::HSS_LMS => serializer.serialize_i8(-46),
-            COSEAlgorithm::SHAKE256 => serializer.serialize_i8(-45),
-            COSEAlgorithm::SHA512 => serializer.serialize_i8(-44),
-            COSEAlgorithm::SHA384 => serializer.serialize_i8(-43),
-            COSEAlgorithm::RSAES_OAEP_SHA_512 => serializer.serialize_i8(-42),
-            COSEAlgorithm::RSAES_OAEP_SHA_256 => serializer.serialize_i8(-41),
-            COSEAlgorithm::RSAES_OAEP_RFC_8017_default => serializer.serialize_i8(-40),
-            COSEAlgorithm::PS512 => serializer.serialize_i8(-39),
-            COSEAlgorithm::PS384 => serializer.serialize_i8(-38),
-            COSEAlgorithm::PS256 => serializer.serialize_i8(-37),
-            COSEAlgorithm::ES512 => serializer.serialize_i8(-36),
-            COSEAlgorithm::ES384 => serializer.serialize_i8(-35),
-            COSEAlgorithm::ECDH_SS_A256KW => serializer.serialize_i8(-34),
-            COSEAlgorithm::ECDH_SS_A192KW => serializer.serialize_i8(-33),
-            COSEAlgorithm::ECDH_SS_A128KW => serializer.serialize_i8(-32),
-            COSEAlgorithm::ECDH_ES_A256KW => serializer.serialize_i8(-31),
-            COSEAlgorithm::ECDH_ES_A192KW => serializer.serialize_i8(-30),
-            COSEAlgorithm::ECDH_ES_A128KW => serializer.serialize_i8(-29),
-            COSEAlgorithm::ECDH_SS_HKDF512 => serializer.serialize_i8(-28),
-            COSEAlgorithm::ECDH_SS_HKDF256 => serializer.serialize_i8(-27),
-            COSEAlgorithm::ECDH_ES_HKDF512 => serializer.serialize_i8(-26),
-            COSEAlgorithm::ECDH_ES_HKDF256 => serializer.serialize_i8(-25),
-            COSEAlgorithm::SHAKE128 => serializer.serialize_i8(-18),
-            COSEAlgorithm::SHA512_256 => serializer.serialize_i8(-17),
-            COSEAlgorithm::SHA256 => serializer.serialize_i8(-16),
-            COSEAlgorithm::SHA256_64 => serializer.serialize_i8(-15),
-            COSEAlgorithm::SHA1 => serializer.serialize_i8(-14),
-            COSEAlgorithm::Direct_HKDF_AES256 => serializer.serialize_i8(-13),
-            COSEAlgorithm::Direct_HKDF_AES128 => serializer.serialize_i8(-12),
-            COSEAlgorithm::Direct_HKDF_SHA512 => serializer.serialize_i8(-11),
-            COSEAlgorithm::Direct_HKDF_SHA256 => serializer.serialize_i8(-10),
-            COSEAlgorithm::EDDSA => serializer.serialize_i8(-8),
-            COSEAlgorithm::ES256 => serializer.serialize_i8(-7),
-            COSEAlgorithm::Direct => serializer.serialize_i8(-6),
-            COSEAlgorithm::A256KW => serializer.serialize_i8(-5),
-            COSEAlgorithm::A192KW => serializer.serialize_i8(-4),
-            COSEAlgorithm::A128KW => serializer.serialize_i8(-3),
-            COSEAlgorithm::A128GCM => serializer.serialize_i8(1),
-            COSEAlgorithm::A192GCM => serializer.serialize_i8(2),
-            COSEAlgorithm::A256GCM => serializer.serialize_i8(3),
-            COSEAlgorithm::HMAC256_64 => serializer.serialize_i8(4),
-            COSEAlgorithm::HMAC256_256 => serializer.serialize_i8(5),
-            COSEAlgorithm::HMAC384_384 => serializer.serialize_i8(6),
-            COSEAlgorithm::HMAC512_512 => serializer.serialize_i8(7),
-            COSEAlgorithm::AES_CCM_16_64_128 => serializer.serialize_i8(10),
-            COSEAlgorithm::AES_CCM_16_64_256 => serializer.serialize_i8(11),
-            COSEAlgorithm::AES_CCM_64_64_128 => serializer.serialize_i8(12),
-            COSEAlgorithm::AES_CCM_64_64_256 => serializer.serialize_i8(13),
-            COSEAlgorithm::AES_MAC_128_64 => serializer.serialize_i8(14),
-            COSEAlgorithm::AES_MAC_256_64 => serializer.serialize_i8(15),
-            COSEAlgorithm::ChaCha20_Poly1305 => serializer.serialize_i8(24),
-            COSEAlgorithm::AES_MAC_128_128 => serializer.serialize_i8(25),
-            COSEAlgorithm::AES_MAC_256_128 => serializer.serialize_i8(26),
-            COSEAlgorithm::AES_CCM_16_128_128 => serializer.serialize_i8(30),
-            COSEAlgorithm::AES_CCM_16_128_256 => serializer.serialize_i8(31),
-            COSEAlgorithm::AES_CCM_64_128_128 => serializer.serialize_i8(32),
-            COSEAlgorithm::AES_CCM_64_128_256 => serializer.serialize_i8(33),
-            COSEAlgorithm::IV_GENERATION => serializer.serialize_i8(34),
-            COSEAlgorithm::INSECURE_RS1 => serializer.serialize_i32(-65535),
-        }
+        serializer.serialize_i64(*self as i64)
     }
 }
 
@@ -650,69 +596,69 @@ impl TryFrom<i64> for COSEAlgorithm {
     type Error = CryptoError;
     fn try_from(i: i64) -> Result<Self, Self::Error> {
         match i {
-            -259 => Ok(COSEAlgorithm::RS512),
-            -258 => Ok(COSEAlgorithm::RS384),
-            -257 => Ok(COSEAlgorithm::RS256),
-            -47 => Ok(COSEAlgorithm::ES256K),
-            -46 => Ok(COSEAlgorithm::HSS_LMS),
-            -45 => Ok(COSEAlgorithm::SHAKE256),
-            -44 => Ok(COSEAlgorithm::SHA512),
-            -43 => Ok(COSEAlgorithm::SHA384),
-            -42 => Ok(COSEAlgorithm::RSAES_OAEP_SHA_512),
-            -41 => Ok(COSEAlgorithm::RSAES_OAEP_SHA_256),
-            -40 => Ok(COSEAlgorithm::RSAES_OAEP_RFC_8017_default),
-            -39 => Ok(COSEAlgorithm::PS512),
-            -38 => Ok(COSEAlgorithm::PS384),
-            -37 => Ok(COSEAlgorithm::PS256),
-            -36 => Ok(COSEAlgorithm::ES512),
-            -35 => Ok(COSEAlgorithm::ES384),
-            -34 => Ok(COSEAlgorithm::ECDH_SS_A256KW),
-            -33 => Ok(COSEAlgorithm::ECDH_SS_A192KW),
-            -32 => Ok(COSEAlgorithm::ECDH_SS_A128KW),
-            -31 => Ok(COSEAlgorithm::ECDH_ES_A256KW),
-            -30 => Ok(COSEAlgorithm::ECDH_ES_A192KW),
-            -29 => Ok(COSEAlgorithm::ECDH_ES_A128KW),
-            -28 => Ok(COSEAlgorithm::ECDH_SS_HKDF512),
-            -27 => Ok(COSEAlgorithm::ECDH_SS_HKDF256),
-            -26 => Ok(COSEAlgorithm::ECDH_ES_HKDF512),
-            -25 => Ok(COSEAlgorithm::ECDH_ES_HKDF256),
-            -18 => Ok(COSEAlgorithm::SHAKE128),
-            -17 => Ok(COSEAlgorithm::SHA512_256),
-            -16 => Ok(COSEAlgorithm::SHA256),
-            -15 => Ok(COSEAlgorithm::SHA256_64),
-            -14 => Ok(COSEAlgorithm::SHA1),
-            -13 => Ok(COSEAlgorithm::Direct_HKDF_AES256),
-            -12 => Ok(COSEAlgorithm::Direct_HKDF_AES128),
-            -11 => Ok(COSEAlgorithm::Direct_HKDF_SHA512),
-            -10 => Ok(COSEAlgorithm::Direct_HKDF_SHA256),
-            -8 => Ok(COSEAlgorithm::EDDSA),
-            -7 => Ok(COSEAlgorithm::ES256),
-            -6 => Ok(COSEAlgorithm::Direct),
-            -5 => Ok(COSEAlgorithm::A256KW),
-            -4 => Ok(COSEAlgorithm::A192KW),
-            -3 => Ok(COSEAlgorithm::A128KW),
-            1 => Ok(COSEAlgorithm::A128GCM),
-            2 => Ok(COSEAlgorithm::A192GCM),
-            3 => Ok(COSEAlgorithm::A256GCM),
-            4 => Ok(COSEAlgorithm::HMAC256_64),
-            5 => Ok(COSEAlgorithm::HMAC256_256),
-            6 => Ok(COSEAlgorithm::HMAC384_384),
-            7 => Ok(COSEAlgorithm::HMAC512_512),
-            10 => Ok(COSEAlgorithm::AES_CCM_16_64_128),
-            11 => Ok(COSEAlgorithm::AES_CCM_16_64_256),
-            12 => Ok(COSEAlgorithm::AES_CCM_64_64_128),
-            13 => Ok(COSEAlgorithm::AES_CCM_64_64_256),
-            14 => Ok(COSEAlgorithm::AES_MAC_128_64),
-            15 => Ok(COSEAlgorithm::AES_MAC_256_64),
-            24 => Ok(COSEAlgorithm::ChaCha20_Poly1305),
-            25 => Ok(COSEAlgorithm::AES_MAC_128_128),
-            26 => Ok(COSEAlgorithm::AES_MAC_256_128),
-            30 => Ok(COSEAlgorithm::AES_CCM_16_128_128),
-            31 => Ok(COSEAlgorithm::AES_CCM_16_128_256),
-            32 => Ok(COSEAlgorithm::AES_CCM_64_128_128),
-            33 => Ok(COSEAlgorithm::AES_CCM_64_128_256),
-            34 => Ok(COSEAlgorithm::IV_GENERATION),
-            -65535 => Ok(COSEAlgorithm::INSECURE_RS1),
+            i if i == COSEAlgorithm::RS512 as i64 => Ok(COSEAlgorithm::RS512),
+            i if i == COSEAlgorithm::RS384 as i64 => Ok(COSEAlgorithm::RS384),
+            i if i == COSEAlgorithm::RS256 as i64 => Ok(COSEAlgorithm::RS256),
+            i if i == COSEAlgorithm::ES256K as i64 => Ok(COSEAlgorithm::ES256K),
+            i if i == COSEAlgorithm::HSS_LMS as i64 => Ok(COSEAlgorithm::HSS_LMS),
+            i if i == COSEAlgorithm::SHAKE256 as i64 => Ok(COSEAlgorithm::SHAKE256),
+            i if i == COSEAlgorithm::SHA512 as i64 => Ok(COSEAlgorithm::SHA512),
+            i if i == COSEAlgorithm::SHA384 as i64 => Ok(COSEAlgorithm::SHA384),
+            i if i == COSEAlgorithm::RSAES_OAEP_SHA_512 as i64 => Ok(COSEAlgorithm::RSAES_OAEP_SHA_512),
+            i if i == COSEAlgorithm::RSAES_OAEP_SHA_256 as i64 => Ok(COSEAlgorithm::RSAES_OAEP_SHA_256),
+            i if i == COSEAlgorithm::RSAES_OAEP_RFC_8017_default as i64 => Ok(COSEAlgorithm::RSAES_OAEP_RFC_8017_default),
+            i if i == COSEAlgorithm::PS512 as i64 => Ok(COSEAlgorithm::PS512),
+            i if i == COSEAlgorithm::PS384 as i64 => Ok(COSEAlgorithm::PS384),
+            i if i == COSEAlgorithm::PS256 as i64 => Ok(COSEAlgorithm::PS256),
+            i if i == COSEAlgorithm::ES512 as i64 => Ok(COSEAlgorithm::ES512),
+            i if i == COSEAlgorithm::ES384 as i64 => Ok(COSEAlgorithm::ES384),
+            i if i == COSEAlgorithm::ECDH_SS_A256KW as i64 => Ok(COSEAlgorithm::ECDH_SS_A256KW),
+            i if i == COSEAlgorithm::ECDH_SS_A192KW as i64 => Ok(COSEAlgorithm::ECDH_SS_A192KW),
+            i if i == COSEAlgorithm::ECDH_SS_A128KW as i64 => Ok(COSEAlgorithm::ECDH_SS_A128KW),
+            i if i == COSEAlgorithm::ECDH_ES_A256KW as i64 => Ok(COSEAlgorithm::ECDH_ES_A256KW),
+            i if i == COSEAlgorithm::ECDH_ES_A192KW as i64 => Ok(COSEAlgorithm::ECDH_ES_A192KW),
+            i if i == COSEAlgorithm::ECDH_ES_A128KW as i64 => Ok(COSEAlgorithm::ECDH_ES_A128KW),
+            i if i == COSEAlgorithm::ECDH_SS_HKDF512 as i64 => Ok(COSEAlgorithm::ECDH_SS_HKDF512),
+            i if i == COSEAlgorithm::ECDH_SS_HKDF256 as i64 => Ok(COSEAlgorithm::ECDH_SS_HKDF256),
+            i if i == COSEAlgorithm::ECDH_ES_HKDF512 as i64 => Ok(COSEAlgorithm::ECDH_ES_HKDF512),
+            i if i == COSEAlgorithm::ECDH_ES_HKDF256 as i64 => Ok(COSEAlgorithm::ECDH_ES_HKDF256),
+            i if i == COSEAlgorithm::SHAKE128 as i64 => Ok(COSEAlgorithm::SHAKE128),
+            i if i == COSEAlgorithm::SHA512_256 as i64 => Ok(COSEAlgorithm::SHA512_256),
+            i if i == COSEAlgorithm::SHA256 as i64 => Ok(COSEAlgorithm::SHA256),
+            i if i == COSEAlgorithm::SHA256_64 as i64 => Ok(COSEAlgorithm::SHA256_64),
+            i if i == COSEAlgorithm::SHA1 as i64 => Ok(COSEAlgorithm::SHA1),
+            i if i == COSEAlgorithm::Direct_HKDF_AES256 as i64 => Ok(COSEAlgorithm::Direct_HKDF_AES256),
+            i if i == COSEAlgorithm::Direct_HKDF_AES128 as i64 => Ok(COSEAlgorithm::Direct_HKDF_AES128),
+            i if i == COSEAlgorithm::Direct_HKDF_SHA512 as i64 => Ok(COSEAlgorithm::Direct_HKDF_SHA512),
+            i if i == COSEAlgorithm::Direct_HKDF_SHA256 as i64 => Ok(COSEAlgorithm::Direct_HKDF_SHA256),
+            i if i == COSEAlgorithm::EDDSA as i64 => Ok(COSEAlgorithm::EDDSA),
+            i if i == COSEAlgorithm::ES256 as i64 => Ok(COSEAlgorithm::ES256),
+            i if i == COSEAlgorithm::Direct as i64 => Ok(COSEAlgorithm::Direct),
+            i if i == COSEAlgorithm::A256KW as i64 => Ok(COSEAlgorithm::A256KW),
+            i if i == COSEAlgorithm::A192KW as i64 => Ok(COSEAlgorithm::A192KW),
+            i if i == COSEAlgorithm::A128KW as i64 => Ok(COSEAlgorithm::A128KW),
+            i if i == COSEAlgorithm::A128GCM as i64 => Ok(COSEAlgorithm::A128GCM),
+            i if i == COSEAlgorithm::A192GCM as i64 => Ok(COSEAlgorithm::A192GCM),
+            i if i == COSEAlgorithm::A256GCM as i64 => Ok(COSEAlgorithm::A256GCM),
+            i if i == COSEAlgorithm::HMAC256_64 as i64 => Ok(COSEAlgorithm::HMAC256_64),
+            i if i == COSEAlgorithm::HMAC256_256 as i64 => Ok(COSEAlgorithm::HMAC256_256),
+            i if i == COSEAlgorithm::HMAC384_384 as i64 => Ok(COSEAlgorithm::HMAC384_384),
+            i if i == COSEAlgorithm::HMAC512_512 as i64 => Ok(COSEAlgorithm::HMAC512_512),
+            i if i == COSEAlgorithm::AES_CCM_16_64_128 as i64 => Ok(COSEAlgorithm::AES_CCM_16_64_128),
+            i if i == COSEAlgorithm::AES_CCM_16_64_256 as i64 => Ok(COSEAlgorithm::AES_CCM_16_64_256),
+            i if i == COSEAlgorithm::AES_CCM_64_64_128 as i64 => Ok(COSEAlgorithm::AES_CCM_64_64_128),
+            i if i == COSEAlgorithm::AES_CCM_64_64_256 as i64 => Ok(COSEAlgorithm::AES_CCM_64_64_256),
+            i if i == COSEAlgorithm::AES_MAC_128_64 as i64 => Ok(COSEAlgorithm::AES_MAC_128_64),
+            i if i == COSEAlgorithm::AES_MAC_256_64 as i64 => Ok(COSEAlgorithm::AES_MAC_256_64),
+            i if i == COSEAlgorithm::ChaCha20_Poly1305 as i64 => Ok(COSEAlgorithm::ChaCha20_Poly1305),
+            i if i == COSEAlgorithm::AES_MAC_128_128 as i64 => Ok(COSEAlgorithm::AES_MAC_128_128),
+            i if i == COSEAlgorithm::AES_MAC_256_128 as i64 => Ok(COSEAlgorithm::AES_MAC_256_128),
+            i if i == COSEAlgorithm::AES_CCM_16_128_128 as i64 => Ok(COSEAlgorithm::AES_CCM_16_128_128),
+            i if i == COSEAlgorithm::AES_CCM_16_128_256 as i64 => Ok(COSEAlgorithm::AES_CCM_16_128_256),
+            i if i == COSEAlgorithm::AES_CCM_64_128_128 as i64 => Ok(COSEAlgorithm::AES_CCM_64_128_128),
+            i if i == COSEAlgorithm::AES_CCM_64_128_256 as i64 => Ok(COSEAlgorithm::AES_CCM_64_128_256),
+            i if i == COSEAlgorithm::IV_GENERATION as i64 => Ok(COSEAlgorithm::IV_GENERATION),
+            i if i == COSEAlgorithm::INSECURE_RS1 as i64 => Ok(COSEAlgorithm::INSECURE_RS1),
             _ => Err(CryptoError::UnknownAlgorithm),
         }
     }
@@ -818,13 +764,22 @@ pub enum COSEKeyTypeId {
     RSA = 3,
 }
 
-impl TryFrom<u64> for COSEKeyTypeId {
+impl Serialize for COSEKeyTypeId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_i64(*self as i64)
+    }
+}
+
+impl TryFrom<i64> for COSEKeyTypeId {
     type Error = CryptoError;
-    fn try_from(i: u64) -> Result<Self, Self::Error> {
+    fn try_from(i: i64) -> Result<Self, Self::Error> {
         match i {
-            1 => Ok(COSEKeyTypeId::OKP),
-            2 => Ok(COSEKeyTypeId::EC2),
-            3 => Ok(COSEKeyTypeId::RSA),
+             i if i == COSEKeyTypeId::OKP as i64 => Ok(COSEKeyTypeId::OKP),
+             i if i == COSEKeyTypeId::EC2 as i64 => Ok(COSEKeyTypeId::EC2),
+             i if i == COSEKeyTypeId::RSA as i64 => Ok(COSEKeyTypeId::RSA),
             _ => Err(CryptoError::UnknownKeyType),
         }
     }
@@ -907,7 +862,7 @@ impl<'de> Deserialize<'de> for COSEKey {
                             if key_type.is_some() {
                                 return Err(SerdeError::duplicate_field("key_type"));
                             }
-                            let value: u64 = map.next_value()?;
+                            let value: i64 = map.next_value()?;
                             let val = COSEKeyTypeId::try_from(value).map_err(|_| {
                                 SerdeError::custom(format!("unsupported key_type {value}"))
                             })?;
@@ -929,7 +884,7 @@ impl<'de> Deserialize<'de> for COSEKey {
                                 if curve.is_some() {
                                     return Err(SerdeError::duplicate_field("curve"));
                                 }
-                                let value: u64 = map.next_value()?;
+                                let value: i64 = map.next_value()?;
                                 let val = Curve::try_from(value).map_err(|_| {
                                     SerdeError::custom(format!("unsupported curve {value}"))
                                 })?;
@@ -1015,20 +970,20 @@ impl Serialize for COSEKey {
         let mut map = serializer.serialize_map(Some(map_len))?;
         match &self.key {
             COSEKeyType::OKP(key) => {
-                map.serialize_entry(&1, &(COSEKeyTypeId::OKP as u8))?;
+                map.serialize_entry(&1, &COSEKeyTypeId::OKP)?;
                 map.serialize_entry(&3, &self.alg)?;
-                map.serialize_entry(&-1, &(key.curve as u8))?;
+                map.serialize_entry(&-1, &key.curve)?;
                 map.serialize_entry(&-2, &serde_bytes::Bytes::new(&key.x))?;
             }
             COSEKeyType::EC2(key) => {
-                map.serialize_entry(&1, &(COSEKeyTypeId::EC2 as u8))?;
+                map.serialize_entry(&1, &COSEKeyTypeId::EC2)?;
                 map.serialize_entry(&3, &self.alg)?;
-                map.serialize_entry(&-1, &(key.curve as u8))?;
+                map.serialize_entry(&-1, &key.curve)?;
                 map.serialize_entry(&-2, &serde_bytes::Bytes::new(&key.x))?;
                 map.serialize_entry(&-3, &serde_bytes::Bytes::new(&key.y))?;
             }
             COSEKeyType::RSA(key) => {
-                map.serialize_entry(&1, &(COSEKeyTypeId::RSA as u8))?;
+                map.serialize_entry(&1, &COSEKeyTypeId::RSA)?;
                 map.serialize_entry(&3, &self.alg)?;
                 map.serialize_entry(&-1, &serde_bytes::Bytes::new(&key.n))?;
                 map.serialize_entry(&-2, &serde_bytes::Bytes::new(&key.e))?;
