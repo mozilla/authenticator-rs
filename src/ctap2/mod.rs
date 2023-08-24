@@ -480,11 +480,7 @@ pub fn register<Dev: FidoDevice>(
                 send_status(&status, crate::StatusUpdate::PresenceRequired);
                 let msg = dummy_make_credentials_cmd();
                 let _ = dev.send_msg_cancellable(&msg, alive); // Ignore answer, return "CredentialExcluded"
-                callback.call(Err(HIDError::Command(CommandError::StatusCode(
-                    StatusCode::CredentialExcluded,
-                    None,
-                ))
-                .into()));
+                callback.call(Err(AuthenticatorError::CredentialExcluded));
                 return false;
             }
         }
