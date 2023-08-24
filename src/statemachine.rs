@@ -10,7 +10,6 @@ use crate::ctap2::client_data::ClientDataHash;
 use crate::ctap2::commands::client_pin::Pin;
 use crate::ctap2::commands::get_assertion::GetAssertionResult;
 use crate::ctap2::commands::make_credentials::MakeCredentialsResult;
-use crate::ctap2::preflight::silently_discover_credentials;
 use crate::ctap2::server::{
     PublicKeyCredentialDescriptor, RelyingParty, RelyingPartyWrapper, ResidentKeyRequirement,
     RpIdHash, UserVerificationRequirement,
@@ -98,7 +97,6 @@ impl StateMachine {
         dev: &mut Device,
         selector: &Sender<DeviceSelectorEvent>,
         status: &Sender<crate::StatusUpdate>,
-        auto_select: bool,
         keep_alive: &dyn Fn() -> bool,
     ) -> bool {
         let (tx, rx) = channel();
@@ -118,14 +116,6 @@ impl StateMachine {
 
         // Blocking recv. DeviceSelector will tell us what to do
         match rx.recv() {
-            Ok(DeviceCommand::Blink) if auto_select => {
-                // The caller knows it wants to select this device. Now that we've received
-                // a blink command from the device selector, we can request to be selected.
-                // We may be racing several devices here.
-                selector
-                    .send(DeviceSelectorEvent::SelectedToken(dev.id()))
-                    .is_ok()
-            }
             Ok(DeviceCommand::Blink) => {
                 // The caller wants the user to choose a device. Send a status update and blink
                 // this device. NOTE: We send one status update per device, so the recipient should be
@@ -216,7 +206,7 @@ impl StateMachine {
                     Some(dev) => dev,
                     None => return,
                 };
-                if !Self::wait_for_device_selector(&mut dev, &selector, &status, false, alive) {
+                if !Self::wait_for_device_selector(&mut dev, &selector, &status, alive) {
                     return;
                 };
 
@@ -294,41 +284,13 @@ impl StateMachine {
                     Some(dev) => dev,
                     None => return,
                 };
-
-                let args = args.clone();
-
-                // Attempt to silently discover credentials. If we find useful credentials, then we
-                // can potentially skip a device selection tap. We may find acceptable credentials
-                // on several devices. In that case, the first device to ask for automatic
-                // selection will be selected.
-                let silent_creds = silently_discover_credentials(
-                    &mut dev,
-                    &args.allow_list,
-                    &RelyingPartyWrapper::from(args.relying_party_id.as_str()),
-                    &ClientDataHash(args.client_data_hash),
-                );
-                let mut auto_select = !silent_creds.is_empty();
-                if silent_creds.is_empty() && !args.allow_list.is_empty() {
-                    // Check if we have (U2F / server-side) credentials bound to the alternate RP ID.
-                    if let Some(ref alt_rp_id) = args.alternate_rp_id {
-                        let silent_creds = silently_discover_credentials(
-                            &mut dev,
-                            &args.allow_list,
-                            &RelyingPartyWrapper::from(alt_rp_id.as_str()),
-                            &ClientDataHash(args.client_data_hash),
-                        );
-                        auto_select = !silent_creds.is_empty();
-                    }
-                }
-
-                if !Self::wait_for_device_selector(&mut dev, &selector, &status, auto_select, alive)
-                {
+                if !Self::wait_for_device_selector(&mut dev, &selector, &status, alive) {
                     return;
                 };
 
                 info!("Device {:?} continues with the signing process", dev.id());
 
-                if ctap2::sign(&mut dev, args, status, callback.clone(), alive) {
+                if ctap2::sign(&mut dev, args.clone(), status, callback.clone(), alive) {
                     // ctap2::sign returns true if it called the callback with Ok(..).  Cancel all
                     // other tokens in case we skipped the "blinking"-action and went straight for
                     // the actual request.
@@ -374,7 +336,7 @@ impl StateMachine {
                     return;
                 }
 
-                if !Self::wait_for_device_selector(&mut dev, &selector, &status, false, alive) {
+                if !Self::wait_for_device_selector(&mut dev, &selector, &status, alive) {
                     return;
                 };
                 ctap2::reset_helper(&mut dev, selector, status, callback.clone(), alive);
@@ -412,7 +374,7 @@ impl StateMachine {
                     return;
                 }
 
-                if !Self::wait_for_device_selector(&mut dev, &selector, &status, false, alive) {
+                if !Self::wait_for_device_selector(&mut dev, &selector, &status, alive) {
                     return;
                 };
 
@@ -678,7 +640,7 @@ impl StateMachine {
                     return;
                 }
 
-                if !Self::wait_for_device_selector(&mut dev, &selector, &status, false, alive) {
+                if !Self::wait_for_device_selector(&mut dev, &selector, &status, alive) {
                     return;
                 };
 
