@@ -430,7 +430,7 @@ pub fn register<Dev: FidoDevice>(
         args.pub_cred_params,
         args.exclude_list,
         options,
-        args.extensions,
+        args.extensions.into(),
     );
 
     let mut skip_uv = false;
@@ -556,7 +556,7 @@ pub fn sign<Dev: FidoDevice>(
             user_presence: Some(args.user_presence_req),
             user_verification: None,
         },
-        args.extensions,
+        args.extensions.into(),
     );
 
     let mut skip_uv = false;
