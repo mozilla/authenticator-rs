@@ -974,7 +974,7 @@ pub(crate) fn bio_enrollment(
                             &status,
                             StatusUpdate::InteractiveManagement(
                                 InteractiveUpdate::BioEnrollmentUpdate((
-                                    BioEnrollmentResult::DeleteSucess(auth_info.clone()),
+                                    BioEnrollmentResult::DeleteSuccess(auth_info.clone()),
                                     Some(pin_uv_auth_result),
                                 )),
                             ),
