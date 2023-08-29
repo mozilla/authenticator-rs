@@ -12,6 +12,7 @@ use crate::ctap2::client_data::ClientDataHash;
 use crate::ctap2::commands::get_next_assertion::GetNextAssertion;
 use crate::ctap2::commands::make_credentials::UserVerification;
 use crate::ctap2::server::{
+    AuthenticationExtensionsClientInputs,
     PublicKeyCredentialDescriptor, RelyingPartyWrapper, RpIdHash, User, UserVerificationRequirement,
 };
 use crate::ctap2::utils::{read_be_u32, read_byte};
@@ -134,6 +135,12 @@ impl Serialize for HmacSecretExtension {
 #[derive(Debug, Clone, Default)]
 pub struct GetAssertionExtensions {
     pub hmac_secret: Option<HmacSecretExtension>,
+}
+
+impl From<AuthenticationExtensionsClientInputs> for GetAssertionExtensions {
+    fn from(_input: AuthenticationExtensionsClientInputs) -> Self {
+        Default::default()
+    }
 }
 
 impl Serialize for GetAssertionExtensions {

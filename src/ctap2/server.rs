@@ -329,6 +329,12 @@ pub enum UserVerificationRequirement {
     Required,
 }
 
+#[derive(Copy, Clone, Debug)]
+pub struct AuthenticationExtensionsClientInputs;
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct AuthenticationExtensionsClientOutputs;
+
 #[cfg(test)]
 mod test {
     use super::{

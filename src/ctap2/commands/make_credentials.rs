@@ -13,6 +13,7 @@ use crate::ctap2::attestation::{
 };
 use crate::ctap2::client_data::ClientDataHash;
 use crate::ctap2::server::{
+    AuthenticationExtensionsClientInputs,
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty,
     RelyingPartyWrapper, RpIdHash, User, UserVerificationRequirement,
 };
@@ -231,6 +232,12 @@ pub struct MakeCredentialsExtensions {
 impl MakeCredentialsExtensions {
     fn has_extensions(&self) -> bool {
         self.pin_min_length.or(self.hmac_secret).is_some()
+    }
+}
+
+impl From<AuthenticationExtensionsClientInputs> for MakeCredentialsExtensions {
+    fn from(_input: AuthenticationExtensionsClientInputs) -> Self {
+        Default::default()
     }
 }
 

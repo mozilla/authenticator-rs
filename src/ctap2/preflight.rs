@@ -1,7 +1,6 @@
 use super::client_data::ClientDataHash;
-use super::commands::get_assertion::{GetAssertion, GetAssertionOptions};
+use super::commands::get_assertion::{GetAssertion, GetAssertionExtensions, GetAssertionOptions};
 use super::commands::{PinUvAuthCommand, RequestCtap1, Retryable};
-use crate::authenticatorservice::GetAssertionExtensions;
 use crate::consts::{PARAMETER_SIZE, U2F_AUTHENTICATE, U2F_CHECK_IS_REGISTERED};
 use crate::crypto::PinUvAuthToken;
 use crate::ctap2::server::{PublicKeyCredentialDescriptor, RelyingPartyWrapper};
