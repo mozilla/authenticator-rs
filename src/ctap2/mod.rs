@@ -76,16 +76,30 @@ macro_rules! unwrap_result {
 macro_rules! handle_errors {
     ($error: expr, $status: expr, $callback: expr, $pin_uv_auth_result: expr, $skip_uv: expr) => {
         let mut _dummy_skip_puap = false;
+        let mut _dummy_cached_puat = false;
         handle_errors!(
             $error,
             $status,
             $callback,
             $pin_uv_auth_result,
             $skip_uv,
-            _dummy_skip_puap
+            _dummy_skip_puap,
+            _dummy_cached_puat
         )
     };
     ($error: expr, $status: expr, $callback: expr, $pin_uv_auth_result: expr, $skip_uv: expr, $skip_puap: expr) => {
+        let mut _dummy_cached_puat = false;
+        handle_errors!(
+            $error,
+            $status,
+            $callback,
+            $pin_uv_auth_result,
+            $skip_uv,
+            $skip_puap,
+            _dummy_cached_puat
+        )
+    };
+    ($error: expr, $status: expr, $callback: expr, $pin_uv_auth_result: expr, $skip_uv: expr, $skip_puap: expr, $cached_puat: expr) => {
         match $error {
             HIDError::Command(CommandError::StatusCode(StatusCode::ChannelBusy, _)) => {
                 // Channel busy. Client SHOULD retry the request after a short delay.
@@ -129,6 +143,18 @@ macro_rules! handle_errors {
             HIDError::Command(CommandError::StatusCode(StatusCode::CredentialExcluded, _)) => {
                 $callback.call(Err(AuthenticatorError::CredentialExcluded));
                 break;
+            }
+            HIDError::Command(CommandError::StatusCode(StatusCode::PinAuthInvalid, _))
+                if $cached_puat =>
+            {
+                // We used the cached PUAT, but it was invalid. So we just try again
+                // without the cached one and potentially trigger a new PIN/UV entry from
+                // the user. This happens e.g. in interactive-mode, when we first
+                // executed some bio-related operations with a bio-PUAT and then some
+                // credential management with the bio-PUAT, which fails.
+                $cached_puat = false;
+                $skip_puap = false;
+                continue;
             }
             e => {
                 warn!("error happened: {e}");
@@ -832,6 +858,7 @@ pub(crate) fn bio_enrollment(
     };
 
     let mut skip_puap = false;
+    let mut cached_puat = false; // If we were provided with a cached puat from the outside
     let mut pin_uv_auth_result = puat_result
         .clone()
         .unwrap_or(PinUvAuthResult::NoAuthRequired);
@@ -840,6 +867,7 @@ pub(crate) fn bio_enrollment(
         | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingUvWithPermissions(t))
         | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingPinWithPermissions(t)) => {
             skip_puap = true;
+            cached_puat = true;
             unwrap_result!(bio_cmd.set_pin_uv_auth_param(Some(t)), callback);
         }
         _ => {}
@@ -1013,7 +1041,15 @@ pub(crate) fn bio_enrollment(
                 };
             }
             Err(e) => {
-                handle_errors!(e, status, callback, pin_uv_auth_result, skip_uv, skip_puap);
+                handle_errors!(
+                    e,
+                    status,
+                    callback,
+                    pin_uv_auth_result,
+                    skip_uv,
+                    skip_puap,
+                    cached_puat
+                );
             }
         }
     }
@@ -1078,6 +1114,7 @@ pub(crate) fn credential_management(
     let mut remaining_cred_ids = 0;
     let mut current_rp = 0;
     let mut skip_puap = false;
+    let mut cached_puat = false; // If we were provided with a cached puat from the outside
     let mut pin_uv_auth_result = puat_result
         .clone()
         .unwrap_or(PinUvAuthResult::NoAuthRequired);
@@ -1086,6 +1123,7 @@ pub(crate) fn credential_management(
         | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingUvWithPermissions(t))
         | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingPinWithPermissions(t)) => {
             skip_puap = true;
+            cached_puat = true;
             unwrap_result!(cred_management.set_pin_uv_auth_param(Some(t)), callback);
         }
         _ => {}
@@ -1311,7 +1349,15 @@ pub(crate) fn credential_management(
                 };
             }
             Err(e) => {
-                handle_errors!(e, status, callback, pin_uv_auth_result, skip_uv, skip_puap);
+                handle_errors!(
+                    e,
+                    status,
+                    callback,
+                    pin_uv_auth_result,
+                    skip_uv,
+                    skip_puap,
+                    cached_puat
+                );
             }
         }
     }
@@ -1344,6 +1390,7 @@ pub(crate) fn configure_authenticator(
     }
 
     let mut skip_puap = false;
+    let mut cached_puat = false; // If we were provided with a cached puat from the outside
     let mut pin_uv_auth_result = puat_result
         .clone()
         .unwrap_or(PinUvAuthResult::NoAuthRequired);
@@ -1352,6 +1399,7 @@ pub(crate) fn configure_authenticator(
         | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingUvWithPermissions(t))
         | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingPinWithPermissions(t)) => {
             skip_puap = true;
+            cached_puat = true;
             unwrap_result!(authcfg.set_pin_uv_auth_param(Some(t)), callback);
         }
         _ => {}
@@ -1397,7 +1445,15 @@ pub(crate) fn configure_authenticator(
                 return true;
             }
             Err(e) => {
-                handle_errors!(e, status, callback, pin_uv_auth_result, skip_uv);
+                handle_errors!(
+                    e,
+                    status,
+                    callback,
+                    pin_uv_auth_result,
+                    skip_uv,
+                    skip_puap,
+                    cached_puat
+                );
             }
         }
     }
