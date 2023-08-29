@@ -302,7 +302,7 @@ impl<'de> Deserialize<'de> for PublicKeyCredentialDescriptor {
             }
         }
 
-        deserializer.deserialize_bytes(PublicKeyCredentialDescriptorVisitor)
+        deserializer.deserialize_any(PublicKeyCredentialDescriptorVisitor)
     }
 }
 
