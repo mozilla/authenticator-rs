@@ -987,11 +987,19 @@ pub(crate) fn bio_enrollment(
                         return true;
                     }
                     BioEnrollmentCommand::SetFriendlyName(_) => {
+                        let res = match command {
+                            BioEnrollmentCmd::StartNewEnrollment(..) => {
+                                let auth_info =
+                                    unwrap_option!(dev.refresh_authenticator_info(), callback);
+                                BioEnrollmentResult::AddSuccess(auth_info.clone())
+                            }
+                            _ => BioEnrollmentResult::UpdateSuccess,
+                        };
                         send_status(
                             &status,
                             StatusUpdate::InteractiveManagement(
                                 InteractiveUpdate::BioEnrollmentUpdate((
-                                    BioEnrollmentResult::UpdateSuccess,
+                                    res,
                                     Some(pin_uv_auth_result),
                                 )),
                             ),
