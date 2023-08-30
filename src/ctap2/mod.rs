@@ -149,9 +149,8 @@ macro_rules! handle_errors {
             {
                 // We used the cached PUAT, but it was invalid. So we just try again
                 // without the cached one and potentially trigger a new PIN/UV entry from
-                // the user. This happens e.g. in interactive-mode, when we first
-                // executed some bio-related operations with a bio-PUAT and then some
-                // credential management with the bio-PUAT, which fails.
+                // the user. This happens e.g. if the PUAT expires, or we get an all-zeros
+                // PUAT from outside for whatever reason, etc.
                 $cached_puat = false;
                 $skip_puap = false;
                 continue;
@@ -862,10 +861,13 @@ pub(crate) fn bio_enrollment(
     let mut pin_uv_auth_result = puat_result
         .clone()
         .unwrap_or(PinUvAuthResult::NoAuthRequired);
+    // See, if we have a cached PUAT with matching permissions.
     match puat_result {
         Some(PinUvAuthResult::SuccessGetPinToken(t))
         | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingUvWithPermissions(t))
-        | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingPinWithPermissions(t)) => {
+        | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingPinWithPermissions(t))
+            if t.permissions == PinUvAuthTokenPermission::BioEnrollment =>
+        {
             skip_puap = true;
             cached_puat = true;
             unwrap_result!(bio_cmd.set_pin_uv_auth_param(Some(t)), callback);
@@ -1118,10 +1120,13 @@ pub(crate) fn credential_management(
     let mut pin_uv_auth_result = puat_result
         .clone()
         .unwrap_or(PinUvAuthResult::NoAuthRequired);
+    // See, if we have a cached PUAT with matching permissions.
     match puat_result {
         Some(PinUvAuthResult::SuccessGetPinToken(t))
         | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingUvWithPermissions(t))
-        | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingPinWithPermissions(t)) => {
+        | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingPinWithPermissions(t))
+            if t.permissions == PinUvAuthTokenPermission::CredentialManagement =>
+        {
             skip_puap = true;
             cached_puat = true;
             unwrap_result!(cred_management.set_pin_uv_auth_param(Some(t)), callback);
@@ -1397,7 +1402,9 @@ pub(crate) fn configure_authenticator(
     match puat_result {
         Some(PinUvAuthResult::SuccessGetPinToken(t))
         | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingUvWithPermissions(t))
-        | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingPinWithPermissions(t)) => {
+        | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingPinWithPermissions(t))
+            if t.permissions == PinUvAuthTokenPermission::AuthenticatorConfiguration =>
+        {
             skip_puap = true;
             cached_puat = true;
             unwrap_result!(authcfg.set_pin_uv_auth_param(Some(t)), callback);

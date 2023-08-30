@@ -358,8 +358,7 @@ impl SharedSecret {
 pub struct PinUvAuthToken {
     pub pin_protocol: PinUvAuthProtocol,
     pin_token: Vec<u8>,
-    #[allow(dead_code)] // Not yet used
-    permissions: PinUvAuthTokenPermission,
+    pub permissions: PinUvAuthTokenPermission,
 }
 
 impl PinUvAuthToken {
