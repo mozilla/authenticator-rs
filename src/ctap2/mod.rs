@@ -866,7 +866,8 @@ pub(crate) fn bio_enrollment(
         Some(PinUvAuthResult::SuccessGetPinToken(t))
         | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingUvWithPermissions(t))
         | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingPinWithPermissions(t))
-            if t.permissions == PinUvAuthTokenPermission::BioEnrollment =>
+            if t.permissions
+                .contains(PinUvAuthTokenPermission::BioEnrollment) =>
         {
             skip_puap = true;
             cached_puat = true;
