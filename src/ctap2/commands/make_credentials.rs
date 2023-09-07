@@ -226,7 +226,7 @@ impl UserVerification for MakeCredentialsOptions {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Default, Clone, Serialize)]
 pub struct MakeCredentialsExtensions {
     #[serde(skip_serializing)]
     pub cred_props: Option<bool>,
@@ -239,7 +239,7 @@ pub struct MakeCredentialsExtensions {
 }
 
 impl MakeCredentialsExtensions {
-    fn has_extensions(&self) -> bool {
+    fn has_content(&self) -> bool {
         self.min_pin_length.is_some() || self.hmac_secret.is_some() || self.cred_protect.is_some()
     }
 }
@@ -390,7 +390,7 @@ impl Serialize for MakeCredentials {
         if !self.exclude_list.is_empty() {
             map_len += 1;
         }
-        if self.extensions.has_extensions() {
+        if self.extensions.has_content() {
             map_len += 1;
         }
         if self.options.has_some() {
@@ -420,7 +420,7 @@ impl Serialize for MakeCredentials {
         if !self.exclude_list.is_empty() {
             map.serialize_entry(&0x05, &self.exclude_list)?;
         }
-        if self.extensions.has_extensions() {
+        if self.extensions.has_content() {
             map.serialize_entry(&0x06, &self.extensions)?;
         }
         if self.options.has_some() {
