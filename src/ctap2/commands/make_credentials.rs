@@ -228,8 +228,8 @@ impl UserVerification for MakeCredentialsOptions {
 
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct MakeCredentialsExtensions {
-    #[serde(rename = "pinMinLength", skip_serializing_if = "Option::is_none")]
-    pub pin_min_length: Option<bool>,
+    #[serde(rename = "minPinLength", skip_serializing_if = "Option::is_none")]
+    pub min_pin_length: Option<bool>,
     #[serde(rename = "hmac-secret", skip_serializing_if = "Option::is_none")]
     pub hmac_secret: Option<bool>,
     #[serde(skip_serializing)]
@@ -238,7 +238,7 @@ pub struct MakeCredentialsExtensions {
 
 impl MakeCredentialsExtensions {
     fn has_extensions(&self) -> bool {
-        self.pin_min_length.or(self.hmac_secret).is_some()
+        self.min_pin_length.or(self.hmac_secret).is_some()
     }
 }
 
@@ -246,6 +246,7 @@ impl From<AuthenticationExtensionsClientInputs> for MakeCredentialsExtensions {
     fn from(input: AuthenticationExtensionsClientInputs) -> Self {
         Self {
             cred_props: input.cred_props,
+            min_pin_length: input.min_pin_length,
             ..Default::default()
         }
     }

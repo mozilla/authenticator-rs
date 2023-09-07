@@ -68,15 +68,15 @@ impl<'de> Deserialize<'de> for HmacSecretResponse {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct Extension {
-    #[serde(rename = "pinMinLength", skip_serializing_if = "Option::is_none")]
-    pub pin_min_length: Option<u64>,
+    #[serde(rename = "minPinLength", skip_serializing_if = "Option::is_none")]
+    pub min_pin_length: Option<u64>,
     #[serde(rename = "hmac-secret", skip_serializing_if = "Option::is_none")]
     pub hmac_secret: Option<HmacSecretResponse>,
 }
 
 impl Extension {
     fn has_some(&self) -> bool {
-        self.pin_min_length.is_some() || self.hmac_secret.is_some()
+        self.min_pin_length.is_some() || self.hmac_secret.is_some()
     }
 }
 

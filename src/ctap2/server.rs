@@ -333,6 +333,7 @@ pub enum UserVerificationRequirement {
 pub struct AuthenticationExtensionsClientInputs {
     pub app_id: Option<String>,
     pub cred_props: Option<bool>,
+    pub min_pin_length: Option<bool>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
