@@ -133,9 +133,11 @@ impl Serialize for HmacSecretExtension {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default, Clone, Serialize)]
 pub struct GetAssertionExtensions {
+    #[serde(skip_serializing)]
     pub app_id: Option<String>,
+    #[serde(rename = "hmac-secret", skip_serializing_if = "Option::is_none")]
     pub hmac_secret: Option<HmacSecretExtension>,
 }
 
@@ -148,19 +150,8 @@ impl From<AuthenticationExtensionsClientInputs> for GetAssertionExtensions {
     }
 }
 
-impl Serialize for GetAssertionExtensions {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut map = serializer.serialize_map(Some(1))?;
-        map.serialize_entry(&"hmac-secret", &self.hmac_secret)?;
-        map.end()
-    }
-}
-
 impl GetAssertionExtensions {
-    fn has_extensions(&self) -> bool {
+    fn has_content(&self) -> bool {
         self.hmac_secret.is_some()
     }
 }
@@ -275,7 +266,7 @@ impl Serialize for GetAssertion {
         if !self.allow_list.is_empty() {
             map_len += 1;
         }
-        if self.extensions.has_extensions() {
+        if self.extensions.has_content() {
             map_len += 1;
         }
         if self.options.has_some() {
@@ -301,7 +292,7 @@ impl Serialize for GetAssertion {
         if !self.allow_list.is_empty() {
             map.serialize_entry(&3, &self.allow_list)?;
         }
-        if self.extensions.has_extensions() {
+        if self.extensions.has_content() {
             map.serialize_entry(&4, &self.extensions)?;
         }
         if self.options.has_some() {
