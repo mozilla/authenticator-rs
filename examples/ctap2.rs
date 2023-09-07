@@ -180,6 +180,7 @@ fn main() {
         resident_key_req: ResidentKeyRequirement::Discouraged,
         extensions: AuthenticationExtensionsClientInputs {
             cred_props: Some(true),
+            min_pin_length: Some(true),
             ..Default::default()
         },
         pin: None,
