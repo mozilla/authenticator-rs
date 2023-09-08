@@ -290,6 +290,10 @@ impl MakeCredentials {
             enterprise_attestation: None,
         }
     }
+
+    pub fn finalize_result(&self, result: &mut MakeCredentialsResult) {
+        // Handle extensions whose outputs are not encoded in the authenticator data.
+    }
 }
 
 impl PinUvAuthCommand for MakeCredentials {
@@ -477,20 +481,25 @@ impl RequestCtap2 for MakeCredentials {
 
         let status: StatusCode = input[0].into();
         debug!("response status code: {:?}", status);
-        if input.len() > 1 {
+        if input.len() == 1 {
             if status.is_ok() {
-                Ok(from_slice(&input[1..]).map_err(CommandError::Deserializing)?)
+                return Err(HIDError::Command(CommandError::InputTooSmall));
             } else {
-                let data: Value = from_slice(&input[1..]).map_err(CommandError::Deserializing)?;
-                Err(HIDError::Command(CommandError::StatusCode(
-                    status,
-                    Some(data),
-                )))
+                return Err(HIDError::Command(CommandError::StatusCode(status, None)));
             }
-        } else if status.is_ok() {
-            Err(HIDError::Command(CommandError::InputTooSmall))
+        }
+
+        if status.is_ok() {
+            let mut output: MakeCredentialsResult =
+                from_slice(&input[1..]).map_err(CommandError::Deserializing)?;
+            self.finalize_result(&mut output);
+            Ok(output)
         } else {
-            Err(HIDError::Command(CommandError::StatusCode(status, None)))
+            let data: Value = from_slice(&input[1..]).map_err(CommandError::Deserializing)?;
+            Err(HIDError::Command(CommandError::StatusCode(
+                status,
+                Some(data),
+            )))
         }
     }
 
@@ -498,7 +507,9 @@ impl RequestCtap2 for MakeCredentials {
         &self,
         dev: &mut Dev,
     ) -> Result<Self::Output, HIDError> {
-        dev.make_credentials(self)
+        let mut output = dev.make_credentials(self)?;
+        self.finalize_result(&mut output);
+        Ok(output)
     }
 }
 

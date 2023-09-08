@@ -195,6 +195,10 @@ impl GetAssertion {
             pin_uv_auth_param: None,
         }
     }
+
+    pub fn finalize_result(&self, result: &mut GetAssertionResult) {
+        // Handle extensions whose outputs are not encoded in the authenticator data.
+    }
 }
 
 impl PinUvAuthCommand for GetAssertion {
@@ -348,16 +352,19 @@ impl RequestCtap1 for GetAssertion {
             return Err(Retryable::Error(HIDError::ApduStatus(err)));
         }
 
-        GetAssertionResult::from_ctap1(input, &self.rp.hash(), add_info)
-            .map_err(HIDError::Command)
-            .map_err(Retryable::Error)
+        let mut output = GetAssertionResult::from_ctap1(input, &self.rp.hash(), add_info)
+            .map_err(|e| Retryable::Error(HIDError::Command(e)))?;
+        self.finalize_result(&mut output);
+        Ok(output)
     }
 
     fn send_to_virtual_device<Dev: VirtualFidoDevice>(
         &self,
         dev: &mut Dev,
     ) -> Result<Self::Output, HIDError> {
-        dev.get_assertion(self)
+        let mut output = dev.get_assertion(self)?;
+        self.finalize_result(&mut output);
+        Ok(output)
     }
 }
 
@@ -387,30 +394,36 @@ impl RequestCtap2 for GetAssertion {
             status,
             &input[1..]
         );
-        if input.len() > 1 {
+        if input.len() == 1 {
             if status.is_ok() {
-                let assertion: GetAssertionResponse =
-                    from_slice(&input[1..]).map_err(CommandError::Deserializing)?;
-                let number_of_credentials = assertion.number_of_credentials.unwrap_or(1);
-                let mut assertions = Vec::with_capacity(number_of_credentials);
-                assertions.push(assertion.into());
-
-                let msg = GetNextAssertion;
-                // We already have one, so skipping 0
-                for _ in 1..number_of_credentials {
-                    let new_cred = dev.send_cbor(&msg)?;
-                    assertions.push(new_cred.into());
-                }
-
-                Ok(GetAssertionResult(assertions))
-            } else {
-                let data: Value = from_slice(&input[1..]).map_err(CommandError::Deserializing)?;
-                Err(CommandError::StatusCode(status, Some(data)).into())
+                return Err(CommandError::InputTooSmall.into());
             }
-        } else if status.is_ok() {
-            Err(CommandError::InputTooSmall.into())
+            return Err(CommandError::StatusCode(status, None).into());
+        }
+
+        if status.is_ok() {
+            let assertion: GetAssertionResponse =
+                from_slice(&input[1..]).map_err(CommandError::Deserializing)?;
+            let number_of_credentials = assertion.number_of_credentials.unwrap_or(1);
+            let mut assertions = Vec::with_capacity(number_of_credentials);
+            assertions.push(assertion.into());
+
+            let msg = GetNextAssertion;
+            // We already have one, so skipping 0
+            for _ in 1..number_of_credentials {
+                let new_cred = dev.send_cbor(&msg)?;
+                assertions.push(new_cred.into());
+            }
+
+            let mut output = GetAssertionResult {
+                assertions,
+                extensions: Default::default(),
+            };
+            self.finalize_result(&mut output);
+            Ok(output)
         } else {
-            Err(CommandError::StatusCode(status, None).into())
+            let data: Value = from_slice(&input[1..]).map_err(CommandError::Deserializing)?;
+            Err(CommandError::StatusCode(status, Some(data)).into())
         }
     }
 
@@ -418,7 +431,9 @@ impl RequestCtap2 for GetAssertion {
         &self,
         dev: &mut Dev,
     ) -> Result<Self::Output, HIDError> {
-        dev.get_assertion(self)
+        let mut output = dev.get_assertion(self)?;
+        self.finalize_result(&mut output);
+        Ok(output)
     }
 }
 
