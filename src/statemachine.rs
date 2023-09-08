@@ -242,7 +242,7 @@ impl StateMachine {
                 ..Default::default()
             });
             app_ids.push(rp_id.hash().as_ref().to_vec());
-            if let Some(app_id) = args.alternate_rp_id {
+            if let Some(app_id) = args.extensions.app_id {
                 let app_id = RelyingPartyWrapper::Data(RelyingParty {
                     id: app_id,
                     ..Default::default()

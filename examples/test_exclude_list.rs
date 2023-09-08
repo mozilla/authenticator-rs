@@ -222,7 +222,6 @@ fn main() {
         allow_list: vec![],
         extensions: Default::default(),
         pin: None,
-        alternate_rp_id: None,
         use_ctap1_fallback: false,
         user_verification_req: UserVerificationRequirement::Preferred,
         user_presence_req: true,

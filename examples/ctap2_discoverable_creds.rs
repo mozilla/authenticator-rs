@@ -297,7 +297,6 @@ fn main() {
         user_presence_req: true,
         extensions: Default::default(),
         pin: None,
-        alternate_rp_id: None,
         use_ctap1_fallback: false,
     };
 
@@ -324,7 +323,7 @@ fn main() {
                 println!(
                     "{:?}",
                     assertion_object
-                        .0
+                        .assertions
                         .iter()
                         .map(|x| x.user.clone().unwrap().name.unwrap()) // Unwrapping here, as these shouldn't fail
                         .collect::<Vec<_>>()

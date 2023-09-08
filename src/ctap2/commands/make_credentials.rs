@@ -500,9 +500,8 @@ impl RequestCtap2 for MakeCredentials {
         if input.len() == 1 {
             if status.is_ok() {
                 return Err(HIDError::Command(CommandError::InputTooSmall));
-            } else {
-                return Err(HIDError::Command(CommandError::StatusCode(status, None)));
             }
+            return Err(HIDError::Command(CommandError::StatusCode(status, None)));
         }
 
         if status.is_ok() {

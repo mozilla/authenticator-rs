@@ -556,19 +556,19 @@ pub fn sign<Dev: FidoDevice>(
     let mut allow_list = args.allow_list;
     let mut rp_id = args.relying_party_id;
     let client_data_hash = ClientDataHash(args.client_data_hash);
-    if let Some(alt_rp_id) = args.alternate_rp_id {
+    if let Some(ref app_id) = args.extensions.app_id {
         if !allow_list.is_empty() {
             // Try to silently discover U2F credentials that require the FIDO App ID extension. If
             // any are found, we should use the alternate RP ID instead of the provided RP ID.
             let silent_creds = silently_discover_credentials(
                 dev,
                 &allow_list,
-                &RelyingPartyWrapper::from(alt_rp_id.as_str()),
+                &RelyingPartyWrapper::from(app_id.as_str()),
                 &client_data_hash,
             );
             if !silent_creds.is_empty() {
                 allow_list = silent_creds;
-                rp_id = alt_rp_id;
+                rp_id = app_id.to_string();
             }
         }
     }

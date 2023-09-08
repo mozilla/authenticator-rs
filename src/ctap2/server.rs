@@ -331,6 +331,7 @@ pub enum UserVerificationRequirement {
 
 #[derive(Clone, Debug, Default)]
 pub struct AuthenticationExtensionsClientInputs {
+    pub app_id: Option<String>,
     pub cred_props: Option<bool>,
 }
 
@@ -341,6 +342,7 @@ pub struct CredentialProperties {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct AuthenticationExtensionsClientOutputs {
+    pub app_id: Option<bool>,
     pub cred_props: Option<CredentialProperties>,
 }
 
