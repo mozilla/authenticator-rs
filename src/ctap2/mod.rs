@@ -35,7 +35,8 @@ use crate::ctap2::preflight::{
     silently_discover_credentials,
 };
 use crate::ctap2::server::{
-    RelyingPartyWrapper, ResidentKeyRequirement, UserVerificationRequirement,
+    CredentialProtectionPolicy, RelyingPartyWrapper, ResidentKeyRequirement,
+    UserVerificationRequirement,
 };
 use crate::errors::{AuthenticatorError, UnsupportedOption};
 use crate::statecallback::StateCallback;
@@ -446,6 +447,24 @@ pub fn register<Dev: FidoDevice>(
             )));
             return false;
         }
+    }
+
+    // Client extension processing for credProtect:
+    // "When enforceCredentialProtectionPolicy is true, and credentialProtectionPolicy's value is
+    // [not "Optional"], the platform SHOULD NOT create the credential in a way that does not
+    // implement the requested protection policy. (For example, by creating it on an authenticator
+    // that does not support this extension.)"
+    if args.extensions.enforce_credential_protection_policy == Some(true)
+        && args.extensions.credential_protection_policy
+            != Some(CredentialProtectionPolicy::UserVerificationOptional)
+        && dev
+            .get_authenticator_info()
+            .map_or(false, |info| !info.supports_cred_protect())
+    {
+        callback.call(Err(AuthenticatorError::UnsupportedOption(
+            UnsupportedOption::CredProtect,
+        )));
+        return false;
     }
 
     let mut makecred = MakeCredentials::new(

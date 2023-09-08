@@ -1,6 +1,6 @@
 use super::utils::{from_slice_stream, read_be_u16, read_be_u32, read_byte};
 use crate::crypto::COSEAlgorithm;
-use crate::ctap2::server::RpIdHash;
+use crate::ctap2::server::{CredentialProtectionPolicy, RpIdHash};
 use crate::ctap2::utils::serde_parse_err;
 use crate::{crypto::COSEKey, errors::AuthenticatorError};
 use base64::Engine;
@@ -72,11 +72,13 @@ pub struct Extension {
     pub min_pin_length: Option<u64>,
     #[serde(rename = "hmac-secret", skip_serializing_if = "Option::is_none")]
     pub hmac_secret: Option<HmacSecretResponse>,
+    #[serde(rename = "credProtect", skip_serializing_if = "Option::is_none")]
+    pub cred_protect: Option<CredentialProtectionPolicy>,
 }
 
 impl Extension {
     fn has_some(&self) -> bool {
-        self.min_pin_length.is_some() || self.hmac_secret.is_some()
+        self.min_pin_length.is_some() || self.hmac_secret.is_some() || self.cred_protect.is_some()
     }
 }
 

@@ -14,8 +14,8 @@ use crate::ctap2::attestation::{
 use crate::ctap2::client_data::ClientDataHash;
 use crate::ctap2::server::{
     AuthenticationExtensionsClientInputs, AuthenticationExtensionsClientOutputs,
-    PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty,
-    RelyingPartyWrapper, RpIdHash, User, UserVerificationRequirement,
+    CredentialProtectionPolicy, PublicKeyCredentialDescriptor, PublicKeyCredentialParameters,
+    RelyingParty, RelyingPartyWrapper, RpIdHash, User, UserVerificationRequirement,
 };
 use crate::ctap2::utils::{read_byte, serde_parse_err};
 use crate::errors::AuthenticatorError;
@@ -228,17 +228,19 @@ impl UserVerification for MakeCredentialsOptions {
 
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct MakeCredentialsExtensions {
+    #[serde(skip_serializing)]
+    pub cred_props: Option<bool>,
+    #[serde(rename = "credProtect", skip_serializing_if = "Option::is_none")]
+    pub cred_protect: Option<CredentialProtectionPolicy>,
     #[serde(rename = "minPinLength", skip_serializing_if = "Option::is_none")]
     pub min_pin_length: Option<bool>,
     #[serde(rename = "hmac-secret", skip_serializing_if = "Option::is_none")]
     pub hmac_secret: Option<bool>,
-    #[serde(skip_serializing)]
-    pub cred_props: Option<bool>,
 }
 
 impl MakeCredentialsExtensions {
     fn has_extensions(&self) -> bool {
-        self.min_pin_length.or(self.hmac_secret).is_some()
+        self.min_pin_length.is_some() || self.hmac_secret.is_some() || self.cred_protect.is_some()
     }
 }
 
@@ -246,6 +248,7 @@ impl From<AuthenticationExtensionsClientInputs> for MakeCredentialsExtensions {
     fn from(input: AuthenticationExtensionsClientInputs) -> Self {
         Self {
             cred_props: input.cred_props,
+            cred_protect: input.credential_protection_policy,
             min_pin_length: input.min_pin_length,
             ..Default::default()
         }
