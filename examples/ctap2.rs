@@ -8,9 +8,9 @@ use authenticator::{
     },
     crypto::COSEAlgorithm,
     ctap2::server::{
-        AuthenticationExtensionsClientInputs,
+        AuthenticationExtensionsClientInputs, CredentialProtectionPolicy,
         PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty,
-        RelyingPartyWrapper, ResidentKeyRequirement, Transport, User, UserVerificationRequirement,
+        ResidentKeyRequirement, Transport, User, UserVerificationRequirement,
     },
     statecallback::StateCallback,
     Pin, StatusPinUv, StatusUpdate,
@@ -181,6 +181,9 @@ fn main() {
         extensions: AuthenticationExtensionsClientInputs {
             cred_props: Some(true),
             min_pin_length: Some(true),
+            credential_protection_policy: Some(
+                CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIDList,
+            ),
             ..Default::default()
         },
         pin: None,
