@@ -135,12 +135,16 @@ impl Serialize for HmacSecretExtension {
 
 #[derive(Debug, Clone, Default)]
 pub struct GetAssertionExtensions {
+    pub app_id: Option<String>,
     pub hmac_secret: Option<HmacSecretExtension>,
 }
 
 impl From<AuthenticationExtensionsClientInputs> for GetAssertionExtensions {
-    fn from(_input: AuthenticationExtensionsClientInputs) -> Self {
-        Default::default()
+    fn from(input: AuthenticationExtensionsClientInputs) -> Self {
+        Self {
+            app_id: input.app_id,
+            ..Default::default()
+        }
     }
 }
 
@@ -198,6 +202,17 @@ impl GetAssertion {
 
     pub fn finalize_result(&self, result: &mut GetAssertionResult) {
         // Handle extensions whose outputs are not encoded in the authenticator data.
+        // 1. appId
+        if let Some(app_id) = &self.extensions.app_id {
+            result.extensions.app_id = result
+                .assertions
+                .first()
+                .map(|assertion| {
+                    assertion.auth_data.rp_id_hash
+                        == RelyingPartyWrapper::from(app_id.as_str()).hash()
+                })
+                .or(Some(false));
+        }
     }
 }
 

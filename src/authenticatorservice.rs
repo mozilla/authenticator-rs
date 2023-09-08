@@ -38,7 +38,6 @@ pub struct SignArgs {
     pub user_presence_req: bool,
     pub extensions: AuthenticationExtensionsClientInputs,
     pub pin: Option<Pin>,
-    pub alternate_rp_id: Option<String>,
     pub use_ctap1_fallback: bool,
 }
 
@@ -472,7 +471,6 @@ mod tests {
                     user_presence_req: true,
                     extensions: Default::default(),
                     pin: None,
-                    alternate_rp_id: None,
                     use_ctap1_fallback: false,
                 },
                 status_tx,
@@ -572,7 +570,6 @@ mod tests {
                     user_presence_req: true,
                     extensions: Default::default(),
                     pin: None,
-                    alternate_rp_id: None,
                     use_ctap1_fallback: false,
                 },
                 status_tx,

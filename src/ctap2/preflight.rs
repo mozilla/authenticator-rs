@@ -165,7 +165,7 @@ pub(crate) fn do_credential_list_filtering_ctap2<Dev: FidoDevice>(
                 // This chunk contains a key_handle that is already known to the device.
                 // Filter out all credentials the device returned. Those are valid.
                 let credential_ids = response
-                    .0
+                    .assertions
                     .iter()
                     .filter_map(|a| a.credentials.clone())
                     .collect();
