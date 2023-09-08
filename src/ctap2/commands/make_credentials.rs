@@ -13,7 +13,7 @@ use crate::ctap2::attestation::{
 };
 use crate::ctap2::client_data::ClientDataHash;
 use crate::ctap2::server::{
-    AuthenticationExtensionsClientInputs,
+    AuthenticationExtensionsClientInputs, AuthenticationExtensionsClientOutputs,
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty,
     RelyingPartyWrapper, RpIdHash, User, UserVerificationRequirement,
 };
@@ -34,6 +34,7 @@ use std::io::{Cursor, Read};
 #[derive(Debug, PartialEq, Eq)]
 pub struct MakeCredentialsResult {
     pub att_obj: AttestationObject,
+    pub extensions: AuthenticationExtensionsClientOutputs,
 }
 
 impl MakeCredentialsResult {
@@ -99,7 +100,10 @@ impl MakeCredentialsResult {
             att_stmt,
         };
 
-        Ok(Self { att_obj })
+        Ok(Self {
+            att_obj,
+            extensions: Default::default(),
+        })
     }
 }
 
@@ -182,6 +186,7 @@ impl<'de> Deserialize<'de> for MakeCredentialsResult {
                         auth_data,
                         att_stmt,
                     },
+                    extensions: Default::default(),
                 })
             }
         }
@@ -606,6 +611,7 @@ pub mod test {
 
         let expected = MakeCredentialsResult {
             att_obj: create_attestation_obj(),
+            extensions: Default::default(),
         };
 
         assert_eq!(make_cred_result, expected);
@@ -760,7 +766,10 @@ pub mod test {
             }),
         };
 
-        let expected = MakeCredentialsResult { att_obj };
+        let expected = MakeCredentialsResult {
+            att_obj,
+            extensions: Default::default(),
+        };
 
         assert_eq!(make_cred_result, expected);
     }
