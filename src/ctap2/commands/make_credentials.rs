@@ -232,6 +232,8 @@ pub struct MakeCredentialsExtensions {
     pub pin_min_length: Option<bool>,
     #[serde(rename = "hmac-secret", skip_serializing_if = "Option::is_none")]
     pub hmac_secret: Option<bool>,
+    #[serde(skip_serializing)]
+    pub cred_props: Option<bool>,
 }
 
 impl MakeCredentialsExtensions {
@@ -241,8 +243,11 @@ impl MakeCredentialsExtensions {
 }
 
 impl From<AuthenticationExtensionsClientInputs> for MakeCredentialsExtensions {
-    fn from(_input: AuthenticationExtensionsClientInputs) -> Self {
-        Default::default()
+    fn from(input: AuthenticationExtensionsClientInputs) -> Self {
+        Self {
+            cred_props: input.cred_props,
+            ..Default::default()
+        }
     }
 }
 
@@ -293,6 +298,17 @@ impl MakeCredentials {
 
     pub fn finalize_result(&self, result: &mut MakeCredentialsResult) {
         // Handle extensions whose outputs are not encoded in the authenticator data.
+        // 1. credProps
+        //      "set clientExtensionResults["credProps"]["rk"] to the value of the
+        //      requireResidentKey parameter that was used in the invocation of the
+        //      authenticatorMakeCredential operation."
+        if self.extensions.cred_props == Some(true) {
+            result
+                .extensions
+                .cred_props
+                .get_or_insert(Default::default())
+                .rk = self.options.resident_key.unwrap_or(false);
+        }
     }
 }
 
