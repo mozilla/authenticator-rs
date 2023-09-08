@@ -178,6 +178,7 @@ fn main() {
         resident_key_req: ResidentKeyRequirement::Discouraged,
         extensions: AuthenticationExtensionsClientInputs {
             cred_props: Some(true),
+            hmac_create_secret: Some(matches.opt_present("hmac_secret")),
             min_pin_length: Some(true),
             credential_protection_policy: Some(
                 CredentialProtectionPolicy::UserVerificationOptionalWithCredentialIDList,

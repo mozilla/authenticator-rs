@@ -385,9 +385,10 @@ impl<'de> Deserialize<'de> for CredentialProtectionPolicy {
 pub struct AuthenticationExtensionsClientInputs {
     pub app_id: Option<String>,
     pub cred_props: Option<bool>,
-    pub min_pin_length: Option<bool>,
     pub credential_protection_policy: Option<CredentialProtectionPolicy>,
     pub enforce_credential_protection_policy: Option<bool>,
+    pub hmac_create_secret: Option<bool>,
+    pub min_pin_length: Option<bool>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -399,6 +400,7 @@ pub struct CredentialProperties {
 pub struct AuthenticationExtensionsClientOutputs {
     pub app_id: Option<bool>,
     pub cred_props: Option<CredentialProperties>,
+    pub hmac_create_secret: Option<bool>,
 }
 
 #[cfg(test)]

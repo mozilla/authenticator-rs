@@ -9,7 +9,7 @@ use crate::crypto::{
 };
 use crate::ctap2::attestation::{
     AAGuid, AttestationObject, AttestationStatement, AttestationStatementFidoU2F,
-    AttestedCredentialData, AuthenticatorData, AuthenticatorDataFlags,
+    AttestedCredentialData, AuthenticatorData, AuthenticatorDataFlags, HmacSecretResponse,
 };
 use crate::ctap2::client_data::ClientDataHash;
 use crate::ctap2::server::{
@@ -232,15 +232,15 @@ pub struct MakeCredentialsExtensions {
     pub cred_props: Option<bool>,
     #[serde(rename = "credProtect", skip_serializing_if = "Option::is_none")]
     pub cred_protect: Option<CredentialProtectionPolicy>,
-    #[serde(rename = "minPinLength", skip_serializing_if = "Option::is_none")]
-    pub min_pin_length: Option<bool>,
     #[serde(rename = "hmac-secret", skip_serializing_if = "Option::is_none")]
     pub hmac_secret: Option<bool>,
+    #[serde(rename = "minPinLength", skip_serializing_if = "Option::is_none")]
+    pub min_pin_length: Option<bool>,
 }
 
 impl MakeCredentialsExtensions {
     fn has_content(&self) -> bool {
-        self.min_pin_length.is_some() || self.hmac_secret.is_some() || self.cred_protect.is_some()
+        self.cred_protect.is_some() || self.hmac_secret.is_some() || self.min_pin_length.is_some()
     }
 }
 
@@ -249,6 +249,7 @@ impl From<AuthenticationExtensionsClientInputs> for MakeCredentialsExtensions {
         Self {
             cred_props: input.cred_props,
             cred_protect: input.credential_protection_policy,
+            hmac_secret: input.hmac_create_secret,
             min_pin_length: input.min_pin_length,
             ..Default::default()
         }
@@ -312,6 +313,17 @@ impl MakeCredentials {
                 .cred_props
                 .get_or_insert(Default::default())
                 .rk = self.options.resident_key.unwrap_or(false);
+        }
+
+        // 2. hmac-secret
+        //      The extension returns a flag in the authenticator data which we need to mirror as a
+        //      client output.
+        if self.extensions.hmac_secret == Some(true) {
+            if let Some(HmacSecretResponse::Confirmed(flag)) =
+                result.att_obj.auth_data.extensions.hmac_secret
+            {
+                result.extensions.hmac_create_secret = Some(flag);
+            }
         }
     }
 }
