@@ -176,12 +176,8 @@ fn main() {
         }],
         user_verification_req: UserVerificationRequirement::Preferred,
         resident_key_req: ResidentKeyRequirement::Discouraged,
-        extensions: MakeCredentialsExtensions {
-            hmac_secret: if matches.opt_present("hmac_secret") {
-                Some(true)
-            } else {
-                None
-            },
+        extensions: AuthenticationExtensionsClientInputs {
+            cred_props: Some(true),
             ..Default::default()
         },
         pin: None,

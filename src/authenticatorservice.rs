@@ -4,8 +4,9 @@
 
 use crate::ctap2::commands::client_pin::Pin;
 use crate::ctap2::server::{
-    AuthenticationExtensionsClientInputs, PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty,
-    ResidentKeyRequirement, User, UserVerificationRequirement,
+    AuthenticationExtensionsClientInputs, PublicKeyCredentialDescriptor,
+    PublicKeyCredentialParameters, RelyingParty, ResidentKeyRequirement, User,
+    UserVerificationRequirement,
 };
 use crate::errors::*;
 use crate::manager::Manager;

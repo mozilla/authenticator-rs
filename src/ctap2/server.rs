@@ -329,11 +329,20 @@ pub enum UserVerificationRequirement {
     Required,
 }
 
-#[derive(Copy, Clone, Debug)]
-pub struct AuthenticationExtensionsClientInputs;
+#[derive(Clone, Debug, Default)]
+pub struct AuthenticationExtensionsClientInputs {
+    pub cred_props: Option<bool>,
+}
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct AuthenticationExtensionsClientOutputs;
+pub struct CredentialProperties {
+    pub rk: bool,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct AuthenticationExtensionsClientOutputs {
+    pub cred_props: Option<CredentialProperties>,
+}
 
 #[cfg(test)]
 mod test {
