@@ -251,7 +251,6 @@ impl From<AuthenticationExtensionsClientInputs> for MakeCredentialsExtensions {
             cred_protect: input.credential_protection_policy,
             hmac_secret: input.hmac_create_secret,
             min_pin_length: input.min_pin_length,
-            ..Default::default()
         }
     }
 }
