@@ -77,7 +77,7 @@ pub struct Extension {
 }
 
 impl Extension {
-    fn has_some(&self) -> bool {
+    pub fn has_some(&self) -> bool {
         self.min_pin_length.is_some() || self.hmac_secret.is_some() || self.cred_protect.is_some()
     }
 }
