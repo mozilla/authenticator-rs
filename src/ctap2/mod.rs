@@ -454,12 +454,13 @@ pub fn register<Dev: FidoDevice>(
     // [not "Optional"], the platform SHOULD NOT create the credential in a way that does not
     // implement the requested protection policy. (For example, by creating it on an authenticator
     // that does not support this extension.)"
+    let dev_supports_cred_protect = dev
+        .get_authenticator_info()
+        .map_or(false, |info| info.supports_cred_protect());
     if args.extensions.enforce_credential_protection_policy == Some(true)
         && args.extensions.credential_protection_policy
             != Some(CredentialProtectionPolicy::UserVerificationOptional)
-        && dev
-            .get_authenticator_info()
-            .map_or(false, |info| !info.supports_cred_protect())
+        && !dev_supports_cred_protect
     {
         callback.call(Err(AuthenticatorError::UnsupportedOption(
             UnsupportedOption::CredProtect,
