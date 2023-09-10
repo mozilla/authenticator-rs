@@ -477,16 +477,19 @@ impl RequestCtap1 for MakeCredentials {
             return Err(Retryable::Error(HIDError::ApduStatus(err)));
         }
 
-        MakeCredentialsResult::from_ctap1(input, &self.rp.hash())
-            .map_err(HIDError::Command)
-            .map_err(Retryable::Error)
+        let mut output = MakeCredentialsResult::from_ctap1(input, &self.rp.hash())
+            .map_err(|e| Retryable::Error(HIDError::Command(e)))?;
+        self.finalize_result(&mut output);
+        Ok(output)
     }
 
     fn send_to_virtual_device<Dev: VirtualFidoDevice>(
         &self,
         dev: &mut Dev,
     ) -> Result<Self::Output, HIDError> {
-        dev.make_credentials(self)
+        let mut output = dev.make_credentials(self)?;
+        self.finalize_result(&mut output);
+        Ok(output)
     }
 }
 
