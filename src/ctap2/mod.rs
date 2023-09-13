@@ -886,8 +886,10 @@ pub(crate) fn bio_enrollment(
         Some(PinUvAuthResult::SuccessGetPinToken(t))
         | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingUvWithPermissions(t))
         | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingPinWithPermissions(t))
-            if t.permissions
-                .contains(PinUvAuthTokenPermission::BioEnrollment) =>
+            if !authinfo.versions.contains(&AuthenticatorVersion::FIDO_2_1) // Only 2.1 has a permission-system
+                || use_legacy_preview // Preview doesn't use permissions
+                || t.permissions
+                    .contains(PinUvAuthTokenPermission::BioEnrollment) =>
         {
             skip_puap = true;
             cached_puat = true;
@@ -1154,7 +1156,10 @@ pub(crate) fn credential_management(
         Some(PinUvAuthResult::SuccessGetPinToken(t))
         | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingUvWithPermissions(t))
         | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingPinWithPermissions(t))
-            if t.permissions == PinUvAuthTokenPermission::CredentialManagement =>
+            if !authinfo.versions.contains(&AuthenticatorVersion::FIDO_2_1) // Only 2.1 has a permission-system
+                || use_legacy_preview // Preview doesn't use permissions
+                || t.permissions
+                    .contains(PinUvAuthTokenPermission::CredentialManagement) =>
         {
             skip_puap = true;
             cached_puat = true;
@@ -1432,7 +1437,8 @@ pub(crate) fn configure_authenticator(
         Some(PinUvAuthResult::SuccessGetPinToken(t))
         | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingUvWithPermissions(t))
         | Some(PinUvAuthResult::SuccessGetPinUvAuthTokenUsingPinWithPermissions(t))
-            if t.permissions == PinUvAuthTokenPermission::AuthenticatorConfiguration =>
+            if t.permissions
+                .contains(PinUvAuthTokenPermission::AuthenticatorConfiguration) =>
         {
             skip_puap = true;
             cached_puat = true;
