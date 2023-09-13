@@ -993,7 +993,7 @@ impl Serialize for COSEKey {
         S: Serializer,
     {
         let map_len = match &self.key {
-            COSEKeyType::OKP(_) => 3,
+            COSEKeyType::OKP(_) => 4,
             COSEKeyType::EC2(_) => 5,
             COSEKeyType::RSA(_) => 4,
         };
