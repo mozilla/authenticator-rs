@@ -724,9 +724,9 @@ impl COSEEC2Key {
         der::sequence(&[
             // algorithm: AlgorithmIdentifier
             &der::sequence(&[
-                /* algorithm */
+                // algorithm
                 &der::object_id(der::OID_EC_PUBLIC_KEY_BYTES)?,
-                /* parameters */
+                // parameters
                 &der::object_id(der::OID_SECP256R1_BYTES)?,
             ])?,
             // subjectPublicKey
@@ -759,9 +759,10 @@ impl COSEOKPKey {
         der::sequence(&[
             // algorithm: AlgorithmIdentifier
             &der::sequence(&[
-                /* algorithm */
+                // algorithm
                 &der::object_id(der::OID_ED25519_BYTES)?,
-                /* parameters (absent as per RFC 8410) */
+                // parameters
+                // (absent as per RFC 8410)
             ])?,
             // subjectPublicKey
             &der::bit_string(
@@ -787,8 +788,10 @@ impl COSERSAKey {
         der::sequence(&[
             // algorithm: AlgorithmIdentifier
             &der::sequence(&[
-                /* algorithm */ &der::object_id(der::OID_RS256_BYTES)?,
-                /* parameters */ &der::null()?,
+                // algorithm
+                &der::object_id(der::OID_RS256_BYTES)?,
+                // parameters
+                &der::null()?,
             ])?,
             // subjectPublicKey
             &der::bit_string(

@@ -45,14 +45,16 @@ fn write_tag_and_length(out: &mut Vec<u8>, tag: u8, len: usize) -> Result<()> {
 }
 
 pub fn integer(val: &[u8]) -> Result<Vec<u8>> {
+    if val.is_empty() {
+        return Err(CryptoError::MalformedInput);
+    }
     // trim leading zeros, leaving a single zero if the input is the zero vector.
     let mut val = val;
     while val.len() > 1 && val[0] == 0 {
         val = &val[1..];
     }
-
     let mut out = Vec::with_capacity(MAX_TAG_AND_LENGTH_BYTES + 1 + val.len());
-    if !val.is_empty() && val[0] & 0x80 != 0 {
+    if val[0] & 0x80 != 0 {
         // needs zero prefix
         write_tag_and_length(&mut out, TAG_INTEGER, 1 + val.len())?;
         out.push(0x00);
