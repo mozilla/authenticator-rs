@@ -7,8 +7,8 @@ use authenticator::{
     crypto::COSEAlgorithm,
     ctap2::server::{
         AuthenticationExtensionsClientInputs, PublicKeyCredentialDescriptor,
-        PublicKeyCredentialParameters, RelyingParty, ResidentKeyRequirement, Transport, User,
-        UserVerificationRequirement,
+        PublicKeyCredentialParameters, PublicKeyCredentialUserEntity, RelyingParty,
+        ResidentKeyRequirement, Transport, UserVerificationRequirement,
     },
     statecallback::StateCallback,
     Pin, StatusPinUv, StatusUpdate,
@@ -105,7 +105,7 @@ fn register_user(manager: &mut AuthenticatorService, username: &str, timeout_ms:
         }
     });
 
-    let user = User {
+    let user = PublicKeyCredentialUserEntity {
         id: username.as_bytes().to_vec(),
         name: Some(username.to_string()),
         display_name: None,
