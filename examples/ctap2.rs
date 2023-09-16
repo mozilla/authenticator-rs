@@ -7,8 +7,9 @@ use authenticator::{
     crypto::COSEAlgorithm,
     ctap2::server::{
         AuthenticationExtensionsClientInputs, CredentialProtectionPolicy,
-        PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, RelyingParty,
-        ResidentKeyRequirement, Transport, User, UserVerificationRequirement,
+        PublicKeyCredentialDescriptor, PublicKeyCredentialParameters,
+        PublicKeyCredentialUserEntity, RelyingParty, ResidentKeyRequirement, Transport,
+        UserVerificationRequirement,
     },
     statecallback::StateCallback,
     Pin, StatusPinUv, StatusUpdate,
@@ -139,7 +140,7 @@ fn main() {
         }
     });
 
-    let user = User {
+    let user = PublicKeyCredentialUserEntity {
         id: "user_id".as_bytes().to_vec(),
         name: Some("A. User".to_string()),
         display_name: None,

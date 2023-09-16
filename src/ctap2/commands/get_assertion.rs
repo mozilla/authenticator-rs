@@ -13,7 +13,7 @@ use crate::ctap2::commands::get_next_assertion::GetNextAssertion;
 use crate::ctap2::commands::make_credentials::UserVerification;
 use crate::ctap2::server::{
     AuthenticationExtensionsClientInputs, AuthenticationExtensionsClientOutputs,
-    PublicKeyCredentialDescriptor, RelyingPartyWrapper, RpIdHash, User,
+    PublicKeyCredentialDescriptor, PublicKeyCredentialUserEntity, RelyingPartyWrapper, RpIdHash,
     UserVerificationRequirement,
 };
 use crate::ctap2::utils::{read_be_u32, read_byte};
@@ -449,7 +449,7 @@ pub struct Assertion {
                                                              * mandatory in CTAP2.1 */
     pub auth_data: AuthenticatorData,
     pub signature: Vec<u8>,
-    pub user: Option<User>,
+    pub user: Option<PublicKeyCredentialUserEntity>,
 }
 
 impl From<GetAssertionResponse> for Assertion {
@@ -524,7 +524,7 @@ pub struct GetAssertionResponse {
     pub credentials: Option<PublicKeyCredentialDescriptor>,
     pub auth_data: AuthenticatorData,
     pub signature: Vec<u8>,
-    pub user: Option<User>,
+    pub user: Option<PublicKeyCredentialUserEntity>,
     pub number_of_credentials: Option<usize>,
 }
 
@@ -628,7 +628,8 @@ pub mod test {
         do_credential_list_filtering_ctap1, do_credential_list_filtering_ctap2,
     };
     use crate::ctap2::server::{
-        PublicKeyCredentialDescriptor, RelyingParty, RelyingPartyWrapper, RpIdHash, Transport, User,
+        PublicKeyCredentialDescriptor, PublicKeyCredentialUserEntity, RelyingParty,
+        RelyingPartyWrapper, RpIdHash, Transport,
     };
     use crate::transport::device_selector::Device;
     use crate::transport::hid::HIDDevice;
@@ -778,7 +779,7 @@ pub mod test {
                 0x47, 0xf1, 0x8d, 0xb4, 0x74, 0xc7, 0x47, 0x90, 0xea, 0xab, 0xb1, 0x44, 0x11, 0xe7,
                 0xa0,
             ],
-            user: Some(User {
+            user: Some(PublicKeyCredentialUserEntity {
                 id: vec![
                     0x30, 0x82, 0x01, 0x93, 0x30, 0x82, 0x01, 0x38, 0xa0, 0x03, 0x02, 0x01, 0x02,
                     0x30, 0x82, 0x01, 0x93, 0x30, 0x82, 0x01, 0x38, 0xa0, 0x03, 0x02, 0x01, 0x02,
