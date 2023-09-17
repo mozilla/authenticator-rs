@@ -680,14 +680,33 @@ pub fn sign<Dev: FidoDevice>(
         debug!("{get_assertion:?} using {pin_uv_auth_result:?}");
         debug!("------------------------------------------------------------------");
         send_status(&status, crate::StatusUpdate::PresenceRequired);
-        let resp = dev.send_msg_cancellable(&get_assertion, alive);
-        match resp {
-            Ok(result) => {
-                callback.call(Ok(result));
-                return true;
-            }
+        let mut results = match dev.send_msg_cancellable(&get_assertion, alive) {
+            Ok(results) => results,
             Err(e) => {
                 handle_errors!(e, status, callback, pin_uv_auth_result, skip_uv);
+            }
+        };
+        if results.len() == 1 {
+            callback.call(Ok(results.swap_remove(0)));
+            return true;
+        }
+        let (tx, rx) = channel();
+        let user_entities = results
+            .iter()
+            .filter_map(|x| x.assertion.user.clone())
+            .collect();
+        send_status(
+            &status,
+            crate::StatusUpdate::SelectResultNotice(tx, user_entities),
+        );
+        match rx.recv() {
+            Ok(Some(index)) if index < results.len() => {
+                callback.call(Ok(results.swap_remove(index)));
+                return true;
+            }
+            _ => {
+                callback.call(Err(AuthenticatorError::CancelledByUser));
+                return true;
             }
         }
     }
