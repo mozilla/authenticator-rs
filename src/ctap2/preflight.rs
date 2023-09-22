@@ -44,8 +44,9 @@ impl<'assertion> RequestCtap1 for CheckKeyHandle<'assertion> {
         Ok((apdu, ()))
     }
 
-    fn handle_response_ctap1(
+    fn handle_response_ctap1<Dev: FidoDevice>(
         &self,
+        _dev: &mut Dev,
         status: Result<(), ApduErrorStatus>,
         _input: &[u8],
         _add_info: &Self::AdditionalInfo,
