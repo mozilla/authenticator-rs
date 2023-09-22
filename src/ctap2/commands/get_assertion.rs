@@ -191,7 +191,7 @@ impl GetAssertion {
         }
     }
 
-    pub fn finalize_result(&self, result: &mut GetAssertionResult) {
+    pub fn finalize_result<Dev: FidoDevice>(&self, _dev: &Dev, result: &mut GetAssertionResult) {
         // Handle extensions whose outputs are not encoded in the authenticator data.
         // 1. appId
         if let Some(app_id) = &self.extensions.app_id {
@@ -325,8 +325,9 @@ impl RequestCtap1 for GetAssertion {
         Ok((apdu, key_handle.clone()))
     }
 
-    fn handle_response_ctap1(
+    fn handle_response_ctap1<Dev: FidoDevice>(
         &self,
+        dev: &mut Dev,
         status: Result<(), ApduErrorStatus>,
         input: &[u8],
         add_info: &PublicKeyCredentialDescriptor,
@@ -340,7 +341,7 @@ impl RequestCtap1 for GetAssertion {
 
         let mut result = GetAssertionResult::from_ctap1(input, &self.rp.hash(), add_info)
             .map_err(|e| Retryable::Error(HIDError::Command(e)))?;
-        self.finalize_result(&mut result);
+        self.finalize_result(dev, &mut result);
         // Although there's only one result, we return a vector for consistency with CTAP2.
         Ok(vec![result])
     }
@@ -351,7 +352,7 @@ impl RequestCtap1 for GetAssertion {
     ) -> Result<Self::Output, HIDError> {
         let mut results = dev.get_assertion(self)?;
         for result in results.iter_mut() {
-            self.finalize_result(result);
+            self.finalize_result(dev, result);
         }
         Ok(results)
     }
@@ -412,7 +413,7 @@ impl RequestCtap2 for GetAssertion {
             }
 
             for result in results.iter_mut() {
-                self.finalize_result(result);
+                self.finalize_result(dev, result);
             }
             Ok(results)
         } else {
@@ -427,7 +428,7 @@ impl RequestCtap2 for GetAssertion {
     ) -> Result<Self::Output, HIDError> {
         let mut results = dev.get_assertion(self)?;
         for result in results.iter_mut() {
-            self.finalize_result(result);
+            self.finalize_result(dev, result);
         }
         Ok(results)
     }

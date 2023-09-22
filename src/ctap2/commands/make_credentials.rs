@@ -300,7 +300,7 @@ impl MakeCredentials {
         }
     }
 
-    pub fn finalize_result(&self, result: &mut MakeCredentialsResult) {
+    pub fn finalize_result<Dev: FidoDevice>(&self, _dev: &Dev, result: &mut MakeCredentialsResult) {
         // Handle extensions whose outputs are not encoded in the authenticator data.
         // 1. credProps
         //      "set clientExtensionResults["credProps"]["rk"] to the value of the
@@ -451,8 +451,9 @@ impl RequestCtap1 for MakeCredentials {
         Ok((apdu, ()))
     }
 
-    fn handle_response_ctap1(
+    fn handle_response_ctap1<Dev: FidoDevice>(
         &self,
+        dev: &mut Dev,
         status: Result<(), ApduErrorStatus>,
         input: &[u8],
         _add_info: &(),
@@ -466,7 +467,7 @@ impl RequestCtap1 for MakeCredentials {
 
         let mut output = MakeCredentialsResult::from_ctap1(input, &self.rp.hash())
             .map_err(|e| Retryable::Error(HIDError::Command(e)))?;
-        self.finalize_result(&mut output);
+        self.finalize_result(dev, &mut output);
         Ok(output)
     }
 
@@ -475,7 +476,7 @@ impl RequestCtap1 for MakeCredentials {
         dev: &mut Dev,
     ) -> Result<Self::Output, HIDError> {
         let mut output = dev.make_credentials(self)?;
-        self.finalize_result(&mut output);
+        self.finalize_result(dev, &mut output);
         Ok(output)
     }
 }
@@ -493,7 +494,7 @@ impl RequestCtap2 for MakeCredentials {
 
     fn handle_response_ctap2<Dev: FidoDevice>(
         &self,
-        _dev: &mut Dev,
+        dev: &mut Dev,
         input: &[u8],
     ) -> Result<Self::Output, HIDError> {
         if input.is_empty() {
@@ -512,7 +513,7 @@ impl RequestCtap2 for MakeCredentials {
         if status.is_ok() {
             let mut output: MakeCredentialsResult =
                 from_slice(&input[1..]).map_err(CommandError::Deserializing)?;
-            self.finalize_result(&mut output);
+            self.finalize_result(dev, &mut output);
             Ok(output)
         } else {
             let data: Value = from_slice(&input[1..]).map_err(CommandError::Deserializing)?;
@@ -528,7 +529,7 @@ impl RequestCtap2 for MakeCredentials {
         dev: &mut Dev,
     ) -> Result<Self::Output, HIDError> {
         let mut output = dev.make_credentials(self)?;
-        self.finalize_result(&mut output);
+        self.finalize_result(dev, &mut output);
         Ok(output)
     }
 }
@@ -688,8 +689,14 @@ pub mod test {
             req_serialized, MAKE_CREDENTIALS_SAMPLE_REQUEST_CTAP1,
             "\nGot:      {req_serialized:X?}\nExpected: {MAKE_CREDENTIALS_SAMPLE_REQUEST_CTAP1:X?}"
         );
+        let mut device = Device::new("commands/make_credentials").unwrap(); // not really used
         let make_cred_result = req
-            .handle_response_ctap1(Ok(()), &MAKE_CREDENTIALS_SAMPLE_RESPONSE_CTAP1, &())
+            .handle_response_ctap1(
+                &mut device,
+                Ok(()),
+                &MAKE_CREDENTIALS_SAMPLE_RESPONSE_CTAP1,
+                &(),
+            )
             .expect("Failed to handle CTAP1 response");
 
         let att_obj = AttestationObject {
