@@ -1,4 +1,4 @@
-use super::get_info::AuthenticatorInfo;
+use super::get_info::{AuthenticatorInfo, AuthenticatorVersion};
 use super::{
     Command, CommandError, PinUvAuthCommand, RequestCtap1, RequestCtap2, Retryable, StatusCode,
 };
@@ -300,18 +300,31 @@ impl MakeCredentials {
         }
     }
 
-    pub fn finalize_result<Dev: FidoDevice>(&self, _dev: &Dev, result: &mut MakeCredentialsResult) {
+    pub fn finalize_result<Dev: FidoDevice>(&self, dev: &Dev, result: &mut MakeCredentialsResult) {
+        let maybe_info = dev.get_authenticator_info();
+
         // Handle extensions whose outputs are not encoded in the authenticator data.
         // 1. credProps
         //      "set clientExtensionResults["credProps"]["rk"] to the value of the
         //      requireResidentKey parameter that was used in the invocation of the
         //      authenticatorMakeCredential operation."
-        if self.extensions.cred_props == Some(true) {
+        //      Note: a CTAP 2.0 authenticator is allowed to create a discoverable credential even
+        //      if one was not requested, so there is a case in which we cannot confidently
+        //      return `rk=false` here. We omit the response entirely in this case.
+        let dev_supports_rk = maybe_info.map_or(false, |info| info.options.resident_key);
+        let requested_rk = self.options.resident_key.unwrap_or(false);
+        let max_supported_version = maybe_info.map_or(AuthenticatorVersion::U2F_V2, |info| {
+            info.max_supported_version()
+        });
+        let rk_uncertain = max_supported_version == AuthenticatorVersion::FIDO_2_0
+            && dev_supports_rk
+            && !requested_rk;
+        if self.extensions.cred_props == Some(true) && !rk_uncertain {
             result
                 .extensions
                 .cred_props
                 .get_or_insert(Default::default())
-                .rk = self.options.resident_key.unwrap_or(false);
+                .rk = requested_rk;
         }
 
         // 2. hmac-secret
