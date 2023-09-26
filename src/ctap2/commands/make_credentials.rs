@@ -15,8 +15,7 @@ use crate::ctap2::client_data::ClientDataHash;
 use crate::ctap2::server::{
     AuthenticationExtensionsClientInputs, AuthenticationExtensionsClientOutputs,
     CredentialProtectionPolicy, PublicKeyCredentialDescriptor, PublicKeyCredentialParameters,
-    PublicKeyCredentialUserEntity, RelyingParty, RelyingPartyWrapper, RpIdHash,
-    UserVerificationRequirement,
+    PublicKeyCredentialUserEntity, RelyingParty, RpIdHash, UserVerificationRequirement,
 };
 use crate::ctap2::utils::{read_byte, serde_parse_err};
 use crate::errors::AuthenticatorError;
@@ -25,7 +24,7 @@ use crate::transport::{FidoDevice, VirtualFidoDevice};
 use crate::u2ftypes::CTAP1RequestAPDU;
 use serde::{
     de::{Error as DesError, MapAccess, Unexpected, Visitor},
-    ser::{Error as SerError, SerializeMap},
+    ser::SerializeMap,
     Deserialize, Deserializer, Serialize, Serializer,
 };
 use serde_cbor::{self, de::from_slice, ser, Value};
@@ -259,7 +258,7 @@ impl From<AuthenticationExtensionsClientInputs> for MakeCredentialsExtensions {
 #[derive(Debug, Clone)]
 pub struct MakeCredentials {
     pub client_data_hash: ClientDataHash,
-    pub rp: RelyingPartyWrapper,
+    pub rp: RelyingParty,
     // Note(baloo): If none -> ctap1
     pub user: Option<PublicKeyCredentialUserEntity>,
     pub pub_cred_params: Vec<PublicKeyCredentialParameters>,
@@ -281,7 +280,7 @@ impl MakeCredentials {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         client_data_hash: ClientDataHash,
-        rp: RelyingPartyWrapper,
+        rp: RelyingParty,
         user: Option<PublicKeyCredentialUserEntity>,
         pub_cred_params: Vec<PublicKeyCredentialParameters>,
         exclude_list: Vec<PublicKeyCredentialDescriptor>,
@@ -350,11 +349,7 @@ impl PinUvAuthCommand for MakeCredentials {
     }
 
     fn get_rp_id(&self) -> Option<&String> {
-        match &self.rp {
-            // CTAP1 case: We only have the hash, not the entire RpID
-            RelyingPartyWrapper::Hash(..) => None,
-            RelyingPartyWrapper::Data(r) => Some(&r.id),
-        }
+        Some(&self.rp.id)
     }
 
     fn can_skip_user_verification(
@@ -417,16 +412,7 @@ impl Serialize for MakeCredentials {
 
         let mut map = serializer.serialize_map(Some(map_len))?;
         map.serialize_entry(&0x01, &self.client_data_hash)?;
-        match self.rp {
-            RelyingPartyWrapper::Data(ref d) => {
-                map.serialize_entry(&0x02, &d)?;
-            }
-            _ => {
-                return Err(S::Error::custom(
-                    "Can't serialize a RelyingParty::Hash for CTAP2",
-                ));
-            }
-        }
+        map.serialize_entry(&0x02, &self.rp)?;
         map.serialize_entry(&0x03, &self.user)?;
         map.serialize_entry(&0x04, &self.pub_cred_params)?;
         if !self.exclude_list.is_empty() {
@@ -561,10 +547,7 @@ pub(crate) fn dummy_make_credentials_cmd() -> MakeCredentials {
             208, 206, 230, 252, 125, 191, 89, 154, 145, 157, 184, 251, 149, 19, 17, 38, 159, 14,
             183, 129, 247, 132, 28, 108, 192, 84, 74, 217, 218, 52, 21, 75,
         ]),
-        RelyingPartyWrapper::Data(RelyingParty {
-            id: String::from("make.me.blink"),
-            ..Default::default()
-        }),
+        RelyingParty::from("make.me.blink"),
         Some(PublicKeyCredentialUserEntity {
             id: vec![0],
             name: Some(String::from("make.me.blink")),
@@ -599,7 +582,6 @@ pub mod test {
     use crate::ctap2::server::RpIdHash;
     use crate::ctap2::server::{
         PublicKeyCredentialParameters, PublicKeyCredentialUserEntity, RelyingParty,
-        RelyingPartyWrapper,
     };
     use crate::transport::device_selector::Device;
     use crate::transport::hid::HIDDevice;
@@ -618,10 +600,10 @@ pub mod test {
             }
             .hash()
             .expect("failed to serialize client data"),
-            RelyingPartyWrapper::Data(RelyingParty {
+            RelyingParty {
                 id: String::from("example.com"),
                 name: Some(String::from("Acme")),
-            }),
+            },
             Some(PublicKeyCredentialUserEntity {
                 id: base64::engine::general_purpose::URL_SAFE
                     .decode("MIIBkzCCATigAwIBAjCCAZMwggE4oAMCAQIwggGTMII=")
@@ -675,10 +657,7 @@ pub mod test {
             }
             .hash()
             .expect("failed to serialize client data"),
-            RelyingPartyWrapper::Data(RelyingParty {
-                id: String::from("example.com"),
-                name: Some(String::from("Acme")),
-            }),
+            RelyingParty::from("example.com"),
             Some(PublicKeyCredentialUserEntity {
                 id: base64::engine::general_purpose::URL_SAFE
                     .decode("MIIBkzCCATigAwIBAjCCAZMwggE4oAMCAQIwggGTMII=")
