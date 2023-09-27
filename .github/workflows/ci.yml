@@ -5,6 +5,9 @@ on: [push, pull_request]
 # Make sure CI fails on all warnings, including Clippy lints
 env:
   RUSTFLAGS: "-Dwarnings"
+  # Minimum supported rust version for mozilla-central
+  # https://firefox-source-docs.mozilla.org/writing-rust-code/update-policy.html
+  MOZILLA_MSRV: "1.66"
 
 jobs:
   build:
@@ -82,8 +85,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v2
 
-      - name: Install latest rust toolchain
-        run: rustup target add ${{ matrix.TARGET }}
+      - name: Install the minimum supported rust toolchain for mozilla central
+        run: |
+          rustup toolchain install ${{ env.MOZILLA_MSRV }}
+          rustup +${{ env.MOZILLA_MSRV }} target add ${{ matrix.TARGET }}
+          rustup default ${{ env.MOZILLA_MSRV }}-${{ matrix.TARGET }}
 
       - name: Install Packages
         if: ${{ matrix.ADD_INSTALL }}
