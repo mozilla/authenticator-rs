@@ -14,8 +14,9 @@ use crate::ctap2::attestation::{
 use crate::ctap2::client_data::ClientDataHash;
 use crate::ctap2::server::{
     AuthenticationExtensionsClientInputs, AuthenticationExtensionsClientOutputs,
-    CredentialProtectionPolicy, PublicKeyCredentialDescriptor, PublicKeyCredentialParameters,
-    PublicKeyCredentialUserEntity, RelyingParty, RpIdHash, UserVerificationRequirement,
+    AuthenticatorAttachment, CredentialProtectionPolicy, PublicKeyCredentialDescriptor,
+    PublicKeyCredentialParameters, PublicKeyCredentialUserEntity, RelyingParty, RpIdHash,
+    UserVerificationRequirement,
 };
 use crate::ctap2::utils::{read_byte, serde_parse_err};
 use crate::errors::AuthenticatorError;
@@ -34,6 +35,7 @@ use std::io::{Cursor, Read};
 #[derive(Debug, PartialEq, Eq)]
 pub struct MakeCredentialsResult {
     pub att_obj: AttestationObject,
+    pub attachment: AuthenticatorAttachment,
     pub extensions: AuthenticationExtensionsClientOutputs,
 }
 
@@ -102,6 +104,7 @@ impl MakeCredentialsResult {
 
         Ok(Self {
             att_obj,
+            attachment: AuthenticatorAttachment::Unknown,
             extensions: Default::default(),
         })
     }
@@ -186,6 +189,7 @@ impl<'de> Deserialize<'de> for MakeCredentialsResult {
                         auth_data,
                         att_stmt,
                     },
+                    attachment: AuthenticatorAttachment::Unknown,
                     extensions: Default::default(),
                 })
             }
@@ -302,6 +306,12 @@ impl MakeCredentials {
 
     pub fn finalize_result<Dev: FidoDevice>(&self, dev: &Dev, result: &mut MakeCredentialsResult) {
         let maybe_info = dev.get_authenticator_info();
+
+        result.attachment = match maybe_info {
+            Some(info) if info.options.platform_device => AuthenticatorAttachment::Platform,
+            Some(_) => AuthenticatorAttachment::CrossPlatform,
+            None => AuthenticatorAttachment::Unknown,
+        };
 
         // Handle extensions whose outputs are not encoded in the authenticator data.
         // 1. credProps
@@ -595,7 +605,8 @@ pub mod test {
     use crate::ctap2::commands::{RequestCtap1, RequestCtap2};
     use crate::ctap2::server::RpIdHash;
     use crate::ctap2::server::{
-        PublicKeyCredentialParameters, PublicKeyCredentialUserEntity, RelyingParty,
+        AuthenticatorAttachment, PublicKeyCredentialParameters, PublicKeyCredentialUserEntity,
+        RelyingParty,
     };
     use crate::transport::device_selector::Device;
     use crate::transport::hid::HIDDevice;
@@ -653,6 +664,7 @@ pub mod test {
 
         let expected = MakeCredentialsResult {
             att_obj: create_attestation_obj(),
+            attachment: AuthenticatorAttachment::Unknown,
             extensions: Default::default(),
         };
 
@@ -813,6 +825,7 @@ pub mod test {
 
         let expected = MakeCredentialsResult {
             att_obj,
+            attachment: AuthenticatorAttachment::Unknown,
             extensions: Default::default(),
         };
 

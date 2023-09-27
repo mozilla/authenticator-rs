@@ -13,8 +13,8 @@ use crate::ctap2::commands::get_next_assertion::GetNextAssertion;
 use crate::ctap2::commands::make_credentials::UserVerification;
 use crate::ctap2::server::{
     AuthenticationExtensionsClientInputs, AuthenticationExtensionsClientOutputs,
-    PublicKeyCredentialDescriptor, PublicKeyCredentialUserEntity, RelyingParty, RpIdHash,
-    UserVerificationRequirement,
+    AuthenticatorAttachment, PublicKeyCredentialDescriptor, PublicKeyCredentialUserEntity,
+    RelyingParty, RpIdHash, UserVerificationRequirement,
 };
 use crate::ctap2::utils::{read_be_u32, read_byte};
 use crate::errors::AuthenticatorError;
@@ -191,7 +191,13 @@ impl GetAssertion {
         }
     }
 
-    pub fn finalize_result<Dev: FidoDevice>(&self, _dev: &Dev, result: &mut GetAssertionResult) {
+    pub fn finalize_result<Dev: FidoDevice>(&self, dev: &Dev, result: &mut GetAssertionResult) {
+        result.attachment = match dev.get_authenticator_info() {
+            Some(info) if info.options.platform_device => AuthenticatorAttachment::Platform,
+            Some(_) => AuthenticatorAttachment::CrossPlatform,
+            None => AuthenticatorAttachment::Unknown,
+        };
+
         // Handle extensions whose outputs are not encoded in the authenticator data.
         // 1. appId
         if let Some(app_id) = &self.extensions.app_id {
@@ -399,6 +405,7 @@ impl RequestCtap2 for GetAssertion {
             let mut results = Vec::with_capacity(number_of_credentials);
             results.push(GetAssertionResult {
                 assertion: assertion.into(),
+                attachment: AuthenticatorAttachment::Unknown,
                 extensions: Default::default(),
             });
 
@@ -408,6 +415,7 @@ impl RequestCtap2 for GetAssertion {
                 let assertion = dev.send_cbor(&msg)?;
                 results.push(GetAssertionResult {
                     assertion: assertion.into(),
+                    attachment: AuthenticatorAttachment::Unknown,
                     extensions: Default::default(),
                 });
             }
@@ -457,6 +465,7 @@ impl From<GetAssertionResponse> for Assertion {
 #[derive(Debug, PartialEq, Eq)]
 pub struct GetAssertionResult {
     pub assertion: Assertion,
+    pub attachment: AuthenticatorAttachment,
     pub extensions: AuthenticationExtensionsClientOutputs,
 }
 
@@ -493,6 +502,7 @@ impl GetAssertionResult {
 
         Ok(GetAssertionResult {
             assertion,
+            attachment: AuthenticatorAttachment::Unknown,
             extensions: Default::default(),
         })
     }
@@ -606,8 +616,8 @@ pub mod test {
         do_credential_list_filtering_ctap1, do_credential_list_filtering_ctap2,
     };
     use crate::ctap2::server::{
-        PublicKeyCredentialDescriptor, PublicKeyCredentialUserEntity, RelyingParty, RpIdHash,
-        Transport,
+        AuthenticatorAttachment, PublicKeyCredentialDescriptor, PublicKeyCredentialUserEntity,
+        RelyingParty, RpIdHash, Transport,
     };
     use crate::transport::device_selector::Device;
     use crate::transport::hid::HIDDevice;
@@ -768,6 +778,7 @@ pub mod test {
 
         let expected = vec![GetAssertionResult {
             assertion: expected_assertion,
+            attachment: AuthenticatorAttachment::Unknown,
             extensions: Default::default(),
         }];
         let response = device.send_cbor(&assertion).unwrap();
@@ -900,6 +911,7 @@ pub mod test {
 
         let expected = vec![GetAssertionResult {
             assertion: expected_assertion,
+            attachment: AuthenticatorAttachment::Unknown,
             extensions: Default::default(),
         }];
         assert_eq!(response, expected);
@@ -1041,6 +1053,7 @@ pub mod test {
 
         let expected = vec![GetAssertionResult {
             assertion: expected_assertion,
+            attachment: AuthenticatorAttachment::Unknown,
             extensions: Default::default(),
         }];
         assert_eq!(response, expected);
