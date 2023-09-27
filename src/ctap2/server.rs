@@ -379,6 +379,13 @@ pub struct AuthenticationExtensionsClientOutputs {
     pub hmac_create_secret: Option<bool>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AuthenticatorAttachment {
+    CrossPlatform,
+    Platform,
+    Unknown,
+}
+
 #[cfg(test)]
 mod test {
     use super::{
