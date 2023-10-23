@@ -680,6 +680,9 @@ fn interactive_status_callback(status_rx: Receiver<StatusUpdate>) {
                 );
                 continue;
             }
+            Ok(StatusUpdate::NoDevicesFound) => {
+                println!("STATUS: No device found. Please connect one!");
+            }
             Ok(StatusUpdate::SelectDeviceNotice) => {
                 println!("STATUS: Please select a device by touching one of them.");
             }

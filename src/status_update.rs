@@ -107,6 +107,8 @@ pub enum StatusUpdate {
     InteractiveManagement(InteractiveUpdate),
     /// Sent when a token returns multiple results for a getAssertion request
     SelectResultNotice(Sender<Option<usize>>, Vec<PublicKeyCredentialUserEntity>),
+    /// Inform user that no devices are plugged in
+    NoDevicesFound,
 }
 
 pub(crate) fn send_status(status: &Sender<StatusUpdate>, msg: StatusUpdate) {

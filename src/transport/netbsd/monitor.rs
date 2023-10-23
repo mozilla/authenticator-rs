@@ -65,15 +65,13 @@ where
     pub fn run(&mut self, alive: &dyn Fn() -> bool) -> Result<(), Box<dyn Error>> {
         // Loop until we're stopped by the controlling thread, or fail.
         while alive() {
+            let mut added = Vec::new();
             for n in 0..100 {
                 let uhidpath = OsString::from(format!("/dev/uhid{n}"));
                 match Fd::open(&uhidpath, libc::O_RDWR | libc::O_CLOEXEC) {
                     Ok(uhid) => {
                         // The device is available if it can be opened.
-                        let _ = self
-                            .selector_sender
-                            .send(DeviceSelectorEvent::DevicesAdded(vec![uhidpath.clone()]));
-                        self.add_device(WrappedOpenDevice {
+                        added.push(WrappedOpenDevice {
                             fd: uhid,
                             os_path: uhidpath,
                         });
@@ -84,6 +82,17 @@ where
                         _ => self.remove_device(uhidpath),
                     },
                 }
+            }
+
+            // We have to notify additions in batches to avoid
+            // arbitrarily selecting the first added device and
+            // to know when there are no devices present (then
+            // we send an empty vec here).
+            let _ = self.selector_sender.send(DeviceSelectorEvent::DevicesAdded(
+                added.iter().map(|e| e.os_path.clone()).collect(),
+            ));
+            for device in added {
+                self.add_device(device);
             }
             thread::sleep(Duration::from_millis(POLL_TIMEOUT));
         }

@@ -1,7 +1,5 @@
 use crate::crypto::{CryptoError, PinUvAuthParam, PinUvAuthToken};
-use crate::ctap2::commands::client_pin::{
-    GetPinRetries, GetUvRetries, PinError,
-};
+use crate::ctap2::commands::client_pin::{GetPinRetries, GetUvRetries, PinError};
 use crate::ctap2::commands::get_info::AuthenticatorInfo;
 use crate::ctap2::server::UserVerificationRequirement;
 use crate::errors::AuthenticatorError;

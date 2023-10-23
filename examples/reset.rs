@@ -93,6 +93,9 @@ fn main() {
 
     loop {
         match status_rx.recv() {
+            Ok(StatusUpdate::NoDevicesFound) => {
+                println!("STATUS: No device found. Please connect one!");
+            }
             Ok(StatusUpdate::SelectDeviceNotice) => {
                 println!("ERROR: Please unplug all other tokens that should not be reset!");
                 // Needed to give the tokens enough time to start blinking
