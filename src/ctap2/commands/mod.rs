@@ -1,7 +1,5 @@
 use crate::crypto::{CryptoError, PinUvAuthParam, PinUvAuthToken};
-use crate::ctap2::commands::client_pin::{
-    GetPinRetries, GetUvRetries, PinError,
-};
+use crate::ctap2::commands::client_pin::{GetPinRetries, GetUvRetries, PinError};
 use crate::ctap2::commands::get_info::AuthenticatorInfo;
 use crate::ctap2::server::UserVerificationRequirement;
 use crate::errors::AuthenticatorError;
@@ -50,7 +48,7 @@ impl<T> From<T> for Retryable<T> {
 }
 
 pub trait RequestCtap1: fmt::Debug {
-    type Output;
+    type Output: CtapResponse;
     // E.g.: For GetAssertion, which key-handle is currently being tested
     type AdditionalInfo;
 
@@ -75,7 +73,7 @@ pub trait RequestCtap1: fmt::Debug {
 }
 
 pub trait RequestCtap2: fmt::Debug {
-    type Output;
+    type Output: CtapResponse;
 
     fn command(&self) -> Command;
 
@@ -92,6 +90,10 @@ pub trait RequestCtap2: fmt::Debug {
         dev: &mut Dev,
     ) -> Result<Self::Output, HIDError>;
 }
+
+// Sadly, needs to be 'static to enable us in tests to collect them in a Vec
+// but all of them are 'static, so this is currently no problem.
+pub trait CtapResponse: std::fmt::Debug + 'static {}
 
 #[derive(Debug, Clone)]
 pub enum PinUvAuthResult {
