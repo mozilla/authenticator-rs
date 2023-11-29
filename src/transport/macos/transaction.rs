@@ -46,7 +46,7 @@ impl Transaction {
     {
         let (tx, rx) = channel();
         let timeout = (timeout as f64) / 1000.0;
-        let device_selector = DeviceSelector::run();
+        let device_selector = DeviceSelector::run(status.clone());
         let selector_sender = device_selector.clone_sender();
         let builder = thread::Builder::new();
         let thread = builder

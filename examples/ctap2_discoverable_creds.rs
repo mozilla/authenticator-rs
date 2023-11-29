@@ -15,9 +15,9 @@ use authenticator::{
 };
 use getopts::Options;
 use sha2::{Digest, Sha256};
+use std::io::Write;
 use std::sync::mpsc::{channel, RecvError};
 use std::{env, io, thread};
-use std::io::Write;
 
 fn print_usage(program: &str, opts: Options) {
     println!("------------------------------------------------------------------------");
@@ -83,6 +83,9 @@ fn register_user(manager: &mut AuthenticatorService, username: &str, timeout_ms:
         match status_rx.recv() {
             Ok(StatusUpdate::InteractiveManagement(..)) => {
                 panic!("STATUS: This can't happen when doing non-interactive usage");
+            }
+            Ok(StatusUpdate::NoDevicesFound) => {
+                println!("STATUS: No device found. Please connect one!");
             }
             Ok(StatusUpdate::SelectDeviceNotice) => {
                 println!("STATUS: Please select a device by touching one of them.");
@@ -216,10 +219,7 @@ fn main() {
         "timeout in seconds",
         "SEC",
     );
-    opts.optflag(
-        "s",
-        "skip_reg",
-        "Skip registration");
+    opts.optflag("s", "skip_reg", "Skip registration");
 
     opts.optflag("h", "help", "print this help menu");
     let matches = match opts.parse(&args[1..]) {
@@ -272,6 +272,9 @@ fn main() {
         match status_rx.recv() {
             Ok(StatusUpdate::InteractiveManagement(..)) => {
                 panic!("STATUS: This can't happen when doing non-interactive usage");
+            }
+            Ok(StatusUpdate::NoDevicesFound) => {
+                println!("STATUS: No device found. Please connect one!");
             }
             Ok(StatusUpdate::SelectDeviceNotice) => {
                 println!("STATUS: Please select a device by touching one of them.");
@@ -368,7 +371,13 @@ fn main() {
                 println!("Found credentials:");
                 println!(
                     "{:?}",
-                    assertion_object.assertion.user.clone().unwrap().name.unwrap() // Unwrapping here, as these shouldn't fail
+                    assertion_object
+                        .assertion
+                        .user
+                        .clone()
+                        .unwrap()
+                        .name
+                        .unwrap() // Unwrapping here, as these shouldn't fail
                 );
                 println!("-----------------------------------------------------------------");
                 println!("Done.");
