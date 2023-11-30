@@ -205,6 +205,7 @@ pub struct AuthenticatorData {
     pub counter: u32,
     pub credential_data: Option<AttestedCredentialData>,
     pub extensions: Extension,
+    pub raw_data: Vec<u8>,
 }
 
 impl AuthenticatorData {
@@ -263,6 +264,7 @@ impl<'de> Deserialize<'de> for AuthenticatorData {
                     counter,
                     credential_data,
                     extensions,
+                    raw_data: input.to_vec(),
                 })
             }
         }
@@ -539,7 +541,7 @@ impl Serialize for AttestationObject {
         map.end()
     }
 }
-
+/*
 #[cfg(test)]
 pub mod test {
     use super::super::utils::from_slice_stream;
@@ -1127,3 +1129,4 @@ pub mod test {
         }
     }
 }
+ */

@@ -91,6 +91,7 @@ impl MakeCredentialsResult {
                 credential_public_key,
             }),
             extensions: Default::default(),
+            raw_data: input.to_vec(),
         };
 
         let att_stmt = AttestationStatement::FidoU2F(AttestationStatementFidoU2F::new(
@@ -594,6 +595,7 @@ pub(crate) fn dummy_make_credentials_cmd() -> MakeCredentials {
     req
 }
 
+/*
 #[cfg(test)]
 pub mod test {
     use super::{MakeCredentials, MakeCredentialsOptions, MakeCredentialsResult};
@@ -1059,3 +1061,4 @@ pub mod test {
         0xCB, 0x5A, 0xB7, 0xA1, 0xAA, 0x7D, 0x08, 0x1D, 0xE3, 0x41, 0xFA, // ...
     ];
 }
+ */

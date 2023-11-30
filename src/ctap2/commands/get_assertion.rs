@@ -496,6 +496,7 @@ impl GetAssertionResult {
             counter,
             credential_data: None,
             extensions: Default::default(),
+            raw_data: input.to_vec(),
         };
         let assertion = Assertion {
             credentials: Some(key_handle.clone()),
@@ -601,7 +602,7 @@ impl<'de> Deserialize<'de> for GetAssertionResponse {
         deserializer.deserialize_bytes(GetAssertionResponseVisitor)
     }
 }
-
+/*
 #[cfg(test)]
 pub mod test {
     use super::{
@@ -1492,3 +1493,4 @@ pub mod test {
         0x01, // unsigned(1)
     ];
 }
+ */

@@ -294,6 +294,7 @@ pub mod tests {
                     counter: 0,
                     credential_data,
                     extensions: Extension::default(),
+                    raw_data: vec![],
                 },
                 signature: vec![],
                 user: None,
