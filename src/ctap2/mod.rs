@@ -743,8 +743,8 @@ pub(crate) fn reset_helper<T: From<ResetResult>>(
     }
 }
 
-pub(crate) fn set_or_change_pin_helper<T: From<()>>(
-    dev: &mut Device,
+pub fn set_or_change_pin_helper<T: From<()>, Dev: FidoDevice>(
+    dev: &mut Dev,
     mut current_pin: Option<Pin>,
     new_pin: Pin,
     status: Sender<crate::StatusUpdate>,
@@ -1104,8 +1104,8 @@ pub(crate) fn bio_enrollment(
     false
 }
 
-pub(crate) fn credential_management(
-    dev: &mut Device,
+pub fn credential_management<Dev: FidoDevice>(
+    dev: &mut Dev,
     puat_result: Option<PinUvAuthResult>,
     command: CredManagementCmd,
     status: Sender<crate::StatusUpdate>,
