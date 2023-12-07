@@ -13,6 +13,8 @@
 use std::io;
 use std::mem;
 
+use byteorder::{LittleEndian, ReadBytesExt};
+
 use crate::consts::{FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID};
 #[cfg(target_os = "linux")]
 use crate::consts::{INIT_HEADER_SIZE, MAX_HID_RPT_SIZE};
@@ -84,7 +86,7 @@ impl ReportDescriptorIterator {
         assert!(data.len() <= mem::size_of::<u32>());
 
         // Convert data bytes to a uint.
-        let data = read_uint_le(data);
+        let data = data.read_u8::<LittleEndian>().unwrap();
         match tag_type {
             HID_ITEM_TAGTYPE_USAGE_PAGE => Some(Data::UsagePage { data }),
             HID_ITEM_TAGTYPE_USAGE => Some(Data::Usage { data }),
@@ -150,14 +152,6 @@ fn get_hid_short_item<'a>(buf: &'a [u8]) -> Option<(u8, usize, &'a [u8])> {
         1, /* key length */
         &buf[1..=len],
     ))
-}
-
-fn read_uint_le(buf: &[u8]) -> u32 {
-    assert!(buf.len() <= 4);
-    // Parse the number in little endian byte order.
-    buf.iter()
-        .rev()
-        .fold(0, |num, b| (num << 8) | (u32::from(*b)))
 }
 
 pub fn has_fido_usage(desc: ReportDescriptor) -> bool {
