@@ -85,6 +85,12 @@ pub enum StatusPinUv {
     UvBlocked,
 }
 
+#[derive(Debug, DeriveSer)]
+pub enum MessageDirection {
+    Request,
+    Response,
+}
+
 #[derive(Debug)]
 pub enum InteractiveUpdate {
     StartManagement((Sender<InteractiveRequest>, Option<AuthenticatorInfo>)),
@@ -113,6 +119,8 @@ pub enum StatusUpdate {
     LargeBlobData(Sender<LargeBlobArrayElement>, Vec<u8>),
     /// Inform user that no devices are plugged in
     NoDevicesFound,
+    /// Logging of requests being sent to the device
+    RequestLogging(MessageDirection, String),
 }
 
 pub(crate) fn send_status(status: &Sender<StatusUpdate>, msg: StatusUpdate) {
