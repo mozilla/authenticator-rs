@@ -13,6 +13,8 @@
 use std::io;
 use std::mem;
 
+use byteorder::{LittleEndian, ReadBytesExt};
+
 use crate::consts::{FIDO_USAGE_PAGE, FIDO_USAGE_U2FHID};
 #[cfg(target_os = "linux")]
 use crate::consts::{INIT_HEADER_SIZE, MAX_HID_RPT_SIZE};
@@ -84,7 +86,8 @@ impl ReportDescriptorIterator {
         assert!(data.len() <= mem::size_of::<u32>());
 
         // Convert data bytes to a uint.
-        let data = read_uint_le(data);
+        // let data = read_uint_le(data);
+        let data = data.read_u8::<LittleEndian>().unwrap();
         match tag_type {
             HID_ITEM_TAGTYPE_USAGE_PAGE => Some(Data::UsagePage { data }),
             HID_ITEM_TAGTYPE_USAGE => Some(Data::Usage { data }),
