@@ -1,6 +1,6 @@
 # A Rust library for interacting with CTAP1/CTAP2 Security Keys
 
-[![Build Status](https://travis-ci.org/mozilla/authenticator-rs.svg?branch=master)](https://travis-ci.org/mozilla/authenticator-rs)
+[![Build Status](https://travis-ci.org/mozilla/authenticator-rs.svg?branch=ctap2-2021)](https://travis-ci.org/mozilla/authenticator-rs)
 ![Maturity Level](https://img.shields.io/badge/maturity-release-green.svg)
 
 This is a cross-platform library for interacting with Security Key-type devices via Rust.
