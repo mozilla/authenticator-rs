@@ -1,16 +1,19 @@
 use super::TestDevice;
 use crate::consts::{HIDCmd, CID_BROADCAST};
 use crate::ctap2::commands::{CommandError, RequestCtap1, RequestCtap2, Retryable, StatusCode};
+use crate::status_update::{send_status, MessageDirection};
 use crate::transport::errors::{ApduErrorStatus, HIDError};
 use crate::transport::{FidoDevice, FidoDeviceIO, FidoProtocol};
 use crate::u2ftypes::{U2FDeviceInfo, U2FHIDCont, U2FHIDInit, U2FHIDInitResp};
 use crate::util::io_err;
+use crate::StatusUpdate;
 use rand::{thread_rng, RngCore};
 use std::cmp::Eq;
 use std::fmt;
 use std::hash::Hash;
 use std::io;
 use std::io::{Read, Write};
+use std::sync::mpsc::Sender;
 use std::thread;
 use std::time::Duration;
 
@@ -164,14 +167,14 @@ impl<T: HIDDevice + TestDevice> FidoDeviceIO for T {
         &mut self,
         msg: &Req,
         keep_alive: &dyn Fn() -> bool,
+        status: Option<&Sender<StatusUpdate>>,
     ) -> Result<Out, HIDError> {
         if !self.initialized() {
             return Err(HIDError::DeviceNotInitialized);
         }
-
         match self.get_protocol() {
-            FidoProtocol::CTAP1 => self.send_ctap1_cancellable(msg, keep_alive),
-            FidoProtocol::CTAP2 => self.send_cbor_cancellable(msg, keep_alive),
+            FidoProtocol::CTAP1 => self.send_ctap1_cancellable(msg, keep_alive, status),
+            FidoProtocol::CTAP2 => self.send_cbor_cancellable(msg, keep_alive, status),
         }
     }
 
@@ -179,6 +182,7 @@ impl<T: HIDDevice + TestDevice> FidoDeviceIO for T {
         &mut self,
         msg: &Req,
         keep_alive: &dyn Fn() -> bool,
+        status: Option<&Sender<StatusUpdate>>,
     ) -> Result<Req::Output, HIDError> {
         debug!("sending {:?} to {:?}", msg, self);
         #[cfg(test)]
@@ -186,6 +190,13 @@ impl<T: HIDDevice + TestDevice> FidoDeviceIO for T {
             if self.skip_serialization() {
                 return self.send_ctap2_unserialized(msg);
             }
+        }
+
+        if let Some(status) = status {
+            send_status(
+                status,
+                StatusUpdate::RequestLogging(MessageDirection::Request, format!("{msg:?}")),
+            );
         }
 
         let mut data = msg.wire_format()?;
@@ -197,17 +208,26 @@ impl<T: HIDDevice + TestDevice> FidoDeviceIO for T {
         let buf = buf;
 
         let (cmd, resp) = self.sendrecv(HIDCmd::Cbor, &buf, keep_alive)?;
-        if cmd == HIDCmd::Cbor {
-            Ok(msg.handle_response_ctap2(self, &resp)?)
+        let response = if cmd == HIDCmd::Cbor {
+            let response = msg.handle_response_ctap2(self, &resp)?;
+            Ok(response)
         } else {
             Err(HIDError::UnexpectedCmd(cmd.into()))
+        };
+        if let Some(status) = status {
+            send_status(
+                status,
+                StatusUpdate::RequestLogging(MessageDirection::Response, format!("{response:?}")),
+            );
         }
+        response
     }
 
     fn send_ctap1_cancellable<Req: RequestCtap1>(
         &mut self,
         msg: &Req,
         keep_alive: &dyn Fn() -> bool,
+        status: Option<&Sender<StatusUpdate>>,
     ) -> Result<Req::Output, HIDError> {
         debug!("sending {:?} to {:?}", msg, self);
         #[cfg(test)]
@@ -216,32 +236,52 @@ impl<T: HIDDevice + TestDevice> FidoDeviceIO for T {
                 return self.send_ctap1_unserialized(msg);
             }
         }
+
+        if let Some(status) = status {
+            send_status(
+                status,
+                StatusUpdate::RequestLogging(MessageDirection::Request, format!("{msg:?}")),
+            );
+        }
+
         let (data, add_info) = msg.ctap1_format()?;
 
         while keep_alive() {
             // sendrecv will not block with a CTAP1 device
             let (cmd, mut data) = self.sendrecv(HIDCmd::Msg, &data, &|| true)?;
-            if cmd == HIDCmd::Msg {
+            let response = if cmd == HIDCmd::Msg {
                 if data.len() < 2 {
                     return Err(io_err("Unexpected Response: shorter than expected").into());
                 }
                 let split_at = data.len() - 2;
-                let status = data.split_off(split_at);
+                let msg_status = data.split_off(split_at);
                 // This will bubble up error if status != no error
-                let status = ApduErrorStatus::from([status[0], status[1]]);
+                let msg_status = ApduErrorStatus::from([msg_status[0], msg_status[1]]);
 
-                match msg.handle_response_ctap1(self, status, &data, &add_info) {
-                    Ok(out) => return Ok(out),
+                match msg.handle_response_ctap1(self, msg_status, &data, &add_info) {
+                    Ok(out) => Ok(out),
                     Err(Retryable::Retry) => {
                         // sleep 100ms then loop again
                         // TODO(baloo): meh, use tokio instead?
                         thread::sleep(Duration::from_millis(100));
+                        continue;
                     }
-                    Err(Retryable::Error(e)) => return Err(e),
+                    Err(Retryable::Error(e)) => Err(e),
                 }
             } else {
-                return Err(HIDError::UnexpectedCmd(cmd.into()));
+                Err(HIDError::UnexpectedCmd(cmd.into()))
+            };
+
+            if let Some(status) = status {
+                send_status(
+                    status,
+                    StatusUpdate::RequestLogging(
+                        MessageDirection::Response,
+                        format!("{response:?}"),
+                    ),
+                );
             }
+            return response;
         }
 
         Err(HIDError::Command(CommandError::StatusCode(

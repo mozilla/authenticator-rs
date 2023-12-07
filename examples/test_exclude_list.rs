@@ -44,6 +44,7 @@ fn main() {
         Ok(m) => m,
         Err(f) => panic!("{}", f.to_string()),
     };
+    opts.optflag("l", "logging", "Active request/response logging");
     if matches.opt_present("help") {
         print_usage(&program, opts);
         return;
@@ -74,6 +75,7 @@ fn main() {
     );
     let chall_bytes = Sha256::digest(challenge_str.as_bytes()).into();
 
+    let do_logging = matches.opt_present("logging");
     let (status_tx, status_rx) = channel::<StatusUpdate>();
     thread::spawn(move || loop {
         match status_rx.recv() {
@@ -131,6 +133,13 @@ fn main() {
             }
             Ok(StatusUpdate::LargeBlobData(_, _)) => {
                 panic!("Unexpected large blob data request")
+            }
+            Ok(StatusUpdate::RequestLogging(dir, msg)) => {
+                if do_logging {
+                    println!("{dir:?} -> ");
+                    println!("    {msg}");
+                    println!("--------------------------------------");
+                }
             }
             Err(RecvError) => {
                 println!("STATUS: end");
