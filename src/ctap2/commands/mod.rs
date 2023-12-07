@@ -160,7 +160,7 @@ pub(crate) fn repackage_pin_errors<D: FidoDevice>(
             let cmd = GetPinRetries::new();
             // Treat any error as if the device returned a valid response without a pinRetries
             // field.
-            let resp = dev.send_cbor(&cmd).unwrap_or_default();
+            let resp = dev.send_cbor(&cmd, None).unwrap_or_default();
             AuthenticatorError::PinError(PinError::InvalidPin(resp.pin_retries))
         }
         HIDError::Command(CommandError::StatusCode(StatusCode::PinAuthBlocked, _)) => {
@@ -183,7 +183,7 @@ pub(crate) fn repackage_pin_errors<D: FidoDevice>(
             let cmd = GetUvRetries::new();
             // Treat any error as if the device returned a valid response without a uvRetries
             // field.
-            let resp = dev.send_cbor(&cmd).unwrap_or_default();
+            let resp = dev.send_cbor(&cmd, None).unwrap_or_default();
             AuthenticatorError::PinError(PinError::InvalidUv(resp.uv_retries))
         }
         HIDError::Command(CommandError::StatusCode(StatusCode::UvBlocked, _)) => {

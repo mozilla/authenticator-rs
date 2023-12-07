@@ -291,14 +291,14 @@ impl From<&KeyHandle> for PublicKeyCredentialDescriptor {
     }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize)]
 pub enum ResidentKeyRequirement {
     Discouraged,
     Preferred,
     Required,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize)]
 pub enum UserVerificationRequirement {
     Discouraged,
     Preferred,
@@ -357,7 +357,7 @@ impl<'de> Deserialize<'de> for CredentialProtectionPolicy {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct AuthenticationExtensionsClientInputs {
     pub app_id: Option<String>,
     pub cred_props: Option<bool>,

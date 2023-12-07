@@ -48,6 +48,7 @@ fn main() {
     opts.optflag("s", "hmac_secret", "With hmac-secret");
     opts.optflag("h", "help", "print this help menu");
     opts.optflag("f", "fallback", "Use CTAP1 fallback implementation");
+    opts.optflag("l", "logging", "Active request/response logging");
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
         Err(f) => panic!("{}", f.to_string()),
@@ -81,6 +82,7 @@ fn main() {
     let mut chall_bytes = [0u8; 32];
     thread_rng().fill_bytes(&mut chall_bytes);
 
+    let do_logging = matches.opt_present("logging");
     let (status_tx, status_rx) = channel::<StatusUpdate>();
     thread::spawn(move || loop {
         match status_rx.recv() {
@@ -135,6 +137,13 @@ fn main() {
             }
             Ok(StatusUpdate::SelectResultNotice(_, _)) => {
                 panic!("Unexpected select device notice")
+            }
+            Ok(StatusUpdate::RequestLogging(dir, msg)) => {
+                if do_logging {
+                    println!("{dir:?} -> ");
+                    println!("{msg}");
+                    println!("--------------------------------------");
+                }
             }
             Err(RecvError) => {
                 println!("STATUS: end");

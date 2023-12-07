@@ -79,7 +79,7 @@ pub mod tests {
         msg.extend(add); // + maybe additional data
         device.add_read(&msg, 0);
 
-        device.send_cbor(&Reset {})
+        device.send_cbor(&Reset {}, None)
     }
 
     #[test]

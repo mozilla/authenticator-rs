@@ -573,7 +573,7 @@ fn handle_bio_enrollments(
     }
 }
 
-fn interactive_status_callback(status_rx: Receiver<StatusUpdate>) {
+fn interactive_status_callback(status_rx: Receiver<StatusUpdate>, do_logging: bool) {
     let mut tx = None;
     let mut auth_info = None;
     loop {
@@ -730,6 +730,13 @@ fn interactive_status_callback(status_rx: Receiver<StatusUpdate>) {
             Ok(StatusUpdate::SelectResultNotice(_, _)) => {
                 panic!("Unexpected select device notice")
             }
+            Ok(StatusUpdate::RequestLogging(dir, msg)) => {
+                if do_logging {
+                    println!("{dir:?} -> ");
+                    println!("{msg}");
+                    println!("--------------------------------------");
+                }
+            }
             Err(RecvError) => {
                 println!("STATUS: end");
                 return;
@@ -752,6 +759,7 @@ fn main() {
         "SEC",
     );
     opts.optflag("h", "help", "print this help menu");
+    opts.optflag("l", "logging", "Active request/response logging");
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
         Err(f) => panic!("{}", f.to_string()),
@@ -777,8 +785,9 @@ fn main() {
         }
     };
 
+    let do_logging = matches.opt_present("logging");
     let (status_tx, status_rx) = channel::<StatusUpdate>();
-    thread::spawn(move || interactive_status_callback(status_rx));
+    thread::spawn(move || interactive_status_callback(status_rx, do_logging));
 
     let (manage_tx, manage_rx) = channel();
     let state_callback =
