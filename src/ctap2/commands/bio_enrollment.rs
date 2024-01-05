@@ -632,9 +632,11 @@ pub enum BioEnrollmentResult {
 
 #[cfg(test)]
 mod test {
-    use crate::{crypto::PinUvAuthParam, ctap2::commands::client_pin::PinUvAuthTokenPermission};
-
     use super::{BioEnrollment, BioEnrollmentCommand, BioEnrollmentModality, BioEnrollmentParams};
+    use crate::{
+        crypto::PinUvAuthParam,
+        ctap2::commands::{assert_canonical_cbor_encoding, client_pin::PinUvAuthTokenPermission},
+    };
 
     #[test]
     fn test_serialize_bio_enrollment_params() {
@@ -679,5 +681,35 @@ mod test {
                 2, 5, 68, 1, 2, 3, 4
             ]
         );
+    }
+
+    #[test]
+    fn test_cbor_canonical() {
+        for subcommand in [
+            BioEnrollmentCommand::EnrollBegin(Some(42)),
+            BioEnrollmentCommand::EnrollCaptureNextSample((vec![0xDE, 0xAD, 0xBE, 0xEF], Some(42))),
+            BioEnrollmentCommand::CancelCurrentEnrollment,
+            BioEnrollmentCommand::EnumerateEnrollments,
+            BioEnrollmentCommand::SetFriendlyName((
+                vec![0xDE, 0xAD, 0xBE, 0xEF],
+                "foobar".to_string(),
+            )),
+            BioEnrollmentCommand::RemoveEnrollment(vec![0xDE, 0xAD, 0xBE, 0xEF]),
+            BioEnrollmentCommand::GetFingerprintSensorInfo,
+        ] {
+            let request = BioEnrollment {
+                modality: BioEnrollmentModality::Fingerprint,
+                subcommand,
+                pin_uv_auth_param: Some(PinUvAuthParam {
+                    pin_auth: vec![0xDE, 0xAD, 0xBE, 0xEF],
+                    pin_protocol: crate::crypto::PinUvAuthProtocol(Box::new(
+                        crate::crypto::PinUvAuth2 {},
+                    )),
+                    permissions: crate::ctap2::PinUvAuthTokenPermission::MakeCredential,
+                }),
+                use_legacy_preview: false,
+            };
+            assert_canonical_cbor_encoding(&request);
+        }
     }
 }
