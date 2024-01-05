@@ -39,7 +39,7 @@ mod der;
 
 pub use backend::ecdsa_p256_sha256_sign_raw;
 
-pub struct PinUvAuthProtocol(Box<dyn PinProtocolImpl + Send + Sync>);
+pub struct PinUvAuthProtocol(pub(crate) Box<dyn PinProtocolImpl + Send + Sync>);
 impl PinUvAuthProtocol {
     pub fn id(&self) -> u64 {
         self.0.protocol_id()
@@ -53,7 +53,7 @@ impl PinUvAuthProtocol {
 /// PinProtocolImpl. So we stash a copy of the calling PinUvAuthProtocol in the output SharedSecret.
 /// We need a trick here to tell the compiler that every PinProtocolImpl we define will implement
 /// Clone.
-trait ClonablePinProtocolImpl {
+pub(crate) trait ClonablePinProtocolImpl {
     fn clone_box(&self) -> Box<dyn PinProtocolImpl + Send + Sync>;
 }
 
@@ -73,7 +73,7 @@ impl Clone for PinUvAuthProtocol {
 }
 
 /// CTAP 2.1, Section 6.5.4. PIN/UV Auth Protocol Abstract Definition
-trait PinProtocolImpl: ClonablePinProtocolImpl {
+pub(crate) trait PinProtocolImpl: ClonablePinProtocolImpl {
     fn protocol_id(&self) -> u64;
     fn initialize(&self);
     fn encrypt(&self, key: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, CryptoError>;
@@ -364,10 +364,10 @@ impl PinUvAuthToken {
 
 #[derive(Clone, Debug)]
 pub struct PinUvAuthParam {
-    pin_auth: Vec<u8>,
+    pub(crate) pin_auth: Vec<u8>,
     pub pin_protocol: PinUvAuthProtocol,
     #[allow(dead_code)] // Not yet used
-    permissions: PinUvAuthTokenPermission,
+    pub(crate) permissions: PinUvAuthTokenPermission,
 }
 
 impl PinUvAuthParam {

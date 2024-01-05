@@ -605,7 +605,7 @@ pub mod test {
         AuthenticatorDataFlags, Signature,
     };
     use crate::ctap2::client_data::{Challenge, CollectedClientData, TokenBinding, WebauthnType};
-    use crate::ctap2::commands::{RequestCtap1, RequestCtap2};
+    use crate::ctap2::commands::{assert_canonical_cbor_encoding, RequestCtap1, RequestCtap2};
     use crate::ctap2::server::RpIdHash;
     use crate::ctap2::server::{
         AuthenticatorAttachment, PublicKeyCredentialParameters, PublicKeyCredentialUserEntity,
@@ -654,6 +654,7 @@ pub mod test {
             },
             Default::default(),
         );
+        assert_canonical_cbor_encoding(&req);
 
         let mut device = Device::new("commands/make_credentials").unwrap(); // not really used (all functions ignore it)
         assert_eq!(device.get_protocol(), FidoProtocol::CTAP2);
@@ -709,6 +710,7 @@ pub mod test {
             },
             Default::default(),
         );
+        assert_canonical_cbor_encoding(&req);
 
         let (req_serialized, _) = req
             .ctap1_format()

@@ -5,6 +5,7 @@ use crate::ctap2::server::UserVerificationRequirement;
 use crate::errors::AuthenticatorError;
 use crate::transport::errors::{ApduErrorStatus, HIDError};
 use crate::transport::{FidoDevice, VirtualFidoDevice};
+use serde::Serialize;
 use serde_cbor::{error::Error as CborError, Value};
 use serde_json as json;
 use std::error::Error as StdErrorT;
@@ -475,3 +476,66 @@ impl fmt::Display for CommandError {
 }
 
 impl StdErrorT for CommandError {}
+
+/// Asserts that a value encodes to canonical CBOR encoding according to CTAP2.1 spec (https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-errata-20220621.html#ctap2-canonical-cbor-encoding-form). This function is used by submodules to verify the requests they define.
+fn assert_canonical_cbor_encoding<T: Serialize + fmt::Debug>(value: &T) {
+    let bytes = serde_cbor::to_vec(value)
+        .unwrap_or_else(|e| panic!("Failed to serialize value {:?}: {}", value, e));
+    let opaque_value: serde_cbor::Value = serde_cbor::from_slice(&bytes)
+        .unwrap_or_else(|e| panic!("Failed to deserialize value {:?}: {}", value, e));
+
+    // Below, each requirement is first quoted from the spec and then tested (or explained why testing is not necessary):
+
+    // > Integers MUST be encoded as small as possible.
+    // > - 0 to 23 and -1 to -24 MUST be expressed in the same byte as the major type;
+    // > - 24 to 255 and -25 to -256 MUST be expressed only with an additional uint8_t;
+    // > - 256 to 65535 and -257 to -65536 MUST be expressed only with an additional uint16_t;
+    // > - 65536 to 4294967295 and -65537 to -4294967296 MUST be expressed only with an additional uint32_t.
+    // serde_cbor handles this as required, see https://github.com/pyfisch/cbor/blob/master/src/ser.rs#L140-L182
+
+    // > The representations of any floating-point values are not changed.
+    // > Note: The size of a floating point value—16-, 32-, or 64-bits—is considered part of the value for the purpose of CTAP2. E.g., a 16-bit value of 1.5, say, has different semantic meaning than a 32-bit value of 1.5, and both can be canonical for their own meanings.
+    // serde_cbor won't change u32 to u64 by itself, so this is fine, too
+
+    // > The expression of lengths in major types 2 through 5 MUST be as short as possible. The rules for these lengths follow the above rule for integers.
+    // See above -- serde_cbor handles this for us.
+
+    // > Indefinite-length items MUST be made into definite-length items.
+    // serde_cbor might serialize with indefinite length if serde doesn't know the length when beginning to serialize an array/a map.
+    // We use a trick here: serde_cbor::Value manages arrays/maps as `Array`/`Map`. Both of these have iterators implementing `ExactIterator`, so serde_cbor does not serialize them with indefinite length (unless the length is larger than usize max value, which shouldn't happen in practice). So, just re-serialize and compare with the result of the first serialization.
+
+    let bytes_after_reserializing = serde_cbor::to_vec(&opaque_value)
+        .unwrap_or_else(|e| panic!("Failed to reserialize value {:?}: {}", opaque_value, e));
+    assert_eq!(bytes, bytes_after_reserializing, "Bytes aren't equal before and after reserializing, value is probably not in CTAP2 canonical CBOR encoding form");
+
+    // > The keys in every map MUST be sorted lowest value to highest. The sorting rules are:
+    // > - If the major types are different, the one with the lower value in numerical order sorts earlier.
+    // > - If two keys have different lengths, the shorter one sorts earlier;
+    // > - If two keys have different lengths, the shorter one sorts earlier;
+    // > - If two keys have the same length, the one with the lower value in (byte-wise) lexical order sorts earlier.
+    // This is equivalent to the CBOR core canonicalization requirements (https://datatracker.ietf.org/doc/html/draft-ietf-cbor-7049bis-04#section-4.10), which is how the BTReeMap is sorted. Therefore, the reserialization trick from above also handles this case.
+
+    // > Tags as defined in Section 2.4 in [RFC8949] MUST NOT be present.
+    fn assert_has_no_tags(value: &serde_cbor::Value) {
+        match value {
+                serde_cbor::Value::Array(vec) => {
+                    for entry in vec {
+                        assert_has_no_tags(entry);
+                    }
+                }
+                serde_cbor::Value::Map(map) => {
+                    for (key, entry) in map {
+                        assert_has_no_tags(key);
+                        assert_has_no_tags(entry);
+                    }
+                }
+                serde_cbor::Value::Tag(tag, value) => panic!(
+                    "Tags are not allowed inside canonical CBOR encoding, but found tag {} on value {:?}",
+                    tag, value
+                ),
+                _ => {},
+            }
+    }
+
+    assert_has_no_tags(&opaque_value);
+}

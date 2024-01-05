@@ -455,3 +455,49 @@ impl PinUvAuthCommand for CredentialManagement {
         self.pin_uv_auth_param.as_ref()
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::ctap2::commands::assert_canonical_cbor_encoding;
+    use crate::ctap2::server::Transport;
+
+    #[test]
+    fn test_cbor_canonical() {
+        for subcommand in [
+            CredManagementCommand::GetCredsMetadata,
+            CredManagementCommand::EnumerateRPsBegin,
+            CredManagementCommand::EnumerateRPsGetNextRP,
+            CredManagementCommand::EnumerateCredentialsBegin(RpIdHash([0u8; 32])),
+            CredManagementCommand::EnumerateCredentialsGetNextCredential,
+            CredManagementCommand::DeleteCredential(PublicKeyCredentialDescriptor {
+                id: vec![0xDE, 0xAD, 0xBE, 0xEF],
+                transports: vec![Transport::NFC],
+            }),
+            CredManagementCommand::UpdateUserInformation((
+                PublicKeyCredentialDescriptor {
+                    id: vec![0xDE, 0xAD, 0xBE, 0xEF],
+                    transports: vec![Transport::NFC],
+                },
+                PublicKeyCredentialUserEntity {
+                    id: vec![0xDE, 0xAD, 0xBE, 0xEF],
+                    name: Some("foobar".to_string()),
+                    display_name: Some("foobar".to_string()),
+                },
+            )),
+        ] {
+            let request = CredentialManagement {
+                subcommand, // subCommand currently being requested
+                pin_uv_auth_param: Some(PinUvAuthParam {
+                    pin_auth: vec![0xDE, 0xAD, 0xBE, 0xEF],
+                    pin_protocol: crate::crypto::PinUvAuthProtocol(Box::new(
+                        crate::crypto::PinUvAuth2 {},
+                    )),
+                    permissions: crate::ctap2::PinUvAuthTokenPermission::MakeCredential,
+                }),
+                use_legacy_preview: false,
+            };
+            assert_canonical_cbor_encoding(&request);
+        }
+    }
+}
