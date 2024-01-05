@@ -666,12 +666,18 @@ impl From<CryptoError> for PinError {
 
 #[cfg(test)]
 mod test {
-    use std::convert::TryFrom;
-
-    use super::ClientPinResponse;
+    use super::*;
     use crate::{
-        crypto::{COSEAlgorithm, COSEEC2Key, COSEKey, COSEKeyType, Curve, PinUvAuthProtocol},
-        ctap2::commands::client_pin::{ClientPIN, PINSubcommand, PinUvAuthTokenPermission},
+        crypto::{COSEAlgorithm, COSEEC2Key, COSEKey, COSEKeyType, Curve},
+        ctap2::{
+            attestation::AAGuid,
+            commands::{
+                assert_canonical_cbor_encoding, client_pin::PinUvAuthTokenPermission,
+                get_info::AuthenticatorOptions,
+            },
+            AuthenticatorVersion,
+        },
+        util::decode_hex,
         AuthenticatorInfo,
     };
     use serde_cbor::de::from_slice;
@@ -843,5 +849,51 @@ mod test {
                 108, 101, 46, 111, 114, 103
             ]
         );
+    }
+
+    #[test]
+    #[allow(non_snake_case)]
+    fn test_cbor_canonical() {
+        let pin_protocol = PinUvAuthProtocol::try_from(&AuthenticatorInfo {
+            versions: vec![AuthenticatorVersion::U2F_V2, AuthenticatorVersion::FIDO_2_0],
+            extensions: vec![],
+            aaguid: AAGuid([0u8; 16]),
+            options: AuthenticatorOptions {
+                platform_device: false,
+                resident_key: true,
+                client_pin: Some(false),
+                user_presence: true,
+                ..Default::default()
+            },
+            max_msg_size: Some(1200),
+            pin_protocols: None,
+            ..Default::default()
+        })
+        .unwrap();
+
+        // from tests for crate::crypto
+        let DEV_PUB_X =
+            decode_hex("0501D5BC78DA9252560A26CB08FCC60CBE0B6D3B8E1D1FCEE514FAC0AF675168");
+        let DEV_PUB_Y =
+            decode_hex("D551B3ED46F665731F95B4532939C25D91DB7EB844BD96D4ABD4083785F8DF47");
+        let key = COSEKey {
+            alg: COSEAlgorithm::ES256,
+            key: COSEKeyType::EC2(COSEEC2Key {
+                curve: Curve::SECP256R1,
+                x: DEV_PUB_X,
+                y: DEV_PUB_Y,
+            }),
+        };
+        let request = ClientPIN {
+            pin_protocol: Some(pin_protocol),
+            subcommand: PINSubcommand::GetPinRetries,
+            key_agreement: Some(key),
+            pin_auth: Some(vec![0xDE, 0xAD, 0xBE, 0xEF]),
+            new_pin_enc: Some(vec![0xDE, 0xAD, 0xBE, 0xEF]),
+            pin_hash_enc: Some(vec![0xDE, 0xAD, 0xBE, 0xEF]),
+            permissions: Some(42),
+            rp_id: Some("foobar".to_string()),
+        };
+        assert_canonical_cbor_encoding(&request);
     }
 }
