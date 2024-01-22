@@ -416,7 +416,7 @@ impl RequestCtap2 for GetAssertion {
             let msg = GetNextAssertion;
             // We already have one, so skipping 0
             for _ in 1..number_of_credentials {
-                let assertion = dev.send_cbor(&msg)?;
+                let assertion = dev.send_cbor(&msg, None)?;
                 results.push(GetAssertionResult {
                     assertion: assertion.into(),
                     attachment: AuthenticatorAttachment::Unknown,
@@ -631,6 +631,7 @@ pub mod test {
     use crate::transport::{FidoDevice, FidoDeviceIO, FidoProtocol};
     use crate::u2ftypes::U2FDeviceInfo;
     use rand::{thread_rng, RngCore};
+    use std::sync::mpsc::channel;
 
     #[test]
     fn test_get_assertion_ctap2() {
@@ -788,7 +789,7 @@ pub mod test {
             attachment: AuthenticatorAttachment::Unknown,
             extensions: Default::default(),
         }];
-        let response = device.send_cbor(&assertion).unwrap();
+        let response = device.send_cbor(&assertion, None).unwrap();
         assert_eq!(response, expected);
     }
 
@@ -869,6 +870,7 @@ pub mod test {
         device.set_cid(cid);
 
         // ctap1 request
+        let (tx, _rx) = channel();
         fill_device_ctap1(
             &mut device,
             cid,
@@ -880,6 +882,7 @@ pub mod test {
             &assertion.allow_list,
             &assertion.rp,
             &assertion.client_data_hash,
+            &tx,
         )
         .expect("Did not find a key_handle, even though it should have");
         assertion.allow_list = vec![key_handle];
@@ -892,7 +895,7 @@ pub mod test {
         // Pre-flighting is not done automatically
         fill_device_ctap1(&mut device, cid, U2F_REQUEST_USER_PRESENCE, SW_NO_ERROR);
 
-        let response = device.send_ctap1(&assertion).unwrap();
+        let response = device.send_ctap1(&assertion, None).unwrap();
 
         // Check if response is correct
         let expected_auth_data = AuthenticatorData {
@@ -958,12 +961,14 @@ pub mod test {
 
         device.set_cid(cid);
 
+        let (tx, _rx) = channel();
         assert_matches!(
             do_credential_list_filtering_ctap1(
                 &mut device,
                 &assertion.allow_list,
                 &assertion.rp,
                 &assertion.client_data_hash,
+                &tx,
             ),
             None
         );
@@ -981,12 +986,14 @@ pub mod test {
         for allow_list in [vec![], vec![too_long_key_handle.clone(); 5]] {
             assertion.allow_list = allow_list;
 
+            let (tx, _rx) = channel();
             assert_matches!(
                 do_credential_list_filtering_ctap1(
                     &mut device,
                     &assertion.allow_list,
                     &assertion.rp,
                     &assertion.client_data_hash,
+                    &tx,
                 ),
                 None
             );
@@ -1017,11 +1024,13 @@ pub mod test {
             U2F_CHECK_IS_REGISTERED,
             SW_CONDITIONS_NOT_SATISFIED,
         );
+        let (tx, _rx) = channel();
         let key_handle = do_credential_list_filtering_ctap1(
             &mut device,
             &assertion.allow_list,
             &assertion.rp,
             &assertion.client_data_hash,
+            &tx,
         )
         .expect("Did not find a key_handle, even though it should have");
         assertion.allow_list = vec![key_handle];
@@ -1034,7 +1043,7 @@ pub mod test {
         // Pre-flighting is not done automatically
         fill_device_ctap1(&mut device, cid, U2F_REQUEST_USER_PRESENCE, SW_NO_ERROR);
 
-        let response = device.send_ctap1(&assertion).unwrap();
+        let response = device.send_ctap1(&assertion, None).unwrap();
 
         // Check if response is correct
         let expected_auth_data = AuthenticatorData {
@@ -1299,12 +1308,14 @@ pub mod test {
         msg.extend(&GET_ASSERTION_SAMPLE_RESPONSE_CTAP2[293..]);
         device.add_read(&msg, 0);
 
+        let (tx, _rx) = channel();
         assert_matches!(
             do_credential_list_filtering_ctap2(
                 &mut device,
                 &assertion.allow_list,
                 &assertion.rp,
                 None,
+                &tx,
             ),
             Ok(..)
         );

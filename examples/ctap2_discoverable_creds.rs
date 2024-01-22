@@ -15,9 +15,9 @@ use authenticator::{
 };
 use getopts::Options;
 use sha2::{Digest, Sha256};
+use std::io::Write;
 use std::sync::mpsc::{channel, RecvError};
 use std::{env, io, thread};
-use std::io::Write;
 
 fn print_usage(program: &str, opts: Options) {
     println!("------------------------------------------------------------------------");
@@ -60,7 +60,12 @@ fn ask_user_choice(choices: &[PublicKeyCredentialUserEntity]) -> Option<usize> {
     }
 }
 
-fn register_user(manager: &mut AuthenticatorService, username: &str, timeout_ms: u64) {
+fn register_user(
+    manager: &mut AuthenticatorService,
+    username: &str,
+    timeout_ms: u64,
+    do_logging: bool,
+) {
     println!();
     println!("*********************************************************************");
     println!("Asking a security key to register now with user: {username}");
@@ -132,6 +137,13 @@ fn register_user(manager: &mut AuthenticatorService, username: &str, timeout_ms:
             }
             Ok(StatusUpdate::SelectResultNotice(_, _)) => {
                 panic!("Unexpected select result notice")
+            }
+            Ok(StatusUpdate::RequestLogging(dir, msg)) => {
+                if do_logging {
+                    println!("{dir:?} -> ");
+                    println!("{msg}");
+                    println!("--------------------------------------");
+                }
             }
             Err(RecvError) => {
                 println!("STATUS: end");
@@ -216,12 +228,10 @@ fn main() {
         "timeout in seconds",
         "SEC",
     );
-    opts.optflag(
-        "s",
-        "skip_reg",
-        "Skip registration");
+    opts.optflag("s", "skip_reg", "Skip registration");
 
     opts.optflag("h", "help", "print this help menu");
+    opts.optflag("l", "logging", "Active request/response logging");
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
         Err(f) => panic!("{}", f.to_string()),
@@ -247,9 +257,10 @@ fn main() {
         }
     };
 
+    let do_logging = matches.opt_present("logging");
     if !matches.opt_present("skip_reg") {
         for username in &["A. User", "A. Nother", "Dr. Who"] {
-            register_user(&mut manager, username, timeout_ms)
+            register_user(&mut manager, username, timeout_ms, do_logging)
         }
     }
 
@@ -324,6 +335,13 @@ fn main() {
                 let idx = ask_user_choice(&users);
                 index_sender.send(idx).expect("Failed to send choice");
             }
+            Ok(StatusUpdate::RequestLogging(dir, msg)) => {
+                if do_logging {
+                    println!("{dir:?} -> ");
+                    println!("{msg}");
+                    println!("--------------------------------------");
+                }
+            }
             Err(RecvError) => {
                 println!("STATUS: end");
                 return;
@@ -368,7 +386,13 @@ fn main() {
                 println!("Found credentials:");
                 println!(
                     "{:?}",
-                    assertion_object.assertion.user.clone().unwrap().name.unwrap() // Unwrapping here, as these shouldn't fail
+                    assertion_object
+                        .assertion
+                        .user
+                        .clone()
+                        .unwrap()
+                        .name
+                        .unwrap() // Unwrapping here, as these shouldn't fail
                 );
                 println!("-----------------------------------------------------------------");
                 println!("Done.");
