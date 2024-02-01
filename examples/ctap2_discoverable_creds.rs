@@ -6,18 +6,19 @@ use authenticator::{
     authenticatorservice::{AuthenticatorService, RegisterArgs, SignArgs},
     crypto::COSEAlgorithm,
     ctap2::server::{
-        AuthenticationExtensionsClientInputs, PublicKeyCredentialDescriptor,
-        PublicKeyCredentialParameters, PublicKeyCredentialUserEntity, RelyingParty,
-        ResidentKeyRequirement, Transport, UserVerificationRequirement,
+        AuthenticationExtensionsClientInputs, AuthenticatorExtensionsCredBlob,
+        PublicKeyCredentialDescriptor, PublicKeyCredentialParameters,
+        PublicKeyCredentialUserEntity, RelyingParty, ResidentKeyRequirement, Transport,
+        UserVerificationRequirement,
     },
     statecallback::StateCallback,
     Pin, StatusPinUv, StatusUpdate,
 };
-use getopts::Options;
+use getopts::{Matches, Options};
 use sha2::{Digest, Sha256};
+use std::io::Write;
 use std::sync::mpsc::{channel, RecvError};
 use std::{env, io, thread};
-use std::io::Write;
 
 fn print_usage(program: &str, opts: Options) {
     println!("------------------------------------------------------------------------");
@@ -60,7 +61,12 @@ fn ask_user_choice(choices: &[PublicKeyCredentialUserEntity]) -> Option<usize> {
     }
 }
 
-fn register_user(manager: &mut AuthenticatorService, username: &str, timeout_ms: u64) {
+fn register_user(
+    manager: &mut AuthenticatorService,
+    username: &str,
+    timeout_ms: u64,
+    matches: &Matches,
+) {
     println!();
     println!("*********************************************************************");
     println!("Asking a security key to register now with user: {username}");
@@ -170,6 +176,9 @@ fn register_user(manager: &mut AuthenticatorService, username: &str, timeout_ms:
         resident_key_req: ResidentKeyRequirement::Required,
         extensions: AuthenticationExtensionsClientInputs {
             cred_props: Some(true),
+            cred_blob: matches.opt_present("cred_blob").then(|| {
+                AuthenticatorExtensionsCredBlob::AsBytes("My short credBlob".as_bytes().to_vec())
+            }),
             ..Default::default()
         },
         pin: None,
@@ -216,10 +225,8 @@ fn main() {
         "timeout in seconds",
         "SEC",
     );
-    opts.optflag(
-        "s",
-        "skip_reg",
-        "Skip registration");
+    opts.optflag("s", "skip_reg", "Skip registration");
+    opts.optflag("b", "cred_blob", "With credBlob");
 
     opts.optflag("h", "help", "print this help menu");
     let matches = match opts.parse(&args[1..]) {
@@ -249,7 +256,7 @@ fn main() {
 
     if !matches.opt_present("skip_reg") {
         for username in &["A. User", "A. Nother", "Dr. Who"] {
-            register_user(&mut manager, username, timeout_ms)
+            register_user(&mut manager, username, timeout_ms, &matches)
         }
     }
 
@@ -341,7 +348,12 @@ fn main() {
         allow_list,
         user_verification_req: UserVerificationRequirement::Required,
         user_presence_req: true,
-        extensions: Default::default(),
+        extensions: AuthenticationExtensionsClientInputs {
+            cred_blob: matches
+                .opt_present("cred_blob")
+                .then_some(AuthenticatorExtensionsCredBlob::AsBool(true)),
+            ..Default::default()
+        },
         pin: None,
         use_ctap1_fallback: false,
     };
@@ -368,7 +380,13 @@ fn main() {
                 println!("Found credentials:");
                 println!(
                     "{:?}",
-                    assertion_object.assertion.user.clone().unwrap().name.unwrap() // Unwrapping here, as these shouldn't fail
+                    assertion_object
+                        .assertion
+                        .user
+                        .clone()
+                        .unwrap()
+                        .name
+                        .unwrap() // Unwrapping here, as these shouldn't fail
                 );
                 println!("-----------------------------------------------------------------");
                 println!("Done.");

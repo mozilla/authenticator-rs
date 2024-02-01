@@ -15,9 +15,9 @@ use crate::ctap2::attestation::{
 use crate::ctap2::client_data::ClientDataHash;
 use crate::ctap2::server::{
     AuthenticationExtensionsClientInputs, AuthenticationExtensionsClientOutputs,
-    AuthenticatorAttachment, CredentialProtectionPolicy, PublicKeyCredentialDescriptor,
-    PublicKeyCredentialParameters, PublicKeyCredentialUserEntity, RelyingParty, RpIdHash,
-    UserVerificationRequirement,
+    AuthenticatorAttachment, AuthenticatorExtensionsCredBlob, CredentialProtectionPolicy,
+    PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, PublicKeyCredentialUserEntity,
+    RelyingParty, RpIdHash, UserVerificationRequirement,
 };
 use crate::ctap2::utils::{read_byte, serde_parse_err};
 use crate::errors::AuthenticatorError;
@@ -243,11 +243,16 @@ pub struct MakeCredentialsExtensions {
     pub hmac_secret: Option<bool>,
     #[serde(rename = "minPinLength", skip_serializing_if = "Option::is_none")]
     pub min_pin_length: Option<bool>,
+    #[serde(rename = "credBlob", skip_serializing_if = "Option::is_none")]
+    pub cred_blob: Option<AuthenticatorExtensionsCredBlob>,
 }
 
 impl MakeCredentialsExtensions {
     fn has_content(&self) -> bool {
-        self.cred_protect.is_some() || self.hmac_secret.is_some() || self.min_pin_length.is_some()
+        self.cred_protect.is_some()
+            || self.hmac_secret.is_some()
+            || self.min_pin_length.is_some()
+            || self.cred_blob.is_some()
     }
 }
 
@@ -258,6 +263,7 @@ impl From<AuthenticationExtensionsClientInputs> for MakeCredentialsExtensions {
             cred_protect: input.credential_protection_policy,
             hmac_secret: input.hmac_create_secret,
             min_pin_length: input.min_pin_length,
+            cred_blob: input.cred_blob,
         }
     }
 }
@@ -350,6 +356,11 @@ impl MakeCredentials {
                 result.extensions.hmac_create_secret = Some(flag);
             }
         }
+
+        // 3. credBlob
+        //      The extension returns a flag in the authenticator data which we need to mirror as a
+        //      client output.
+        result.extensions.cred_blob = result.att_obj.auth_data.extensions.cred_blob.clone();
     }
 }
 

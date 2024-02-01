@@ -14,8 +14,8 @@ use crate::ctap2::commands::get_next_assertion::GetNextAssertion;
 use crate::ctap2::commands::make_credentials::UserVerification;
 use crate::ctap2::server::{
     AuthenticationExtensionsClientInputs, AuthenticationExtensionsClientOutputs,
-    AuthenticatorAttachment, PublicKeyCredentialDescriptor, PublicKeyCredentialUserEntity,
-    RelyingParty, RpIdHash, UserVerificationRequirement,
+    AuthenticatorAttachment, AuthenticatorExtensionsCredBlob, PublicKeyCredentialDescriptor,
+    PublicKeyCredentialUserEntity, RelyingParty, RpIdHash, UserVerificationRequirement,
 };
 use crate::ctap2::utils::{read_be_u32, read_byte};
 use crate::errors::AuthenticatorError;
@@ -140,12 +140,18 @@ pub struct GetAssertionExtensions {
     pub app_id: Option<String>,
     #[serde(rename = "hmac-secret", skip_serializing_if = "Option::is_none")]
     pub hmac_secret: Option<HmacSecretExtension>,
+    #[serde(rename = "credBlob", skip_serializing_if = "Option::is_none")]
+    pub cred_blob: Option<bool>,
 }
 
 impl From<AuthenticationExtensionsClientInputs> for GetAssertionExtensions {
     fn from(input: AuthenticationExtensionsClientInputs) -> Self {
         Self {
             app_id: input.app_id,
+            cred_blob: match input.cred_blob {
+                Some(AuthenticatorExtensionsCredBlob::AsBool(x)) => Some(x),
+                _ => None,
+            },
             ..Default::default()
         }
     }
@@ -153,7 +159,7 @@ impl From<AuthenticationExtensionsClientInputs> for GetAssertionExtensions {
 
 impl GetAssertionExtensions {
     fn has_content(&self) -> bool {
-        self.hmac_secret.is_some()
+        self.hmac_secret.is_some() || self.cred_blob.is_some()
     }
 }
 
@@ -205,6 +211,11 @@ impl GetAssertion {
             result.extensions.app_id =
                 Some(result.assertion.auth_data.rp_id_hash == RelyingParty::from(app_id).hash());
         }
+
+        // 2. credBlob
+        //      The extension returns a flag in the authenticator data which we need to mirror as a
+        //      client output.
+        result.extensions.cred_blob = result.assertion.auth_data.extensions.cred_blob.clone();
     }
 }
 
