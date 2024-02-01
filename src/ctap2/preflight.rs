@@ -300,6 +300,9 @@ pub mod tests {
             },
             attachment: AuthenticatorAttachment::Platform,
             extensions: AuthenticationExtensionsClientOutputs::default(),
+            user_selected: None,
+            large_blob_key: None,
+            large_blob_array: None,
         }
     }
 

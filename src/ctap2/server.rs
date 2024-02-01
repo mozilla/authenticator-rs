@@ -397,6 +397,7 @@ pub struct AuthenticationExtensionsClientInputs {
     /// MakeCredential-requests use AsBytes
     /// GetAssertion-requests use AsBool
     pub cred_blob: Option<AuthenticatorExtensionsCredBlob>,
+    pub large_blob_key: Option<bool>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

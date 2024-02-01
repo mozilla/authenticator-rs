@@ -1,4 +1,5 @@
 use super::get_info::AuthenticatorInfo;
+use super::large_blobs::LargeBlobArrayElement;
 use super::{
     Command, CommandError, CtapResponse, PinUvAuthCommand, RequestCtap1, RequestCtap2, Retryable,
     StatusCode,
@@ -142,6 +143,8 @@ pub struct GetAssertionExtensions {
     pub hmac_secret: Option<HmacSecretExtension>,
     #[serde(rename = "credBlob", skip_serializing_if = "Option::is_none")]
     pub cred_blob: Option<bool>,
+    #[serde(rename = "largeBlobKey", skip_serializing_if = "Option::is_none")]
+    pub large_blob_key: Option<bool>,
 }
 
 impl From<AuthenticationExtensionsClientInputs> for GetAssertionExtensions {
@@ -152,6 +155,7 @@ impl From<AuthenticationExtensionsClientInputs> for GetAssertionExtensions {
                 Some(AuthenticatorExtensionsCredBlob::AsBool(x)) => Some(x),
                 _ => None,
             },
+            large_blob_key: input.large_blob_key,
             ..Default::default()
         }
     }
@@ -159,7 +163,7 @@ impl From<AuthenticationExtensionsClientInputs> for GetAssertionExtensions {
 
 impl GetAssertionExtensions {
     fn has_content(&self) -> bool {
-        self.hmac_secret.is_some() || self.cred_blob.is_some()
+        self.hmac_secret.is_some() || self.cred_blob.is_some() || self.large_blob_key.is_some()
     }
 }
 
@@ -416,22 +420,31 @@ impl RequestCtap2 for GetAssertion {
             let assertion: GetAssertionResponse =
                 from_slice(&input[1..]).map_err(CommandError::Deserializing)?;
             let number_of_credentials = assertion.number_of_credentials.unwrap_or(1);
-
+            let user_selected = assertion.user_selected;
+            let large_blob_key = assertion.large_blob_key.clone();
             let mut results = Vec::with_capacity(number_of_credentials);
             results.push(GetAssertionResult {
                 assertion: assertion.into(),
                 attachment: AuthenticatorAttachment::Unknown,
                 extensions: Default::default(),
+                user_selected,
+                large_blob_key,
+                large_blob_array: None,
             });
 
             let msg = GetNextAssertion;
             // We already have one, so skipping 0
             for _ in 1..number_of_credentials {
                 let assertion = dev.send_cbor(&msg)?;
+                let user_selected = assertion.user_selected;
+                let large_blob_key = assertion.large_blob_key.clone();
                 results.push(GetAssertionResult {
                     assertion: assertion.into(),
                     attachment: AuthenticatorAttachment::Unknown,
                     extensions: Default::default(),
+                    user_selected,
+                    large_blob_key,
+                    large_blob_array: None,
                 });
             }
 
@@ -482,6 +495,9 @@ pub struct GetAssertionResult {
     pub assertion: Assertion,
     pub attachment: AuthenticatorAttachment,
     pub extensions: AuthenticationExtensionsClientOutputs,
+    pub user_selected: Option<bool>,
+    pub large_blob_key: Option<Vec<u8>>,
+    pub large_blob_array: Option<Vec<LargeBlobArrayElement>>,
 }
 
 impl GetAssertionResult {
@@ -519,6 +535,9 @@ impl GetAssertionResult {
             assertion,
             attachment: AuthenticatorAttachment::Unknown,
             extensions: Default::default(),
+            user_selected: None,
+            large_blob_key: None,
+            large_blob_array: None,
         })
     }
 }
@@ -530,6 +549,8 @@ pub struct GetAssertionResponse {
     pub signature: Vec<u8>,
     pub user: Option<PublicKeyCredentialUserEntity>,
     pub number_of_credentials: Option<usize>,
+    pub user_selected: Option<bool>,
+    pub large_blob_key: Option<Vec<u8>>,
 }
 
 impl CtapResponse for GetAssertionResponse {}
@@ -557,40 +578,54 @@ impl<'de> Deserialize<'de> for GetAssertionResponse {
                 let mut signature = None;
                 let mut user = None;
                 let mut number_of_credentials = None;
+                let mut user_selected = None;
+                let mut large_blob_key = None;
 
                 while let Some(key) = map.next_key()? {
                     match key {
-                        1 => {
+                        0x01 => {
                             if credentials.is_some() {
                                 return Err(M::Error::duplicate_field("credentials"));
                             }
                             credentials = Some(map.next_value()?);
                         }
-                        2 => {
+                        0x02 => {
                             if auth_data.is_some() {
                                 return Err(M::Error::duplicate_field("auth_data"));
                             }
                             auth_data = Some(map.next_value()?);
                         }
-                        3 => {
+                        0x03 => {
                             if signature.is_some() {
                                 return Err(M::Error::duplicate_field("signature"));
                             }
                             let signature_bytes: ByteBuf = map.next_value()?;
-                            let signature_bytes: Vec<u8> = signature_bytes.into_vec();
-                            signature = Some(signature_bytes);
+                            signature = Some(signature_bytes.into_vec());
                         }
-                        4 => {
+                        0x04 => {
                             if user.is_some() {
                                 return Err(M::Error::duplicate_field("user"));
                             }
                             user = map.next_value()?;
                         }
-                        5 => {
+                        0x05 => {
                             if number_of_credentials.is_some() {
                                 return Err(M::Error::duplicate_field("number_of_credentials"));
                             }
                             number_of_credentials = Some(map.next_value()?);
+                        }
+                        0x06 => {
+                            if user_selected.is_some() {
+                                return Err(M::Error::duplicate_field("user_selected"));
+                            }
+                            user_selected = Some(map.next_value()?);
+                        }
+                        0x07 => {
+                            if large_blob_key.is_some() {
+                                return Err(M::Error::duplicate_field("large_blob_key"));
+                            }
+                            let large_blob_key_bytes: ByteBuf = map.next_value()?;
+                            large_blob_key = Some(large_blob_key_bytes.into_vec());
                         }
                         k => return Err(M::Error::custom(format!("unexpected key: {k:?}"))),
                     }
@@ -605,6 +640,8 @@ impl<'de> Deserialize<'de> for GetAssertionResponse {
                     signature,
                     user,
                     number_of_credentials,
+                    user_selected,
+                    large_blob_key,
                 })
             }
         }
@@ -798,6 +835,9 @@ pub mod test {
             assertion: expected_assertion,
             attachment: AuthenticatorAttachment::Unknown,
             extensions: Default::default(),
+            user_selected: None,
+            large_blob_key: None,
+            large_blob_array: None,
         }];
         let response = device.send_cbor(&assertion).unwrap();
         assert_eq!(response, expected);
@@ -931,6 +971,9 @@ pub mod test {
             assertion: expected_assertion,
             attachment: AuthenticatorAttachment::Unknown,
             extensions: Default::default(),
+            user_selected: None,
+            large_blob_key: None,
+            large_blob_array: None,
         }];
         assert_eq!(response, expected);
     }
@@ -1073,6 +1116,9 @@ pub mod test {
             assertion: expected_assertion,
             attachment: AuthenticatorAttachment::Unknown,
             extensions: Default::default(),
+            user_selected: None,
+            large_blob_key: None,
+            large_blob_array: None,
         }];
         assert_eq!(response, expected);
     }
