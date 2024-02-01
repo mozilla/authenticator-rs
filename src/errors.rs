@@ -19,6 +19,7 @@ pub enum UnsupportedOption {
     PubCredParams,
     ResidentKey,
     UserVerification,
+    LargeBlobs,
 }
 
 #[derive(Debug)]
