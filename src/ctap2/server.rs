@@ -357,6 +357,35 @@ impl<'de> Deserialize<'de> for CredentialProtectionPolicy {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum AuthenticatorExtensionsCredBlob {
+    /// Used in GetAssertion-requests to request the stored blob,
+    /// and in MakeCredential-responses to signify if the
+    /// storing worked.
+    AsBool(bool),
+    /// Used in MakeCredential-requests to store a new credBlob,
+    /// and in GetAssertion-responses when retrieving the
+    /// stored blob.
+    #[serde(serialize_with = "vec_to_bytebuf", deserialize_with = "bytebuf_to_vec")]
+    AsBytes(Vec<u8>),
+}
+
+fn vec_to_bytebuf<S>(data: &[u8], s: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    ByteBuf::from(data).serialize(s)
+}
+
+fn bytebuf_to_vec<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let bytes = <ByteBuf>::deserialize(deserializer)?;
+    Ok(bytes.to_vec())
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct AuthenticationExtensionsClientInputs {
     pub app_id: Option<String>,
@@ -365,6 +394,9 @@ pub struct AuthenticationExtensionsClientInputs {
     pub enforce_credential_protection_policy: Option<bool>,
     pub hmac_create_secret: Option<bool>,
     pub min_pin_length: Option<bool>,
+    /// MakeCredential-requests use AsBytes
+    /// GetAssertion-requests use AsBool
+    pub cred_blob: Option<AuthenticatorExtensionsCredBlob>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -377,6 +409,9 @@ pub struct AuthenticationExtensionsClientOutputs {
     pub app_id: Option<bool>,
     pub cred_props: Option<CredentialProperties>,
     pub hmac_create_secret: Option<bool>,
+    /// MakeCredential-responses use AsBool
+    /// GetAssertion-responses use AsBytes
+    pub cred_blob: Option<AuthenticatorExtensionsCredBlob>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

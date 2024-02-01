@@ -1,3 +1,4 @@
+use super::server::AuthenticatorExtensionsCredBlob;
 use super::utils::{from_slice_stream, read_be_u16, read_be_u32, read_byte};
 use crate::crypto::COSEAlgorithm;
 use crate::ctap2::server::{CredentialProtectionPolicy, RpIdHash};
@@ -74,11 +75,16 @@ pub struct Extension {
     pub hmac_secret: Option<HmacSecretResponse>,
     #[serde(rename = "minPinLength", skip_serializing_if = "Option::is_none")]
     pub min_pin_length: Option<u64>,
+    #[serde(rename = "credBlob", skip_serializing_if = "Option::is_none")]
+    pub cred_blob: Option<AuthenticatorExtensionsCredBlob>,
 }
 
 impl Extension {
     pub fn has_some(&self) -> bool {
-        self.min_pin_length.is_some() || self.hmac_secret.is_some() || self.cred_protect.is_some()
+        self.min_pin_length.is_some()
+            || self.hmac_secret.is_some()
+            || self.cred_protect.is_some()
+            || self.cred_blob.is_some()
     }
 }
 
