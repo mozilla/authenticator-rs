@@ -15,8 +15,8 @@ use crate::ctap2::commands::make_credentials::UserVerification;
 use crate::ctap2::server::{
     AuthenticationExtensionsClientInputs, AuthenticationExtensionsClientOutputs,
     AuthenticationExtensionsPRFInputs, AuthenticationExtensionsPRFOutputs, AuthenticatorAttachment,
-    PublicKeyCredentialDescriptor, PublicKeyCredentialUserEntity, RelyingParty, RpIdHash,
-    UserVerificationRequirement,
+    AuthenticatorExtensionsCredBlob, PublicKeyCredentialDescriptor, PublicKeyCredentialUserEntity,
+    RelyingParty, RpIdHash, UserVerificationRequirement,
 };
 use crate::ctap2::utils::{read_be_u32, read_byte};
 use crate::errors::AuthenticatorError;
@@ -253,6 +253,8 @@ pub struct GetAssertionExtensions {
         skip_serializing_if = "HmacGetSecretOrPrf::skip_serializing"
     )]
     pub hmac_secret: Option<HmacGetSecretOrPrf>,
+    #[serde(rename = "credBlob", skip_serializing_if = "Option::is_none")]
+    pub cred_blob: Option<bool>,
 }
 
 impl From<AuthenticationExtensionsClientInputs> for GetAssertionExtensions {
@@ -271,13 +273,17 @@ impl From<AuthenticationExtensionsClientInputs> for GetAssertionExtensions {
                 .or_else(
                     || prf.map(HmacGetSecretOrPrf::PrfUninitialized), // Cannot calculate hmac-secret inputs here because we don't yet know which eval or evalByCredential entry to use
                 ),
+            cred_blob: match input.cred_blob {
+                Some(AuthenticatorExtensionsCredBlob::AsBool(x)) => Some(x),
+                _ => None,
+            },
         }
     }
 }
 
 impl GetAssertionExtensions {
     fn has_content(&self) -> bool {
-        self.hmac_secret.is_some()
+        self.hmac_secret.is_some() || self.cred_blob.is_some()
     }
 }
 
@@ -432,6 +438,11 @@ impl GetAssertion {
             }
             None => {}
         }
+
+        // 3. credBlob
+        //      The extension returns a flag in the authenticator data which we need to mirror as a
+        //      client output.
+        result.extensions.cred_blob = result.assertion.auth_data.extensions.cred_blob.clone();
     }
 }
 
@@ -1048,6 +1059,7 @@ pub mod test {
                         None,
                     ),
                 )),
+                cred_blob: None,
             },
             options: GetAssertionOptions {
                 user_presence: Some(true),
@@ -1105,6 +1117,7 @@ pub mod test {
                         Some(2),
                     ),
                 )),
+                cred_blob: None,
             },
             options: GetAssertionOptions {
                 user_presence: None,
@@ -1150,6 +1163,7 @@ pub mod test {
                         eval_by_credential: None,
                     },
                 )),
+                cred_blob: None,
             },
             options: GetAssertionOptions {
                 user_presence: None,
@@ -1171,6 +1185,7 @@ pub mod test {
             extensions: GetAssertionExtensions {
                 app_id: None,
                 hmac_secret: Some(HmacGetSecretOrPrf::PrfUnmatched),
+                cred_blob: None,
             },
             options: GetAssertionOptions {
                 user_presence: None,
@@ -2828,6 +2843,7 @@ pub mod test {
                             cred_protect: None,
                             hmac_secret: hmac_secret_response,
                             min_pin_length: None,
+                            cred_blob: None,
                         },
                     },
                     signature: vec![],
