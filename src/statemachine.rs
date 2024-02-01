@@ -3,11 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use crate::authenticatorservice::{RegisterArgs, SignArgs};
-
 use crate::ctap2;
-
 use crate::ctap2::commands::client_pin::Pin;
-
 use crate::errors::AuthenticatorError;
 use crate::statecallback::StateCallback;
 use crate::status_update::{send_status, InteractiveUpdate};
@@ -18,7 +15,6 @@ use crate::transport::platform::transaction::Transaction;
 use crate::transport::{hid::HIDDevice, FidoDevice, FidoProtocol};
 use crate::{InteractiveRequest, ManageResult};
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
-
 use std::time::Duration;
 
 #[derive(Default)]

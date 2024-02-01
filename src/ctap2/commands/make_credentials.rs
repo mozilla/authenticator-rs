@@ -28,6 +28,7 @@ use serde::{
     de::{Error as DesError, MapAccess, Unexpected, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
 };
+use serde_bytes::ByteBuf;
 use serde_cbor::{self, de::from_slice, ser, Value};
 use std::fmt;
 use std::io::{Cursor, Read};
@@ -37,6 +38,8 @@ pub struct MakeCredentialsResult {
     pub att_obj: AttestationObject,
     pub attachment: AuthenticatorAttachment,
     pub extensions: AuthenticationExtensionsClientOutputs,
+    pub ep_attestation: Option<bool>,
+    pub large_blob_key: Option<Vec<u8>>,
 }
 
 impl MakeCredentialsResult {
@@ -106,6 +109,8 @@ impl MakeCredentialsResult {
             att_obj,
             attachment: AuthenticatorAttachment::Unknown,
             extensions: Default::default(),
+            ep_attestation: None,
+            large_blob_key: None,
         })
     }
 }
@@ -131,6 +136,8 @@ impl<'de> Deserialize<'de> for MakeCredentialsResult {
                 let mut format: Option<&str> = None;
                 let mut auth_data: Option<AuthenticatorData> = None;
                 let mut att_stmt: Option<AttestationStatement> = None;
+                let mut ep_attestation: Option<bool> = None;
+                let mut large_blob_key: Option<Vec<u8>> = None;
 
                 while let Some(key) = map.next_key()? {
                     match key {
@@ -175,6 +182,20 @@ impl<'de> Deserialize<'de> for MakeCredentialsResult {
                                 }
                             }
                         }
+                        4 => {
+                            if ep_attestation.is_some() {
+                                return Err(M::Error::duplicate_field("ep_attestation"));
+                            }
+                            let ep_attestation_val: bool = map.next_value()?;
+                            ep_attestation = Some(ep_attestation_val);
+                        }
+                        5 => {
+                            if large_blob_key.is_some() {
+                                return Err(M::Error::duplicate_field("large_blob_key"));
+                            }
+                            let large_blob_key_bytes: ByteBuf = map.next_value()?;
+                            large_blob_key = Some(large_blob_key_bytes.into_vec());
+                        }
                         _ => continue,
                     }
                 }
@@ -191,6 +212,8 @@ impl<'de> Deserialize<'de> for MakeCredentialsResult {
                     },
                     attachment: AuthenticatorAttachment::Unknown,
                     extensions: Default::default(),
+                    ep_attestation,
+                    large_blob_key,
                 })
             }
         }
@@ -244,6 +267,8 @@ pub struct MakeCredentialsExtensions {
     pub min_pin_length: Option<bool>,
     #[serde(rename = "credBlob", skip_serializing_if = "Option::is_none")]
     pub cred_blob: Option<AuthenticatorExtensionsCredBlob>,
+    #[serde(rename = "largeBlobKey", skip_serializing_if = "Option::is_none")]
+    pub large_blob_key: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -270,6 +295,7 @@ impl MakeCredentialsExtensions {
             || self.hmac_secret.is_some()
             || self.min_pin_length.is_some()
             || self.cred_blob.is_some()
+            || self.large_blob_key.is_some()
     }
 }
 
@@ -287,6 +313,7 @@ impl From<AuthenticationExtensionsClientInputs> for MakeCredentialsExtensions {
             },
             min_pin_length: input.min_pin_length,
             cred_blob: input.cred_blob,
+            large_blob_key: input.large_blob_key,
         }
     }
 }
@@ -727,6 +754,8 @@ pub mod test {
             att_obj: create_attestation_obj(),
             attachment: AuthenticatorAttachment::Unknown,
             extensions: Default::default(),
+            ep_attestation: None,
+            large_blob_key: None,
         };
 
         assert_eq!(make_cred_result, expected);
@@ -975,6 +1004,8 @@ pub mod test {
             att_obj,
             attachment: AuthenticatorAttachment::Unknown,
             extensions: Default::default(),
+            ep_attestation: None,
+            large_blob_key: None,
         };
 
         assert_eq!(make_cred_result, expected);
