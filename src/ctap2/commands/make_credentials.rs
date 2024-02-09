@@ -804,6 +804,7 @@ pub mod test {
                 hmac_secret: Some(HmacCreateSecretOrPrf::HmacCreateSecret(true)),
                 min_pin_length: Some(true),
                 cred_blob: None,
+                large_blob_key: None,
             },
             options: MakeCredentialsOptions {
                 resident_key: Some(true),

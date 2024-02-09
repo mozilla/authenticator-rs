@@ -149,6 +149,9 @@ fn main() {
             Ok(StatusUpdate::SelectResultNotice(_, _)) => {
                 panic!("Unexpected select device notice")
             }
+            Ok(StatusUpdate::LargeBlobData(..)) => {
+                panic!("Unexpected large blob data request")
+            }
             Err(RecvError) => {
                 println!("STATUS: end");
                 return;
