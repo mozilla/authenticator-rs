@@ -1104,6 +1104,7 @@ pub mod test {
                     ),
                 )),
                 cred_blob: None,
+                large_blob_key: None,
             },
             options: GetAssertionOptions {
                 user_presence: Some(true),
@@ -1162,6 +1163,7 @@ pub mod test {
                     ),
                 )),
                 cred_blob: None,
+                large_blob_key: None,
             },
             options: GetAssertionOptions {
                 user_presence: None,
@@ -1208,6 +1210,7 @@ pub mod test {
                     },
                 )),
                 cred_blob: None,
+                large_blob_key: None,
             },
             options: GetAssertionOptions {
                 user_presence: None,
@@ -1230,6 +1233,7 @@ pub mod test {
                 app_id: None,
                 hmac_secret: Some(HmacGetSecretOrPrf::PrfUnmatched),
                 cred_blob: None,
+                large_blob_key: None,
             },
             options: GetAssertionOptions {
                 user_presence: None,
@@ -2901,6 +2905,9 @@ pub mod test {
                 },
                 attachment: AuthenticatorAttachment::Unknown,
                 extensions: AuthenticationExtensionsClientOutputs::default(),
+                user_selected: None,
+                large_blob_key: None,
+                large_blob_array: None,
             };
 
             let mut dev = Device::new_skipping_serialization("commands/get_assertion")
