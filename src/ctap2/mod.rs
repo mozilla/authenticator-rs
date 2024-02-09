@@ -729,9 +729,13 @@ pub fn sign<Dev: FidoDevice>(
         // and only return valid elements. But for that, we would need AEAD and DEFLATE-algos.
         let large_blob_array =
             if has_large_blob && results.iter().any(|f| f.large_blob_key.is_some()) {
-                large_blobs::read_large_blob_array(dev, alive)
-                    .ok()
-                    .map(|x| x.large_blob_array)
+                match large_blobs::read_large_blob_array(dev, alive) {
+                    Ok(x) => Some(x.large_blob_array),
+                    Err(e) => {
+                        warn!("Failed to read large blob array: {e:?}");
+                        None
+                    }
+                }
             } else {
                 None
             };

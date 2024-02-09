@@ -271,7 +271,7 @@ fn extract_associated_large_blobs(key: Vec<u8>, array: Vec<LargeBlobArrayElement
             let plaintext = cipher.decrypt(e.nonce.as_slice().into(), payload).ok();
             plaintext
         })
-        .map(|d| flate3::inflate(&d))
+        .map(|d| flate3::inflate(&d)) // TODO: Check resulting length and compare to orig_size
         .map(|d| String::from_utf8_lossy(&d).to_string())
         .collect();
     valid_elements
