@@ -15,9 +15,9 @@ use crate::ctap2::attestation::{
 use crate::ctap2::client_data::ClientDataHash;
 use crate::ctap2::server::{
     AuthenticationExtensionsClientInputs, AuthenticationExtensionsClientOutputs,
-    AuthenticatorAttachment, CredentialProtectionPolicy, PublicKeyCredentialDescriptor,
-    PublicKeyCredentialParameters, PublicKeyCredentialUserEntity, RelyingParty, RpIdHash,
-    UserVerificationRequirement,
+    AuthenticatorAttachment, AuthenticatorExtensionsCredBlob, CredentialProtectionPolicy,
+    PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, PublicKeyCredentialUserEntity,
+    RelyingParty, RpIdHash, UserVerificationRequirement,
 };
 use crate::ctap2::utils::{read_byte, serde_parse_err};
 use crate::errors::AuthenticatorError;
@@ -29,6 +29,7 @@ use serde::{
     ser::SerializeMap,
     Deserialize, Deserializer, Serialize, Serializer,
 };
+use serde_bytes::ByteBuf;
 use serde_cbor::{self, de::from_slice, ser, Value};
 use std::fmt;
 use std::io::{Cursor, Read};
@@ -38,6 +39,8 @@ pub struct MakeCredentialsResult {
     pub att_obj: AttestationObject,
     pub attachment: AuthenticatorAttachment,
     pub extensions: AuthenticationExtensionsClientOutputs,
+    pub ep_attestation: Option<bool>,
+    pub large_blob_key: Option<Vec<u8>>,
 }
 
 impl MakeCredentialsResult {
@@ -107,6 +110,8 @@ impl MakeCredentialsResult {
             att_obj,
             attachment: AuthenticatorAttachment::Unknown,
             extensions: Default::default(),
+            ep_attestation: None,
+            large_blob_key: None,
         })
     }
 }
@@ -132,6 +137,8 @@ impl<'de> Deserialize<'de> for MakeCredentialsResult {
                 let mut format: Option<&str> = None;
                 let mut auth_data: Option<AuthenticatorData> = None;
                 let mut att_stmt: Option<AttestationStatement> = None;
+                let mut ep_attestation: Option<bool> = None;
+                let mut large_blob_key: Option<Vec<u8>> = None;
 
                 while let Some(key) = map.next_key()? {
                     match key {
@@ -176,6 +183,20 @@ impl<'de> Deserialize<'de> for MakeCredentialsResult {
                                 }
                             }
                         }
+                        4 => {
+                            if ep_attestation.is_some() {
+                                return Err(M::Error::duplicate_field("ep_attestation"));
+                            }
+                            let ep_attestation_val: bool = map.next_value()?;
+                            ep_attestation = Some(ep_attestation_val);
+                        }
+                        5 => {
+                            if large_blob_key.is_some() {
+                                return Err(M::Error::duplicate_field("large_blob_key"));
+                            }
+                            let large_blob_key_bytes: ByteBuf = map.next_value()?;
+                            large_blob_key = Some(large_blob_key_bytes.into_vec());
+                        }
                         _ => continue,
                     }
                 }
@@ -192,6 +213,8 @@ impl<'de> Deserialize<'de> for MakeCredentialsResult {
                     },
                     attachment: AuthenticatorAttachment::Unknown,
                     extensions: Default::default(),
+                    ep_attestation,
+                    large_blob_key,
                 })
             }
         }
@@ -243,11 +266,19 @@ pub struct MakeCredentialsExtensions {
     pub hmac_secret: Option<bool>,
     #[serde(rename = "minPinLength", skip_serializing_if = "Option::is_none")]
     pub min_pin_length: Option<bool>,
+    #[serde(rename = "credBlob", skip_serializing_if = "Option::is_none")]
+    pub cred_blob: Option<AuthenticatorExtensionsCredBlob>,
+    #[serde(rename = "largeBlobKey", skip_serializing_if = "Option::is_none")]
+    pub large_blob_key: Option<bool>,
 }
 
 impl MakeCredentialsExtensions {
     fn has_content(&self) -> bool {
-        self.cred_protect.is_some() || self.hmac_secret.is_some() || self.min_pin_length.is_some()
+        self.cred_protect.is_some()
+            || self.hmac_secret.is_some()
+            || self.min_pin_length.is_some()
+            || self.cred_blob.is_some()
+            || self.large_blob_key.is_some()
     }
 }
 
@@ -258,6 +289,8 @@ impl From<AuthenticationExtensionsClientInputs> for MakeCredentialsExtensions {
             cred_protect: input.credential_protection_policy,
             hmac_secret: input.hmac_create_secret,
             min_pin_length: input.min_pin_length,
+            cred_blob: input.cred_blob,
+            large_blob_key: input.large_blob_key,
         }
     }
 }
@@ -350,6 +383,11 @@ impl MakeCredentials {
                 result.extensions.hmac_create_secret = Some(flag);
             }
         }
+
+        // 3. credBlob
+        //      The extension returns a flag in the authenticator data which we need to mirror as a
+        //      client output.
+        result.extensions.cred_blob = result.att_obj.auth_data.extensions.cred_blob.clone();
     }
 }
 
@@ -669,6 +707,8 @@ pub mod test {
             att_obj: create_attestation_obj(),
             attachment: AuthenticatorAttachment::Unknown,
             extensions: Default::default(),
+            ep_attestation: None,
+            large_blob_key: None,
         };
 
         assert_eq!(make_cred_result, expected);
@@ -830,6 +870,8 @@ pub mod test {
             att_obj,
             attachment: AuthenticatorAttachment::Unknown,
             extensions: Default::default(),
+            ep_attestation: None,
+            large_blob_key: None,
         };
 
         assert_eq!(make_cred_result, expected);

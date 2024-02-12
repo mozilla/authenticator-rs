@@ -2,22 +2,30 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+use aes_gcm::{
+    aead::{Aead, AeadCore, KeyInit, OsRng, Payload},
+    Aes256Gcm, Key,
+};
 use authenticator::{
     authenticatorservice::{AuthenticatorService, RegisterArgs, SignArgs},
     crypto::COSEAlgorithm,
-    ctap2::server::{
-        AuthenticationExtensionsClientInputs, PublicKeyCredentialDescriptor,
-        PublicKeyCredentialParameters, PublicKeyCredentialUserEntity, RelyingParty,
-        ResidentKeyRequirement, Transport, UserVerificationRequirement,
+    ctap2::{
+        commands::large_blobs::LargeBlobArrayElement,
+        server::{
+            AuthenticationExtensionsClientInputs, AuthenticatorExtensionsCredBlob,
+            PublicKeyCredentialDescriptor, PublicKeyCredentialParameters,
+            PublicKeyCredentialUserEntity, RelyingParty, ResidentKeyRequirement, Transport,
+            UserVerificationRequirement,
+        },
     },
     statecallback::StateCallback,
     Pin, StatusPinUv, StatusUpdate,
 };
-use getopts::Options;
+use getopts::{Matches, Options};
 use sha2::{Digest, Sha256};
 use std::sync::mpsc::{channel, RecvError};
+use std::{convert::TryInto, io::Write};
 use std::{env, io, thread};
-use std::io::Write;
 
 fn print_usage(program: &str, opts: Options) {
     println!("------------------------------------------------------------------------");
@@ -60,7 +68,12 @@ fn ask_user_choice(choices: &[PublicKeyCredentialUserEntity]) -> Option<usize> {
     }
 }
 
-fn register_user(manager: &mut AuthenticatorService, username: &str, timeout_ms: u64) {
+fn register_user(
+    manager: &mut AuthenticatorService,
+    username: &str,
+    timeout_ms: u64,
+    matches: &Matches,
+) {
     println!();
     println!("*********************************************************************");
     println!("Asking a security key to register now with user: {username}");
@@ -78,6 +91,8 @@ fn register_user(manager: &mut AuthenticatorService, username: &str, timeout_ms:
     challenge.update(challenge_str.as_bytes());
     let chall_bytes = challenge.finalize().into();
 
+    let has_large_blob = matches.opt_present("large_blob_key");
+    let name = username.to_string();
     let (status_tx, status_rx) = channel::<StatusUpdate>();
     thread::spawn(move || loop {
         match status_rx.recv() {
@@ -133,6 +148,37 @@ fn register_user(manager: &mut AuthenticatorService, username: &str, timeout_ms:
             Ok(StatusUpdate::SelectResultNotice(_, _)) => {
                 panic!("Unexpected select result notice")
             }
+            Ok(StatusUpdate::LargeBlobData(tx, key)) => {
+                if has_large_blob {
+                    // Let origData equal the opaque large-blob data.
+                    let orig_data = format!("This is the large blob for {name}").into_bytes();
+                    // Let origSize be the length, in bytes, of origData.
+                    let orig_size = orig_data.len() as u64;
+                    // Let plaintext equal origData after compression with DEFLATE [RFC1951].
+                    let plaintext = flate3::deflate(&orig_data);
+                    // Let nonce be a fresh, random, 12-byte value.
+                    let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+                    // Let ciphertext be the AEAD_AES_256_GCM authenticated encryption of plaintext using key, nonce, and the associated data as specified above.
+                    let gcm_key = Key::<Aes256Gcm>::from_slice(&key);
+                    let cipher = Aes256Gcm::new(gcm_key);
+                    let mut payload = Payload::from(plaintext.as_ref());
+                    // Associated data: The value 0x626c6f62 ("blob") || uint64LittleEndian(origSize).
+                    let mut aad = b"blob".to_vec();
+                    aad.extend_from_slice(&orig_size.to_le_bytes());
+                    payload.aad = &aad;
+                    let ciphertext = cipher
+                        .encrypt(&nonce, payload)
+                        .expect("Failed to encrypt plaintext large blob");
+                    let elem = LargeBlobArrayElement {
+                        ciphertext,
+                        nonce: nonce.to_vec().try_into().unwrap(),
+                        orig_size,
+                    };
+                    tx.send(elem).expect("Failed to send large blob element");
+                } else {
+                    panic!("Unexpected large blob data request");
+                }
+            }
             Err(RecvError) => {
                 println!("STATUS: end");
                 return;
@@ -170,6 +216,10 @@ fn register_user(manager: &mut AuthenticatorService, username: &str, timeout_ms:
         resident_key_req: ResidentKeyRequirement::Required,
         extensions: AuthenticationExtensionsClientInputs {
             cred_props: Some(true),
+            cred_blob: matches.opt_present("cred_blob").then(|| {
+                AuthenticatorExtensionsCredBlob::AsBytes("My short credBlob".as_bytes().to_vec())
+            }),
+            large_blob_key: matches.opt_present("large_blob_key").then_some(true),
             ..Default::default()
         },
         pin: None,
@@ -201,6 +251,30 @@ fn register_user(manager: &mut AuthenticatorService, username: &str, timeout_ms:
     }
 
     println!("Register result: {:?}", &attestation_object);
+
+    if matches.opt_present("large_blob_key") {
+        println!("Adding large blob key");
+    }
+}
+
+fn extract_associated_large_blobs(key: Vec<u8>, array: Vec<LargeBlobArrayElement>) -> Vec<String> {
+    let valid_elements = array
+        .iter()
+        .filter_map(|e| {
+            let gcm_key = Key::<Aes256Gcm>::from_slice(&key);
+            let cipher = Aes256Gcm::new(gcm_key);
+            let mut payload = Payload::from(e.ciphertext.as_slice());
+            // Associated data: The value 0x626c6f62 ("blob") || uint64LittleEndian(origSize).
+            let mut aad = b"blob".to_vec();
+            aad.extend_from_slice(&e.orig_size.to_le_bytes());
+            payload.aad = &aad;
+            let plaintext = cipher.decrypt(e.nonce.as_slice().into(), payload).ok();
+            plaintext
+        })
+        .map(|d| flate3::inflate(&d)) // TODO: Check resulting length and compare to orig_size
+        .map(|d| String::from_utf8_lossy(&d).to_string())
+        .collect();
+    valid_elements
 }
 
 fn main() {
@@ -216,11 +290,9 @@ fn main() {
         "timeout in seconds",
         "SEC",
     );
-    opts.optflag(
-        "s",
-        "skip_reg",
-        "Skip registration");
-
+    opts.optflag("s", "skip_reg", "Skip registration");
+    opts.optflag("b", "cred_blob", "With credBlob");
+    opts.optflag("l", "large_blob_key", "With largeBlobKey-extension");
     opts.optflag("h", "help", "print this help menu");
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
@@ -249,7 +321,7 @@ fn main() {
 
     if !matches.opt_present("skip_reg") {
         for username in &["A. User", "A. Nother", "Dr. Who"] {
-            register_user(&mut manager, username, timeout_ms)
+            register_user(&mut manager, username, timeout_ms, &matches)
         }
     }
 
@@ -324,6 +396,9 @@ fn main() {
                 let idx = ask_user_choice(&users);
                 index_sender.send(idx).expect("Failed to send choice");
             }
+            Ok(StatusUpdate::LargeBlobData(..)) => {
+                panic!("Unexpected large blob data request")
+            }
             Err(RecvError) => {
                 println!("STATUS: end");
                 return;
@@ -341,7 +416,13 @@ fn main() {
         allow_list,
         user_verification_req: UserVerificationRequirement::Required,
         user_presence_req: true,
-        extensions: Default::default(),
+        extensions: AuthenticationExtensionsClientInputs {
+            cred_blob: matches
+                .opt_present("cred_blob")
+                .then_some(AuthenticatorExtensionsCredBlob::AsBool(true)),
+            large_blob_key: matches.opt_present("large_blob_key").then_some(true),
+            ..Default::default()
+        },
         pin: None,
         use_ctap1_fallback: false,
     };
@@ -368,9 +449,22 @@ fn main() {
                 println!("Found credentials:");
                 println!(
                     "{:?}",
-                    assertion_object.assertion.user.clone().unwrap().name.unwrap() // Unwrapping here, as these shouldn't fail
+                    assertion_object
+                        .assertion
+                        .user
+                        .clone()
+                        .unwrap()
+                        .name
+                        .unwrap() // Unwrapping here, as these shouldn't fail
                 );
                 println!("-----------------------------------------------------------------");
+                if matches.opt_present("large_blob_key") {
+                    let large_blobs = extract_associated_large_blobs(
+                        assertion_object.large_blob_key.unwrap(),
+                        assertion_object.large_blob_array.unwrap(),
+                    );
+                    println!("Associated large blobs: {large_blobs:?}");
+                }
                 println!("Done.");
                 break;
             }
