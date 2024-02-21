@@ -30,6 +30,7 @@ use serde::{
 };
 use serde_bytes::ByteBuf;
 use serde_cbor::{de::from_slice, ser, Value};
+use std::collections::HashMap;
 use std::fmt;
 use std::io::Cursor;
 
@@ -145,6 +146,8 @@ pub struct GetAssertionExtensions {
     pub cred_blob: Option<bool>,
     #[serde(rename = "largeBlobKey", skip_serializing_if = "Option::is_none")]
     pub large_blob_key: Option<bool>,
+    #[serde(rename = "thirdPartyPayment", skip_serializing_if = "Option::is_none")]
+    pub third_party_payment: Option<bool>,
 }
 
 impl From<AuthenticationExtensionsClientInputs> for GetAssertionExtensions {
@@ -156,6 +159,7 @@ impl From<AuthenticationExtensionsClientInputs> for GetAssertionExtensions {
                 _ => None,
             },
             large_blob_key: input.large_blob_key,
+            third_party_payment: input.third_party_payment,
             ..Default::default()
         }
     }
@@ -163,7 +167,10 @@ impl From<AuthenticationExtensionsClientInputs> for GetAssertionExtensions {
 
 impl GetAssertionExtensions {
     fn has_content(&self) -> bool {
-        self.hmac_secret.is_some() || self.cred_blob.is_some() || self.large_blob_key.is_some()
+        self.hmac_secret.is_some()
+            || self.cred_blob.is_some()
+            || self.large_blob_key.is_some()
+            || self.third_party_payment.is_some()
     }
 }
 
@@ -182,6 +189,10 @@ pub struct GetAssertion {
     pub extensions: GetAssertionExtensions,
     pub options: GetAssertionOptions,
     pub pin_uv_auth_param: Option<PinUvAuthParam>,
+
+    // CTAP 2.2:
+    pub enterprise_attestation: Option<u64>,
+    pub attestation_formats_preference: Option<Vec<String>>,
 }
 
 impl GetAssertion {
@@ -199,6 +210,8 @@ impl GetAssertion {
             extensions,
             options,
             pin_uv_auth_param: None,
+            enterprise_attestation: None,
+            attestation_formats_preference: None,
         }
     }
 
@@ -287,22 +300,34 @@ impl Serialize for GetAssertion {
         if self.pin_uv_auth_param.is_some() {
             map_len += 2;
         }
+        if self.enterprise_attestation.is_some() {
+            map_len += 1;
+        }
+        if self.attestation_formats_preference.is_some() {
+            map_len += 1;
+        }
 
         let mut map = serializer.serialize_map(Some(map_len))?;
-        map.serialize_entry(&1, &self.rp.id)?;
-        map.serialize_entry(&2, &self.client_data_hash)?;
+        map.serialize_entry(&0x01, &self.rp.id)?;
+        map.serialize_entry(&0x02, &self.client_data_hash)?;
         if !self.allow_list.is_empty() {
-            map.serialize_entry(&3, &self.allow_list)?;
+            map.serialize_entry(&0x03, &self.allow_list)?;
         }
         if self.extensions.has_content() {
-            map.serialize_entry(&4, &self.extensions)?;
+            map.serialize_entry(&0x04, &self.extensions)?;
         }
         if self.options.has_some() {
-            map.serialize_entry(&5, &self.options)?;
+            map.serialize_entry(&0x05, &self.options)?;
         }
         if let Some(pin_uv_auth_param) = &self.pin_uv_auth_param {
-            map.serialize_entry(&6, &pin_uv_auth_param)?;
-            map.serialize_entry(&7, &pin_uv_auth_param.pin_protocol.id())?;
+            map.serialize_entry(&0x06, &pin_uv_auth_param)?;
+            map.serialize_entry(&0x07, &pin_uv_auth_param.pin_protocol.id())?;
+        }
+        if let Some(enterprise_attestation) = &self.enterprise_attestation {
+            map.serialize_entry(&0x08, &enterprise_attestation)?;
+        }
+        if let Some(attestation_formats_preference) = &self.attestation_formats_preference {
+            map.serialize_entry(&0x09, &attestation_formats_preference)?;
         }
         map.end()
     }
@@ -551,6 +576,9 @@ pub struct GetAssertionResponse {
     pub number_of_credentials: Option<usize>,
     pub user_selected: Option<bool>,
     pub large_blob_key: Option<Vec<u8>>,
+    pub unsigned_extension_outputs: Option<HashMap<String, serde_cbor::Value>>,
+    pub ep_attestation: Option<bool>,
+    pub att_stmt: Option<HashMap<String, serde_cbor::Value>>,
 }
 
 impl CtapResponse for GetAssertionResponse {}
@@ -580,6 +608,9 @@ impl<'de> Deserialize<'de> for GetAssertionResponse {
                 let mut number_of_credentials = None;
                 let mut user_selected = None;
                 let mut large_blob_key = None;
+                let mut unsigned_extension_outputs = None;
+                let mut ep_attestation = None;
+                let mut att_stmt = None;
 
                 while let Some(key) = map.next_key()? {
                     match key {
@@ -627,6 +658,26 @@ impl<'de> Deserialize<'de> for GetAssertionResponse {
                             let large_blob_key_bytes: ByteBuf = map.next_value()?;
                             large_blob_key = Some(large_blob_key_bytes.into_vec());
                         }
+                        0x08 => {
+                            if unsigned_extension_outputs.is_some() {
+                                return Err(M::Error::duplicate_field(
+                                    "unsigned_extension_outputs",
+                                ));
+                            }
+                            unsigned_extension_outputs = Some(map.next_value()?);
+                        }
+                        0x09 => {
+                            if ep_attestation.is_some() {
+                                return Err(M::Error::duplicate_field("ep_attestation"));
+                            }
+                            ep_attestation = Some(map.next_value()?);
+                        }
+                        0x0A => {
+                            if att_stmt.is_some() {
+                                return Err(M::Error::duplicate_field("att_stmt"));
+                            }
+                            att_stmt = Some(map.next_value()?);
+                        }
                         k => return Err(M::Error::custom(format!("unexpected key: {k:?}"))),
                     }
                 }
@@ -642,6 +693,9 @@ impl<'de> Deserialize<'de> for GetAssertionResponse {
                     number_of_credentials,
                     user_selected,
                     large_blob_key,
+                    unsigned_extension_outputs,
+                    ep_attestation,
+                    att_stmt,
                 })
             }
         }
@@ -1228,6 +1282,9 @@ pub mod test {
             certifications: None,
             remaining_discoverable_credentials: None,
             vendor_prototype_config_commands: None,
+            attestation_formats: None,
+            uv_count_since_last_pin_entry: None,
+            long_touch_for_reset: None,
         });
 
         // Sending first GetAssertion with first allow_list-entry, that will return an error

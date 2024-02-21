@@ -398,6 +398,8 @@ pub struct AuthenticationExtensionsClientInputs {
     /// GetAssertion-requests use AsBool
     pub cred_blob: Option<AuthenticatorExtensionsCredBlob>,
     pub large_blob_key: Option<bool>,
+    // CTAP 2.2
+    pub third_party_payment: Option<bool>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

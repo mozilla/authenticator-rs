@@ -31,6 +31,7 @@ use serde::{
 };
 use serde_bytes::ByteBuf;
 use serde_cbor::{self, de::from_slice, ser, Value};
+use std::collections::HashMap;
 use std::fmt;
 use std::io::{Cursor, Read};
 
@@ -41,6 +42,7 @@ pub struct MakeCredentialsResult {
     pub extensions: AuthenticationExtensionsClientOutputs,
     pub ep_attestation: Option<bool>,
     pub large_blob_key: Option<Vec<u8>>,
+    pub unsigned_extension_outputs: Option<HashMap<String, serde_cbor::Value>>,
 }
 
 impl MakeCredentialsResult {
@@ -112,6 +114,7 @@ impl MakeCredentialsResult {
             extensions: Default::default(),
             ep_attestation: None,
             large_blob_key: None,
+            unsigned_extension_outputs: None,
         })
     }
 }
@@ -139,22 +142,24 @@ impl<'de> Deserialize<'de> for MakeCredentialsResult {
                 let mut att_stmt: Option<AttestationStatement> = None;
                 let mut ep_attestation: Option<bool> = None;
                 let mut large_blob_key: Option<Vec<u8>> = None;
+                let mut unsigned_extension_outputs: Option<HashMap<String, serde_cbor::Value>> =
+                    None;
 
                 while let Some(key) = map.next_key()? {
                     match key {
-                        1 => {
+                        0x01 => {
                             if format.is_some() {
                                 return Err(DesError::duplicate_field("fmt (0x01)"));
                             }
                             format = Some(map.next_value()?);
                         }
-                        2 => {
+                        0x02 => {
                             if auth_data.is_some() {
                                 return Err(DesError::duplicate_field("authData (0x02)"));
                             }
                             auth_data = Some(map.next_value()?);
                         }
-                        3 => {
+                        0x03 => {
                             let format =
                                 format.ok_or_else(|| DesError::missing_field("fmt (0x01)"))?;
                             if att_stmt.is_some() {
@@ -183,19 +188,27 @@ impl<'de> Deserialize<'de> for MakeCredentialsResult {
                                 }
                             }
                         }
-                        4 => {
+                        0x04 => {
                             if ep_attestation.is_some() {
                                 return Err(M::Error::duplicate_field("ep_attestation"));
                             }
                             let ep_attestation_val: bool = map.next_value()?;
                             ep_attestation = Some(ep_attestation_val);
                         }
-                        5 => {
+                        0x05 => {
                             if large_blob_key.is_some() {
                                 return Err(M::Error::duplicate_field("large_blob_key"));
                             }
                             let large_blob_key_bytes: ByteBuf = map.next_value()?;
                             large_blob_key = Some(large_blob_key_bytes.into_vec());
+                        }
+                        0x06 => {
+                            if unsigned_extension_outputs.is_some() {
+                                return Err(M::Error::duplicate_field(
+                                    "unsigned_extension_outputs",
+                                ));
+                            }
+                            unsigned_extension_outputs = Some(map.next_value()?);
                         }
                         _ => continue,
                     }
@@ -215,6 +228,7 @@ impl<'de> Deserialize<'de> for MakeCredentialsResult {
                     extensions: Default::default(),
                     ep_attestation,
                     large_blob_key,
+                    unsigned_extension_outputs,
                 })
             }
         }
@@ -270,6 +284,8 @@ pub struct MakeCredentialsExtensions {
     pub cred_blob: Option<AuthenticatorExtensionsCredBlob>,
     #[serde(rename = "largeBlobKey", skip_serializing_if = "Option::is_none")]
     pub large_blob_key: Option<bool>,
+    #[serde(rename = "thirdPartyPayment", skip_serializing_if = "Option::is_none")]
+    pub third_party_payment: Option<bool>,
 }
 
 impl MakeCredentialsExtensions {
@@ -279,6 +295,7 @@ impl MakeCredentialsExtensions {
             || self.min_pin_length.is_some()
             || self.cred_blob.is_some()
             || self.large_blob_key.is_some()
+            || self.third_party_payment.is_some()
     }
 }
 
@@ -291,6 +308,7 @@ impl From<AuthenticationExtensionsClientInputs> for MakeCredentialsExtensions {
             min_pin_length: input.min_pin_length,
             cred_blob: input.cred_blob,
             large_blob_key: input.large_blob_key,
+            third_party_payment: input.third_party_payment,
         }
     }
 }
@@ -314,6 +332,9 @@ pub struct MakeCredentials {
     pub options: MakeCredentialsOptions,
     pub pin_uv_auth_param: Option<PinUvAuthParam>,
     pub enterprise_attestation: Option<u64>,
+
+    // CTAP 2.2
+    pub attestation_formats_preference: Option<Vec<String>>,
 }
 
 impl MakeCredentials {
@@ -337,6 +358,7 @@ impl MakeCredentials {
             options,
             pin_uv_auth_param: None,
             enterprise_attestation: None,
+            attestation_formats_preference: None,
         }
     }
 
@@ -473,6 +495,9 @@ impl Serialize for MakeCredentials {
         if self.enterprise_attestation.is_some() {
             map_len += 1;
         }
+        if self.attestation_formats_preference.is_some() {
+            map_len += 1;
+        }
 
         let mut map = serializer.serialize_map(Some(map_len))?;
         map.serialize_entry(&0x01, &self.client_data_hash)?;
@@ -494,6 +519,9 @@ impl Serialize for MakeCredentials {
         }
         if let Some(enterprise_attestation) = self.enterprise_attestation {
             map.serialize_entry(&0x0a, &enterprise_attestation)?;
+        }
+        if let Some(attestation_formats_preference) = &self.attestation_formats_preference {
+            map.serialize_entry(&0x0b, &attestation_formats_preference)?;
         }
         map.end()
     }
@@ -709,6 +737,7 @@ pub mod test {
             extensions: Default::default(),
             ep_attestation: None,
             large_blob_key: None,
+            unsigned_extension_outputs: None,
         };
 
         assert_eq!(make_cred_result, expected);
@@ -872,6 +901,7 @@ pub mod test {
             extensions: Default::default(),
             ep_attestation: None,
             large_blob_key: None,
+            unsigned_extension_outputs: None,
         };
 
         assert_eq!(make_cred_result, expected);
