@@ -16,7 +16,7 @@ use std::io::{self, Read, Write};
 use std::sync::mpsc::{channel, Receiver, Sender};
 
 pub(crate) const IN_HID_RPT_SIZE: usize = 64;
-const OUT_HID_RPT_SIZE: usize = 64;
+pub(crate) const OUT_HID_RPT_SIZE: usize = 64;
 
 #[derive(Debug)]
 pub struct Device {

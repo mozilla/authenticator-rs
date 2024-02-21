@@ -5,6 +5,7 @@ use crate::{
             authenticator_config::{AuthConfigCommand, AuthConfigResult},
             bio_enrollment::BioTemplateId,
             get_info::AuthenticatorInfo,
+            large_blobs::LargeBlobArrayElement,
             PinUvAuthResult,
         },
         server::{PublicKeyCredentialDescriptor, PublicKeyCredentialUserEntity},
@@ -107,6 +108,9 @@ pub enum StatusUpdate {
     InteractiveManagement(InteractiveUpdate),
     /// Sent when a token returns multiple results for a getAssertion request
     SelectResultNotice(Sender<Option<usize>>, Vec<PublicKeyCredentialUserEntity>),
+    /// After MakeCredential, supply the user with the large blob key and let
+    /// them calculate the payload, to send back to us.
+    LargeBlobData(Sender<LargeBlobArrayElement>, Vec<u8>),
 }
 
 pub(crate) fn send_status(status: &Sender<StatusUpdate>, msg: StatusUpdate) {

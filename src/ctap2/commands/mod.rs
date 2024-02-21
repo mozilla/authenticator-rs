@@ -18,6 +18,7 @@ pub mod get_assertion;
 pub mod get_info;
 pub mod get_next_assertion;
 pub mod get_version;
+pub mod large_blobs;
 pub mod make_credentials;
 pub mod reset;
 pub mod selection;
@@ -208,6 +209,7 @@ pub enum Command {
     BioEnrollment = 0x09,
     CredentialManagement = 0x0A,
     Selection = 0x0B,
+    LargeBlobs = 0x0C,
     AuthenticatorConfig = 0x0D,
     BioEnrollmentPreview = 0x40,
     CredentialManagementPreview = 0x41,

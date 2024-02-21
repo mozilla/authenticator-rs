@@ -169,6 +169,10 @@ pub struct CredentialManagementResponse {
     pub cred_protect: Option<u64>,
     /// Large blob encryption key.
     pub large_blob_key: Option<Vec<u8>>,
+
+    // CTAP 2.2
+    /// Whether the credential is third-party payment enabled, if supported by the authenticator.
+    pub third_party_payment: Option<bool>,
 }
 
 impl CtapResponse for CredentialManagementResponse {}
@@ -248,6 +252,7 @@ impl<'de> Deserialize<'de> for CredentialManagementResponse {
                 let mut total_credentials = None; // (0x09) 	Unsigned Integer 	Total number of credentials present on the authenticator for the RP in question
                 let mut cred_protect = None; // (0x0A) 	Unsigned Integer 	Credential protection policy.
                 let mut large_blob_key = None; // (0x0B) 	Byte string 	Large blob encryption key.
+                let mut third_party_payment = None; // (0x0C) bool
 
                 while let Some(key) = map.next_key()? {
                     match key {
@@ -327,7 +332,12 @@ impl<'de> Deserialize<'de> for CredentialManagementResponse {
                             // Using into_vec, to avoid any copy of large_blob_key
                             large_blob_key = Some(map.next_value::<ByteBuf>()?.into_vec());
                         }
-
+                        0x0C => {
+                            if third_party_payment.is_some() {
+                                return Err(SerdeError::duplicate_field("third_party_payment"));
+                            }
+                            third_party_payment = Some(map.next_value()?);
+                        }
                         k => {
                             warn!("ClientPinResponse: unexpected key: {:?}", k);
                             let _ = map.next_value::<IgnoredAny>()?;
@@ -348,6 +358,7 @@ impl<'de> Deserialize<'de> for CredentialManagementResponse {
                     total_credentials,
                     cred_protect,
                     large_blob_key,
+                    third_party_payment,
                 })
             }
         }
