@@ -79,6 +79,7 @@ pub struct HmacSecretExtension {
     pub salt1: Vec<u8>,
     pub salt2: Option<Vec<u8>>,
     calculated_hmac: Option<CalculatedHmacSecretExtension>,
+    pin_protocol: Option<u64>,
 }
 
 impl HmacSecretExtension {
@@ -87,10 +88,15 @@ impl HmacSecretExtension {
             salt1,
             salt2,
             calculated_hmac: None,
+            pin_protocol: None,
         }
     }
 
-    pub fn calculate(&mut self, secret: &SharedSecret) -> Result<(), AuthenticatorError> {
+    pub fn calculate(
+        &mut self,
+        secret: &SharedSecret,
+        puat: Option<PinUvAuthToken>,
+    ) -> Result<(), AuthenticatorError> {
         if self.salt1.len() < 32 {
             return Err(CryptoError::WrongSaltLength.into());
         }
@@ -112,6 +118,11 @@ impl HmacSecretExtension {
             salt_auth,
         });
 
+        // CTAP2.1 platforms MUST include this parameter if the value of pinUvAuthProtocol is not 1.
+        self.pin_protocol = puat
+            .map(|puat| puat.pin_protocol.id())
+            .filter(|id| *id != 1);
+
         Ok(())
     }
 }
@@ -122,10 +133,14 @@ impl Serialize for HmacSecretExtension {
         S: Serializer,
     {
         if let Some(calc) = &self.calculated_hmac {
-            let mut map = serializer.serialize_map(Some(3))?;
+            let mut map =
+                serializer.serialize_map(Some(3 + self.pin_protocol.map(|_| 1).unwrap_or(0)))?;
             map.serialize_entry(&1, &calc.public_key)?;
             map.serialize_entry(&2, serde_bytes::Bytes::new(&calc.salt_enc))?;
             map.serialize_entry(&3, serde_bytes::Bytes::new(&calc.salt_auth))?;
+            if let Some(pin_protocol) = &self.pin_protocol {
+                map.serialize_entry(&4, pin_protocol)?;
+            }
             map.end()
         } else {
             Err(SerError::custom(

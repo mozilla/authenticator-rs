@@ -663,7 +663,7 @@ pub fn sign<Dev: FidoDevice>(
         // Third, use the shared secret in the extensions, if requested
         if let Some(extension) = get_assertion.extensions.hmac_secret.as_mut() {
             if let Some(secret) = dev.get_shared_secret() {
-                match extension.calculate(secret) {
+                match extension.calculate(secret, pin_uv_auth_result.get_pin_uv_auth_token()) {
                     Ok(_) => {}
                     Err(e) => {
                         callback.call(Err(e));
@@ -679,7 +679,11 @@ pub fn sign<Dev: FidoDevice>(
             &get_assertion.extensions.hmac_secret,
         ) {
             if let Some(secret) = dev.get_shared_secret() {
-                match prf.calculate(secret, &get_assertion.allow_list) {
+                match prf.calculate(
+                    secret,
+                    &get_assertion.allow_list,
+                    pin_uv_auth_result.get_pin_uv_auth_token(),
+                ) {
                     Ok(Some((hmac_secret, selected_credential))) => {
                         get_assertion.extensions.hmac_secret = Some(hmac_secret);
                         if let Some(selected_cred_id) = selected_credential {
