@@ -15,9 +15,9 @@ use crate::ctap2::attestation::{
 use crate::ctap2::client_data::ClientDataHash;
 use crate::ctap2::server::{
     AuthenticationExtensionsClientInputs, AuthenticationExtensionsClientOutputs,
-    AuthenticatorAttachment, CredentialProtectionPolicy, PublicKeyCredentialDescriptor,
-    PublicKeyCredentialParameters, PublicKeyCredentialUserEntity, RelyingParty, RpIdHash,
-    UserVerificationRequirement,
+    AuthenticationExtensionsPRFOutputs, AuthenticationExtensionsPRFValues, AuthenticatorAttachment,
+    CredentialProtectionPolicy, PublicKeyCredentialDescriptor, PublicKeyCredentialParameters,
+    PublicKeyCredentialUserEntity, RelyingParty, RpIdHash, UserVerificationRequirement,
 };
 use crate::ctap2::utils::{read_byte, serde_parse_err};
 use crate::errors::AuthenticatorError;
@@ -240,9 +240,33 @@ pub struct MakeCredentialsExtensions {
     #[serde(rename = "credProtect", skip_serializing_if = "Option::is_none")]
     pub cred_protect: Option<CredentialProtectionPolicy>,
     #[serde(rename = "hmac-secret", skip_serializing_if = "Option::is_none")]
-    pub hmac_secret: Option<bool>,
+    pub hmac_secret: Option<HmacSecretFromHmacSecretOrPrf>,
     #[serde(rename = "minPinLength", skip_serializing_if = "Option::is_none")]
     pub min_pin_length: Option<bool>,
+}
+
+#[derive(Debug, Clone)]
+pub enum HmacSecretFromHmacSecretOrPrf {
+    HmacSecret(bool),
+    Prf,
+}
+
+impl Default for HmacSecretFromHmacSecretOrPrf {
+    fn default() -> Self {
+        Self::HmacSecret(false)
+    }
+}
+
+impl Serialize for HmacSecretFromHmacSecretOrPrf {
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::HmacSecret(hmac_secret) => s.serialize_bool(*hmac_secret),
+            Self::Prf => s.serialize_bool(true),
+        }
+    }
 }
 
 impl MakeCredentialsExtensions {
@@ -256,7 +280,13 @@ impl From<AuthenticationExtensionsClientInputs> for MakeCredentialsExtensions {
         Self {
             cred_props: input.cred_props,
             cred_protect: input.credential_protection_policy,
-            hmac_secret: input.hmac_create_secret,
+            hmac_secret: match (input.hmac_create_secret, input.prf) {
+                (None, None) => None,
+                (_, Some(_)) => Some(HmacSecretFromHmacSecretOrPrf::Prf),
+                (Some(hmac_secret), _) => {
+                    Some(HmacSecretFromHmacSecretOrPrf::HmacSecret(hmac_secret))
+                }
+            },
             min_pin_length: input.min_pin_length,
         }
     }
@@ -343,12 +373,52 @@ impl MakeCredentials {
         // 2. hmac-secret
         //      The extension returns a flag in the authenticator data which we need to mirror as a
         //      client output.
-        if self.extensions.hmac_secret == Some(true) {
-            if let Some(HmacSecretResponse::Confirmed(flag)) =
-                result.att_obj.auth_data.extensions.hmac_secret
-            {
-                result.extensions.hmac_create_secret = Some(flag);
+        // 3. prf
+        //      hmac-secret returns a flag "enabled" in the authenticator data
+        //      which we need to mirror as a client output.
+        //      If a future version of hmac-secret permits calculating secrets in makeCredential,
+        //      we also need to decrypt and output them as client outputs.
+        match self.extensions.hmac_secret {
+            Some(HmacSecretFromHmacSecretOrPrf::HmacSecret(true)) => {
+                if let Some(HmacSecretResponse::Confirmed(flag)) =
+                    result.att_obj.auth_data.extensions.hmac_secret
+                {
+                    result.extensions.hmac_create_secret = Some(flag);
+                }
             }
+            Some(HmacSecretFromHmacSecretOrPrf::Prf) => {
+                result.extensions.prf = match &result.att_obj.auth_data.extensions.hmac_secret {
+                    None => None,
+                    Some(HmacSecretResponse::Confirmed(flag)) => {
+                        Some(AuthenticationExtensionsPRFOutputs {
+                            enabled: Some(*flag),
+                            results: None,
+                        })
+                    }
+                    Some(HmacSecretResponse::Secret(outputs)) => {
+                        if let Some(shared_secret) = dev.get_shared_secret() {
+                            if let Ok(secrets) = shared_secret.decrypt(&outputs) {
+                                Some(AuthenticationExtensionsPRFOutputs {
+                                    enabled: Some(true),
+                                    results: Some(AuthenticationExtensionsPRFValues {
+                                        first: secrets[0..32].to_vec(),
+                                        second: if secrets.len() > 32 {
+                                            Some(secrets[32..64].to_vec())
+                                        } else {
+                                            None
+                                        },
+                                    }),
+                                })
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    }
+                }
+            }
+            None | Some(HmacSecretFromHmacSecretOrPrf::HmacSecret(false)) => {}
         }
     }
 }

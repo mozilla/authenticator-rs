@@ -616,18 +616,6 @@ pub fn sign<Dev: FidoDevice>(
             ),
             callback
         );
-        // Third, use the shared secret in the extensions, if requested
-        if let Some(extension) = get_assertion.extensions.hmac_secret.as_mut() {
-            if let Some(secret) = dev.get_shared_secret() {
-                match extension.calculate(secret) {
-                    Ok(x) => x,
-                    Err(e) => {
-                        callback.call(Err(e));
-                        return false;
-                    }
-                }
-            }
-        }
 
         // Do "pre-flight": Filter the allow-list
         let original_allow_list_was_empty = get_assertion.allow_list.is_empty();
@@ -670,6 +658,41 @@ pub fn sign<Dev: FidoDevice>(
             ))
             .into()));
             return false;
+        }
+
+        // Third, use the shared secret in the extensions, if requested
+        if let Some(extension) = get_assertion.extensions.hmac_secret.as_mut() {
+            if let Some(secret) = dev.get_shared_secret() {
+                match extension.calculate(secret) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        callback.call(Err(e));
+                        return false;
+                    }
+                }
+            }
+        }
+
+        // Calculate prf extension inputs unless hmac-secret has already taken the spot
+        if let (Some(prf), None) = (
+            &get_assertion.extensions.prf,
+            &get_assertion.extensions.hmac_secret,
+        ) {
+            if let Some(secret) = dev.get_shared_secret() {
+                match prf.calculate(secret, &get_assertion.allow_list) {
+                    Ok(Some((hmac_secret, selected_credential))) => {
+                        get_assertion.extensions.hmac_secret = Some(hmac_secret);
+                        if let Some(selected_cred_id) = selected_credential {
+                            get_assertion.allow_list = vec![selected_cred_id.clone()];
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        callback.call(Err(e));
+                        return false;
+                    }
+                }
+            }
         }
 
         debug!("------------------------------------------------------------------");

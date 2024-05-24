@@ -1,4 +1,4 @@
-use crate::crypto::COSEAlgorithm;
+use crate::crypto::{COSEAlgorithm, SharedSecret};
 use crate::{errors::AuthenticatorError, AuthenticatorTransports, KeyHandle};
 use base64::Engine;
 use serde::de::MapAccess;
@@ -9,8 +9,11 @@ use serde::{
 };
 use serde_bytes::{ByteBuf, Bytes};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::convert::{Into, TryFrom};
 use std::fmt;
+
+use super::commands::get_assertion::HmacSecretExtension;
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct RpIdHash(pub [u8; 32]);
@@ -48,6 +51,12 @@ pub struct RelyingParty {
     pub name: Option<String>,
 }
 
+fn sha256(data: impl AsRef<[u8]>) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    hasher.finalize().into()
+}
+
 impl RelyingParty {
     pub fn from<S>(id: S) -> Self
     where
@@ -60,13 +69,7 @@ impl RelyingParty {
     }
 
     pub fn hash(&self) -> RpIdHash {
-        let mut hasher = Sha256::new();
-        hasher.update(&self.id);
-
-        let mut output = [0u8; 32];
-        output.copy_from_slice(hasher.finalize().as_slice());
-
-        RpIdHash(output)
+        RpIdHash(sha256(&self.id))
     }
 }
 
@@ -365,6 +368,7 @@ pub struct AuthenticationExtensionsClientInputs {
     pub enforce_credential_protection_policy: Option<bool>,
     pub hmac_create_secret: Option<bool>,
     pub min_pin_length: Option<bool>,
+    pub prf: Option<AuthenticationExtensionsPRFInputs>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -372,11 +376,84 @@ pub struct CredentialProperties {
     pub rk: bool,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct AuthenticationExtensionsPRFInputs {
+    pub eval: Option<AuthenticationExtensionsPRFValues>,
+    pub eval_by_credential: Option<HashMap<Vec<u8>, AuthenticationExtensionsPRFValues>>,
+}
+
+impl AuthenticationExtensionsPRFInputs {
+    pub fn calculate<'allow_cred>(
+        &self,
+        secret: &SharedSecret,
+        allow_credentials: &'allow_cred [PublicKeyCredentialDescriptor],
+    ) -> Result<
+        Option<(
+            HmacSecretExtension,
+            Option<&'allow_cred PublicKeyCredentialDescriptor>,
+        )>,
+        AuthenticatorError,
+    > {
+        if let Some((selected_credential, ev)) = self
+            .eval_by_credential
+            .as_ref()
+            .and_then(|eval_by_credential| {
+                allow_credentials.iter().find_map(|pkcd| {
+                    eval_by_credential
+                        .get(&pkcd.id)
+                        .map(|eval| (Some(pkcd), eval))
+                })
+            })
+            .or(self.eval.as_ref().map(|eval| (None, eval)))
+        {
+            let mut hmac_secret = HmacSecretExtension::new(
+                sha256(
+                    b"WebAuthn PRF"
+                        .iter()
+                        .chain([0x00].iter())
+                        .chain(ev.first.iter())
+                        .copied()
+                        .collect::<Vec<u8>>(),
+                )
+                .to_vec(),
+                ev.second.as_ref().map(|second| {
+                    sha256(
+                        b"WebAuthn PRF"
+                            .iter()
+                            .chain([0x00].iter())
+                            .chain(second.iter())
+                            .copied()
+                            .collect::<Vec<u8>>(),
+                    )
+                    .to_vec()
+                }),
+            );
+            hmac_secret.calculate(secret)?;
+            Ok(Some((hmac_secret, selected_credential)))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct AuthenticationExtensionsPRFValues {
+    pub first: Vec<u8>,
+    pub second: Option<Vec<u8>>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct AuthenticationExtensionsPRFOutputs {
+    pub enabled: Option<bool>,
+    pub results: Option<AuthenticationExtensionsPRFValues>,
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct AuthenticationExtensionsClientOutputs {
     pub app_id: Option<bool>,
     pub cred_props: Option<CredentialProperties>,
     pub hmac_create_secret: Option<bool>,
+    pub prf: Option<AuthenticationExtensionsPRFOutputs>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
