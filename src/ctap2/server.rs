@@ -376,6 +376,14 @@ pub struct CredentialProperties {
     pub rk: bool,
 }
 
+/// Decrypted HMAC outputs from the `hmac-secret` extension.
+/// https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-20210615.html#dictdef-hmacgetsecretoutput
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct HMACGetSecretOutput {
+    pub output1: [u8; 32],
+    pub output2: Option<[u8; 32]>,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct AuthenticationExtensionsPRFInputs {
     pub eval: Option<AuthenticationExtensionsPRFValues>,
@@ -441,6 +449,15 @@ impl AuthenticationExtensionsPRFInputs {
 pub struct AuthenticationExtensionsPRFValues {
     pub first: Vec<u8>,
     pub second: Option<Vec<u8>>,
+}
+
+impl From<HMACGetSecretOutput> for AuthenticationExtensionsPRFValues {
+    fn from(hmac_output: HMACGetSecretOutput) -> Self {
+        Self {
+            first: hmac_output.output1.to_vec(),
+            second: hmac_output.output2.map(|o2| o2.to_vec()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

@@ -15,9 +15,9 @@ use crate::ctap2::attestation::{
 use crate::ctap2::client_data::ClientDataHash;
 use crate::ctap2::server::{
     AuthenticationExtensionsClientInputs, AuthenticationExtensionsClientOutputs,
-    AuthenticationExtensionsPRFOutputs, AuthenticationExtensionsPRFValues, AuthenticatorAttachment,
-    CredentialProtectionPolicy, PublicKeyCredentialDescriptor, PublicKeyCredentialParameters,
-    PublicKeyCredentialUserEntity, RelyingParty, RpIdHash, UserVerificationRequirement,
+    AuthenticationExtensionsPRFOutputs, AuthenticatorAttachment, CredentialProtectionPolicy,
+    PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, PublicKeyCredentialUserEntity,
+    RelyingParty, RpIdHash, UserVerificationRequirement,
 };
 use crate::ctap2::utils::{read_byte, serde_parse_err};
 use crate::errors::AuthenticatorError;
@@ -395,19 +395,13 @@ impl MakeCredentials {
                             results: None,
                         })
                     }
-                    Some(HmacSecretResponse::Secret(outputs)) => {
+                    Some(hmac_response @ HmacSecretResponse::Secret(_)) => {
                         if let Some(shared_secret) = dev.get_shared_secret() {
-                            if let Ok(secrets) = shared_secret.decrypt(&outputs) {
+                            if let Some(Ok(secrets)) = hmac_response.decrypt_secrets(shared_secret)
+                            {
                                 Some(AuthenticationExtensionsPRFOutputs {
                                     enabled: Some(true),
-                                    results: Some(AuthenticationExtensionsPRFValues {
-                                        first: secrets[0..32].to_vec(),
-                                        second: if secrets.len() > 32 {
-                                            Some(secrets[32..64].to_vec())
-                                        } else {
-                                            None
-                                        },
-                                    }),
+                                    results: Some(secrets.into()),
                                 })
                             } else {
                                 None

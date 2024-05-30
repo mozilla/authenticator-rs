@@ -14,9 +14,9 @@ use crate::ctap2::commands::get_next_assertion::GetNextAssertion;
 use crate::ctap2::commands::make_credentials::UserVerification;
 use crate::ctap2::server::{
     AuthenticationExtensionsClientInputs, AuthenticationExtensionsClientOutputs,
-    AuthenticationExtensionsPRFInputs, AuthenticationExtensionsPRFOutputs,
-    AuthenticationExtensionsPRFValues, AuthenticatorAttachment, PublicKeyCredentialDescriptor,
-    PublicKeyCredentialUserEntity, RelyingParty, RpIdHash, UserVerificationRequirement,
+    AuthenticationExtensionsPRFInputs, AuthenticationExtensionsPRFOutputs, AuthenticatorAttachment,
+    PublicKeyCredentialDescriptor, PublicKeyCredentialUserEntity, RelyingParty, RpIdHash,
+    UserVerificationRequirement,
 };
 use crate::ctap2::utils::{read_be_u32, read_byte};
 use crate::errors::AuthenticatorError;
@@ -92,6 +92,9 @@ impl HmacSecretExtension {
         }
     }
 
+    /// Calculate inputs for the `hmac-secret` extension.
+    /// See "authenticatorGetAssertion additional behaviors"
+    /// in https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-20210615.html#sctn-hmac-secret-extension
     pub fn calculate(
         &mut self,
         secret: &SharedSecret,
@@ -228,21 +231,15 @@ impl GetAssertion {
         // 2. prf
         //      If the prf extension was requested and hmac-secret returned secrets,
         //      we need to decrypt and output them as prf client outputs.
-        if let (Some(_), Some(HmacSecretResponse::Secret(hmac_outputs)), Some(shared_secret)) = (
+        if let (Some(_), Some(hmac_response @ HmacSecretResponse::Secret(_)), Some(shared_secret)) = (
             &self.extensions.prf,
             &result.assertion.auth_data.extensions.hmac_secret,
             dev.get_shared_secret(),
         ) {
-            if let Ok(secrets) = shared_secret.decrypt(&hmac_outputs) {
-                let (first, second) = secrets.split_at(32);
+            if let Some(Ok(secrets)) = hmac_response.decrypt_secrets(shared_secret) {
                 result.extensions.prf = Some(AuthenticationExtensionsPRFOutputs {
                     enabled: None,
-                    results: Some(AuthenticationExtensionsPRFValues {
-                        first: first.to_vec(),
-                        second: Some(second)
-                            .filter(|second| !second.is_empty())
-                            .map(|second| second.to_vec()),
-                    }),
+                    results: Some(secrets.into()),
                 });
             }
         }

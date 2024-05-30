@@ -1,5 +1,6 @@
+use super::server::HMACGetSecretOutput;
 use super::utils::{from_slice_stream, read_be_u16, read_be_u32, read_byte};
-use crate::crypto::COSEAlgorithm;
+use crate::crypto::{COSEAlgorithm, CryptoError, SharedSecret};
 use crate::ctap2::server::{CredentialProtectionPolicy, RpIdHash};
 use crate::ctap2::utils::serde_parse_err;
 use crate::{crypto::COSEKey, errors::AuthenticatorError};
@@ -10,6 +11,7 @@ use serde::{
     Deserialize, Deserializer, Serialize,
 };
 use serde_cbor;
+use std::convert::TryInto;
 use std::fmt;
 use std::io::{Cursor, Read};
 
@@ -21,6 +23,37 @@ pub enum HmacSecretResponse {
     /// This is returned by GetAssertion:
     /// AES256-CBC(shared_secret, HMAC-SHA265(CredRandom, salt1) || HMAC-SHA265(CredRandom, salt2))
     Secret(Vec<u8>),
+}
+
+impl HmacSecretResponse {
+    /// Return the decrypted HMAC outputs, if this is an instance of [HmacSecretResponse::Secret].
+    pub fn decrypt_secrets(
+        &self,
+        shared_secret: &SharedSecret,
+    ) -> Option<Result<HMACGetSecretOutput, CryptoError>> {
+        if let HmacSecretResponse::Secret(hmac_outputs) = self {
+            Some(Self::decrypt_secrets_internal(shared_secret, hmac_outputs))
+        } else {
+            None
+        }
+    }
+
+    fn decrypt_secrets_internal(
+        shared_secret: &SharedSecret,
+        hmac_outputs: &[u8],
+    ) -> Result<HMACGetSecretOutput, CryptoError> {
+        let output_secrets = shared_secret.decrypt(hmac_outputs)?;
+        let (output1, output2) = output_secrets.split_at(32);
+        Ok(HMACGetSecretOutput {
+            output1: output1
+                .try_into()
+                .map_err(|_| CryptoError::WrongSaltLength)?,
+            output2: Some(output2)
+                .filter(|o2| !o2.is_empty())
+                .map(|o2| o2.try_into().map_err(|_| CryptoError::WrongSaltLength))
+                .transpose()?,
+        })
+    }
 }
 
 impl Serialize for HmacSecretResponse {
