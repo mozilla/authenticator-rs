@@ -22,7 +22,9 @@ use crate::ctap2::commands::credential_management::{
     CredManagementCommand, CredentialList, CredentialListEntry, CredentialManagement,
     CredentialManagementResult, CredentialRpListEntry,
 };
-use crate::ctap2::commands::get_assertion::{GetAssertion, GetAssertionOptions};
+use crate::ctap2::commands::get_assertion::{
+    GetAssertion, GetAssertionOptions, HmacGetSecretOrPrf,
+};
 use crate::ctap2::commands::make_credentials::{
     dummy_make_credentials_cmd, MakeCredentials, MakeCredentialsOptions,
 };
@@ -661,42 +663,48 @@ pub fn sign<Dev: FidoDevice>(
         }
 
         // Third, use the shared secret in the extensions, if requested
-        if let Some(extension) = get_assertion.extensions.hmac_secret.as_mut() {
-            if let Some(secret) = dev.get_shared_secret() {
-                match extension.calculate(secret, pin_uv_auth_result.get_pin_uv_auth_token()) {
-                    Ok(_) => {}
-                    Err(e) => {
-                        callback.call(Err(e));
-                        return false;
-                    }
-                }
-            }
-        }
-
-        // Calculate prf extension inputs unless hmac-secret has already taken the spot
-        if let (Some(prf), None) = (
-            &get_assertion.extensions.prf,
-            &get_assertion.extensions.hmac_secret,
-        ) {
-            if let Some(secret) = dev.get_shared_secret() {
-                match prf.calculate(
-                    secret,
-                    &get_assertion.allow_list,
-                    pin_uv_auth_result.get_pin_uv_auth_token(),
-                ) {
-                    Ok(Some((hmac_secret, selected_credential))) => {
-                        get_assertion.extensions.hmac_secret = Some(hmac_secret);
-                        if let Some(selected_cred_id) = selected_credential {
-                            get_assertion.allow_list = vec![selected_cred_id.clone()];
+        if let Some(hmac_get_secret_or_prf) = get_assertion.extensions.hmac_secret.as_mut() {
+            match hmac_get_secret_or_prf {
+                HmacGetSecretOrPrf::HmacGetSecret(extension) => {
+                    if let Some(secret) = dev.get_shared_secret() {
+                        match extension
+                            .calculate(secret, pin_uv_auth_result.get_pin_uv_auth_token())
+                        {
+                            Ok(_) => {}
+                            Err(e) => {
+                                callback.call(Err(e));
+                                return false;
+                            }
                         }
                     }
-                    Ok(None) => {}
-                    Err(e) => {
-                        callback.call(Err(e));
-                        return false;
+                }
+
+                HmacGetSecretOrPrf::PrfUninitialized(prf) => {
+                    if let Some(secret) = dev.get_shared_secret() {
+                        match prf.calculate(
+                            secret,
+                            &get_assertion.allow_list,
+                            pin_uv_auth_result.get_pin_uv_auth_token(),
+                        ) {
+                            Ok(Some((hmac_secret, selected_credential))) => {
+                                *hmac_get_secret_or_prf = HmacGetSecretOrPrf::Prf(hmac_secret);
+                                if let Some(selected_cred_id) = selected_credential {
+                                    get_assertion.allow_list = vec![selected_cred_id.clone()];
+                                }
+                            }
+                            Ok(None) => {}
+                            Err(e) => {
+                                callback.call(Err(e));
+                                return false;
+                            }
+                        }
                     }
                 }
-            }
+
+                HmacGetSecretOrPrf::Prf(_) => {
+                    unreachable!("hmac-secret inputs from PRF already initialized")
+                }
+            };
         }
 
         debug!("------------------------------------------------------------------");

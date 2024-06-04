@@ -74,6 +74,32 @@ pub struct CalculatedHmacSecretExtension {
     pub salt_auth: Vec<u8>,
 }
 
+/// Wrapper type recording whether the hmac-secret input originally came from the hmacGetSecret or the prf client extension input.
+#[derive(Debug, Clone)]
+pub enum HmacGetSecretOrPrf {
+    /// hmac-secret inputs set by the hmacGetSecret client extension input.
+    HmacGetSecret(HmacSecretExtension),
+    /// hmac-secret input is to be calculated from PRF inputs, but we haven't yet identified which eval or evalByCredential entry to use.
+    PrfUninitialized(AuthenticationExtensionsPRFInputs),
+    /// hmac-secret inputs set by the prf client extension input.
+    Prf(HmacSecretExtension),
+}
+
+impl Serialize for HmacGetSecretOrPrf {
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::HmacGetSecret(ext) => ext.serialize(s),
+            Self::PrfUninitialized(_) => Err(serde::ser::Error::custom(
+                "PrfUninitialized must be replaced with Prf before serializing",
+            )),
+            Self::Prf(ext) => ext.serialize(s),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct HmacSecretExtension {
     pub salt1: Vec<u8>,
@@ -158,16 +184,25 @@ pub struct GetAssertionExtensions {
     #[serde(skip_serializing)]
     pub app_id: Option<String>,
     #[serde(rename = "hmac-secret", skip_serializing_if = "Option::is_none")]
-    pub hmac_secret: Option<HmacSecretExtension>,
-    #[serde(skip)] // prf only exists in the web API, implemented by hmac-secret in CTAP
-    pub prf: Option<AuthenticationExtensionsPRFInputs>,
+    pub hmac_secret: Option<HmacGetSecretOrPrf>,
 }
 
 impl From<AuthenticationExtensionsClientInputs> for GetAssertionExtensions {
     fn from(input: AuthenticationExtensionsClientInputs) -> Self {
+        let prf = input.prf;
         Self {
             app_id: input.app_id,
-            prf: input.prf,
+            hmac_secret: input
+                .hmac_get_secret
+                .map(|hmac_secret| {
+                    HmacGetSecretOrPrf::HmacGetSecret(HmacSecretExtension::new(
+                        hmac_secret.salt1.into(),
+                        hmac_secret.salt2.map(|salt2| salt2.into()),
+                    ))
+                })
+                .or_else(
+                    || prf.map(HmacGetSecretOrPrf::PrfUninitialized), // Cannot calculate hmac-secret inputs here because we don't yet know which eval or evalByCredential entry to use
+                ),
             ..Default::default()
         }
     }
@@ -231,17 +266,39 @@ impl GetAssertion {
         // 2. prf
         //      If the prf extension was requested and hmac-secret returned secrets,
         //      we need to decrypt and output them as prf client outputs.
-        if let (Some(_), Some(hmac_response @ HmacSecretResponse::Secret(_)), Some(shared_secret)) = (
-            &self.extensions.prf,
-            &result.assertion.auth_data.extensions.hmac_secret,
-            dev.get_shared_secret(),
-        ) {
-            if let Some(Ok(secrets)) = hmac_response.decrypt_secrets(shared_secret) {
+        match self.extensions.hmac_secret {
+            Some(HmacGetSecretOrPrf::HmacGetSecret(_)) => {
+                result.extensions.hmac_get_secret =
+                    if let Some(hmac_response @ HmacSecretResponse::Secret(_)) =
+                        &result.assertion.auth_data.extensions.hmac_secret
+                    {
+                        dev.get_shared_secret()
+                            .and_then(|shared_secret| hmac_response.decrypt_secrets(shared_secret))
+                            .and_then(Result::ok)
+                            .map(|outputs| outputs.into())
+                    } else {
+                        None
+                    };
+            }
+            Some(HmacGetSecretOrPrf::PrfUninitialized(_)) => {
+                unreachable!("Reached GetAssertion.finalize_result without replacing PrfUninitialized instance with Prf")
+            }
+            Some(HmacGetSecretOrPrf::Prf(_)) => {
                 result.extensions.prf = Some(AuthenticationExtensionsPRFOutputs {
                     enabled: None,
-                    results: Some(secrets.into()),
+                    results: if let Some(hmac_response @ HmacSecretResponse::Secret(_)) =
+                        &result.assertion.auth_data.extensions.hmac_secret
+                    {
+                        dev.get_shared_secret()
+                            .and_then(|shared_secret| hmac_response.decrypt_secrets(shared_secret))
+                            .and_then(Result::ok)
+                            .map(|outputs| outputs.into())
+                    } else {
+                        None
+                    },
                 });
             }
+            None => {}
         }
     }
 }

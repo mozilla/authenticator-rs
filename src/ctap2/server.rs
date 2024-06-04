@@ -367,6 +367,7 @@ pub struct AuthenticationExtensionsClientInputs {
     pub credential_protection_policy: Option<CredentialProtectionPolicy>,
     pub enforce_credential_protection_policy: Option<bool>,
     pub hmac_create_secret: Option<bool>,
+    pub hmac_get_secret: Option<HMACGetSecretInput>,
     pub min_pin_length: Option<bool>,
     pub prf: Option<AuthenticationExtensionsPRFInputs>,
 }
@@ -374,6 +375,14 @@ pub struct AuthenticationExtensionsClientInputs {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct CredentialProperties {
     pub rk: bool,
+}
+
+/// Salt inputs for the `hmac-secret` extension.
+/// https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-20210615.html#dictdef-hmacgetsecretinput
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct HMACGetSecretInput {
+    pub salt1: [u8; 32],
+    pub salt2: Option<[u8; 32]>,
 }
 
 /// Decrypted HMAC outputs from the `hmac-secret` extension.
@@ -471,6 +480,7 @@ pub struct AuthenticationExtensionsClientOutputs {
     pub app_id: Option<bool>,
     pub cred_props: Option<CredentialProperties>,
     pub hmac_create_secret: Option<bool>,
+    pub hmac_get_secret: Option<HMACGetSecretOutput>,
     pub prf: Option<AuthenticationExtensionsPRFOutputs>,
 }
 
