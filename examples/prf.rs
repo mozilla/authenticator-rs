@@ -191,8 +191,8 @@ fn main() {
     };
 
     let attestation_object;
+    let (register_tx, register_rx) = channel();
     loop {
-        let (register_tx, register_rx) = channel();
         let callback = StateCallback::new(Box::new(move |rv| {
             register_tx.send(rv).unwrap();
         }));
@@ -247,9 +247,8 @@ fn main() {
         use_ctap1_fallback: false,
     };
 
+    let (sign_tx, sign_rx) = channel();
     loop {
-        let (sign_tx, sign_rx) = channel();
-
         let callback = StateCallback::new(Box::new(move |rv| {
             sign_tx.send(rv).unwrap();
         }));
