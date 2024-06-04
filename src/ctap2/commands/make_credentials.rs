@@ -374,43 +374,45 @@ impl MakeCredentials {
         //      The extension returns a flag in the authenticator data which we need to mirror as a
         //      client output.
         // 3. prf
-        //      hmac-secret returns a flag "enabled" in the authenticator data
-        //      which we need to mirror as a client output.
+        //      hmac-secret returns a flag in the authenticator data
+        //      which we need to mirror as a PRF "enabled" client output.
         //      If a future version of hmac-secret permits calculating secrets in makeCredential,
         //      we also need to decrypt and output them as client outputs.
         match self.extensions.hmac_secret {
             Some(HmacSecretFromHmacSecretOrPrf::HmacSecret(true)) => {
-                if let Some(HmacSecretResponse::Confirmed(flag)) =
-                    result.att_obj.auth_data.extensions.hmac_secret
-                {
-                    result.extensions.hmac_create_secret = Some(flag);
-                }
+                result.extensions.hmac_create_secret =
+                    Some(match result.att_obj.auth_data.extensions.hmac_secret {
+                        Some(HmacSecretResponse::Confirmed(flag)) => flag,
+                        Some(HmacSecretResponse::Secret(_)) => true,
+                        None => false,
+                    });
             }
             Some(HmacSecretFromHmacSecretOrPrf::Prf) => {
-                result.extensions.prf = match &result.att_obj.auth_data.extensions.hmac_secret {
-                    None => None,
-                    Some(HmacSecretResponse::Confirmed(flag)) => {
-                        Some(AuthenticationExtensionsPRFOutputs {
-                            enabled: Some(*flag),
+                result.extensions.prf =
+                    Some(match &result.att_obj.auth_data.extensions.hmac_secret {
+                        None => AuthenticationExtensionsPRFOutputs {
+                            enabled: Some(false),
                             results: None,
-                        })
-                    }
-                    Some(hmac_response @ HmacSecretResponse::Secret(_)) => {
-                        if let Some(shared_secret) = dev.get_shared_secret() {
-                            if let Some(Ok(secrets)) = hmac_response.decrypt_secrets(shared_secret)
-                            {
-                                Some(AuthenticationExtensionsPRFOutputs {
-                                    enabled: Some(true),
-                                    results: Some(secrets.into()),
-                                })
-                            } else {
-                                None
+                        },
+                        Some(HmacSecretResponse::Confirmed(flag)) => {
+                            AuthenticationExtensionsPRFOutputs {
+                                enabled: Some(*flag),
+                                results: None,
                             }
-                        } else {
-                            None
                         }
-                    }
-                }
+                        Some(hmac_response @ HmacSecretResponse::Secret(_)) => {
+                            AuthenticationExtensionsPRFOutputs {
+                                enabled: Some(true),
+                                results: dev
+                                    .get_shared_secret()
+                                    .and_then(|shared_secret| {
+                                        hmac_response.decrypt_secrets(shared_secret)
+                                    })
+                                    .and_then(Result::ok)
+                                    .map(|outputs| outputs.into()),
+                            }
+                        }
+                    })
             }
             None | Some(HmacSecretFromHmacSecretOrPrf::HmacSecret(false)) => {}
         }
