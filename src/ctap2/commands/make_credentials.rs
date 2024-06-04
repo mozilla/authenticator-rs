@@ -251,12 +251,6 @@ pub enum HmacSecretFromHmacSecretOrPrf {
     Prf,
 }
 
-impl Default for HmacSecretFromHmacSecretOrPrf {
-    fn default() -> Self {
-        Self::HmacSecret(false)
-    }
-}
-
 impl Serialize for HmacSecretFromHmacSecretOrPrf {
     fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
     where
