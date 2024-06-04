@@ -192,27 +192,24 @@ fn main() {
 
     let attestation_object;
     let (register_tx, register_rx) = channel();
-    loop {
-        let callback = StateCallback::new(Box::new(move |rv| {
-            register_tx.send(rv).unwrap();
-        }));
+    let callback = StateCallback::new(Box::new(move |rv| {
+        register_tx.send(rv).unwrap();
+    }));
 
-        if let Err(e) = manager.register(timeout_ms, ctap_args, status_tx.clone(), callback) {
-            panic!("Couldn't register: {:?}", e);
-        };
+    if let Err(e) = manager.register(timeout_ms, ctap_args, status_tx.clone(), callback) {
+        panic!("Couldn't register: {:?}", e);
+    };
 
-        let register_result = register_rx
-            .recv()
-            .expect("Problem receiving, unable to continue");
-        match register_result {
-            Ok(a) => {
-                println!("Ok!");
-                attestation_object = a;
-                break;
-            }
-            Err(e) => panic!("Registration failed: {:?}", e),
-        };
-    }
+    let register_result = register_rx
+        .recv()
+        .expect("Problem receiving, unable to continue");
+    match register_result {
+        Ok(a) => {
+            println!("Ok!");
+            attestation_object = a;
+        }
+        Err(e) => panic!("Registration failed: {:?}", e),
+    };
 
     println!("Register result: {:?}", &attestation_object);
 
@@ -248,67 +245,63 @@ fn main() {
     };
 
     let (sign_tx, sign_rx) = channel();
-    loop {
-        let callback = StateCallback::new(Box::new(move |rv| {
-            sign_tx.send(rv).unwrap();
-        }));
+    let callback = StateCallback::new(Box::new(move |rv| {
+        sign_tx.send(rv).unwrap();
+    }));
 
-        if let Err(e) = manager.sign(timeout_ms, ctap_args, status_tx, callback) {
-            panic!("Couldn't sign: {:?}", e);
-        }
+    if let Err(e) = manager.sign(timeout_ms, ctap_args, status_tx, callback) {
+        panic!("Couldn't sign: {:?}", e);
+    }
 
-        let sign_result = sign_rx
-            .recv()
-            .expect("Problem receiving, unable to continue");
+    let sign_result = sign_rx
+        .recv()
+        .expect("Problem receiving, unable to continue");
 
-        match sign_result {
-            Ok(assertion_object) => {
-                println!("Assertion Object: {assertion_object:?}");
-                println!("Done.");
+    match sign_result {
+        Ok(assertion_object) => {
+            println!("Assertion Object: {assertion_object:?}");
+            println!("Done.");
 
-                if sign_hmac_secret.is_some() {
-                    let hmac_secret_outputs = assertion_object
-                        .extensions
-                        .hmac_get_secret
-                        .as_ref()
-                        .expect("Expected hmac-secret output");
+            if sign_hmac_secret.is_some() {
+                let hmac_secret_outputs = assertion_object
+                    .extensions
+                    .hmac_get_secret
+                    .as_ref()
+                    .expect("Expected hmac-secret output");
 
-                    assert_eq!(
-                        Some(hmac_secret_outputs.output1),
-                        hmac_secret_outputs.output2,
-                        "Expected hmac-secret outputs to be equal for equal input"
-                    );
+                assert_eq!(
+                    Some(hmac_secret_outputs.output1),
+                    hmac_secret_outputs.output2,
+                    "Expected hmac-secret outputs to be equal for equal input"
+                );
 
-                    assert_eq!(
-                        assertion_object.extensions.prf, None,
-                        "Expected no PRF outputs when hmacGetSecret input was present"
-                    );
-                }
-
-                if sign_prf.is_some() {
-                    let prf_results = assertion_object
-                        .extensions
-                        .prf
-                        .expect("Expected PRF output")
-                        .results
-                        .expect("Expected PRF output to contain results");
-
-                    assert_eq!(
-                        Some(prf_results.first),
-                        prf_results.second,
-                        "Expected PRF results to be equal for equal input"
-                    );
-
-                    assert_eq!(
-                        assertion_object.extensions.hmac_get_secret, None,
-                        "Expected no hmacGetSecret output when PRF input was present"
-                    );
-                }
-
-                break;
+                assert_eq!(
+                    assertion_object.extensions.prf, None,
+                    "Expected no PRF outputs when hmacGetSecret input was present"
+                );
             }
 
-            Err(e) => panic!("Signing failed: {:?}", e),
+            if sign_prf.is_some() {
+                let prf_results = assertion_object
+                    .extensions
+                    .prf
+                    .expect("Expected PRF output")
+                    .results
+                    .expect("Expected PRF output to contain results");
+
+                assert_eq!(
+                    Some(prf_results.first),
+                    prf_results.second,
+                    "Expected PRF results to be equal for equal input"
+                );
+
+                assert_eq!(
+                    assertion_object.extensions.hmac_get_secret, None,
+                    "Expected no hmacGetSecret output when PRF input was present"
+                );
+            }
         }
+
+        Err(e) => panic!("Signing failed: {:?}", e),
     }
 }
