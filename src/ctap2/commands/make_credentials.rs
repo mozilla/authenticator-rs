@@ -240,24 +240,24 @@ pub struct MakeCredentialsExtensions {
     #[serde(rename = "credProtect", skip_serializing_if = "Option::is_none")]
     pub cred_protect: Option<CredentialProtectionPolicy>,
     #[serde(rename = "hmac-secret", skip_serializing_if = "Option::is_none")]
-    pub hmac_secret: Option<HmacSecretFromHmacSecretOrPrf>,
+    pub hmac_secret: Option<HmacCreateSecretOrPrf>,
     #[serde(rename = "minPinLength", skip_serializing_if = "Option::is_none")]
     pub min_pin_length: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
-pub enum HmacSecretFromHmacSecretOrPrf {
-    HmacSecret(bool),
+pub enum HmacCreateSecretOrPrf {
+    HmacCreateSecret(bool),
     Prf,
 }
 
-impl Serialize for HmacSecretFromHmacSecretOrPrf {
+impl Serialize for HmacCreateSecretOrPrf {
     fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         match self {
-            Self::HmacSecret(hmac_secret) => s.serialize_bool(*hmac_secret),
+            Self::HmacCreateSecret(hmac_secret) => s.serialize_bool(*hmac_secret),
             Self::Prf => s.serialize_bool(true),
         }
     }
@@ -276,9 +276,9 @@ impl From<AuthenticationExtensionsClientInputs> for MakeCredentialsExtensions {
             cred_protect: input.credential_protection_policy,
             hmac_secret: match (input.hmac_create_secret, input.prf) {
                 (None, None) => None,
-                (_, Some(_)) => Some(HmacSecretFromHmacSecretOrPrf::Prf),
+                (_, Some(_)) => Some(HmacCreateSecretOrPrf::Prf),
                 (Some(hmac_secret), _) => {
-                    Some(HmacSecretFromHmacSecretOrPrf::HmacSecret(hmac_secret))
+                    Some(HmacCreateSecretOrPrf::HmacCreateSecret(hmac_secret))
                 }
             },
             min_pin_length: input.min_pin_length,
@@ -373,7 +373,7 @@ impl MakeCredentials {
         //      If a future version of hmac-secret permits calculating secrets in makeCredential,
         //      we also need to decrypt and output them as client outputs.
         match self.extensions.hmac_secret {
-            Some(HmacSecretFromHmacSecretOrPrf::HmacSecret(true)) => {
+            Some(HmacCreateSecretOrPrf::HmacCreateSecret(true)) => {
                 result.extensions.hmac_create_secret =
                     Some(match result.att_obj.auth_data.extensions.hmac_secret {
                         Some(HmacSecretResponse::Confirmed(flag)) => flag,
@@ -381,7 +381,7 @@ impl MakeCredentials {
                         None => false,
                     });
             }
-            Some(HmacSecretFromHmacSecretOrPrf::Prf) => {
+            Some(HmacCreateSecretOrPrf::Prf) => {
                 result.extensions.prf =
                     Some(match &result.att_obj.auth_data.extensions.hmac_secret {
                         None => AuthenticationExtensionsPRFOutputs {
@@ -408,7 +408,7 @@ impl MakeCredentials {
                         }
                     })
             }
-            None | Some(HmacSecretFromHmacSecretOrPrf::HmacSecret(false)) => {}
+            None | Some(HmacCreateSecretOrPrf::HmacCreateSecret(false)) => {}
         }
     }
 }
