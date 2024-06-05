@@ -425,32 +425,28 @@ impl AuthenticationExtensionsPRFInputs {
             .or(self.eval.as_ref().map(|eval| (None, eval)))
         {
             let mut hmac_secret = HmacSecretExtension::new(
-                sha256(
-                    b"WebAuthn PRF"
-                        .iter()
-                        .chain([0x00].iter())
-                        .chain(ev.first.iter())
-                        .copied()
-                        .collect::<Vec<u8>>(),
-                )
-                .to_vec(),
-                ev.second.as_ref().map(|second| {
-                    sha256(
-                        b"WebAuthn PRF"
-                            .iter()
-                            .chain([0x00].iter())
-                            .chain(second.iter())
-                            .copied()
-                            .collect::<Vec<u8>>(),
-                    )
-                    .to_vec()
-                }),
+                Self::eval_to_salt(&ev.first).to_vec(),
+                ev.second
+                    .as_ref()
+                    .map(|second| Self::eval_to_salt(second).to_vec()),
             );
             hmac_secret.calculate(secret, puat)?;
             Ok(Some((hmac_secret, selected_credential)))
         } else {
             Ok(None)
         }
+    }
+
+    /// Convert a PRF eval input to an hmac-secret salt input.
+    fn eval_to_salt(eval: &[u8]) -> [u8; 32] {
+        sha256(
+            b"WebAuthn PRF"
+                .iter()
+                .chain([0x00].iter())
+                .chain(eval.iter())
+                .copied()
+                .collect::<Vec<u8>>(),
+        )
     }
 }
 
