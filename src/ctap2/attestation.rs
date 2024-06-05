@@ -43,16 +43,20 @@ impl HmacSecretResponse {
         hmac_outputs: &[u8],
     ) -> Result<HMACGetSecretOutput, CryptoError> {
         let output_secrets = shared_secret.decrypt(hmac_outputs)?;
-        let (output1, output2) = output_secrets.split_at(32);
-        Ok(HMACGetSecretOutput {
-            output1: output1
-                .try_into()
-                .map_err(|_| CryptoError::WrongSaltLength)?,
-            output2: Some(output2)
-                .filter(|o2| !o2.is_empty())
-                .map(|o2| o2.try_into().map_err(|_| CryptoError::WrongSaltLength))
-                .transpose()?,
-        })
+        if output_secrets.len() < 32 {
+            Err(CryptoError::WrongSaltLength)
+        } else {
+            let (output1, output2) = output_secrets.split_at(32);
+            Ok(HMACGetSecretOutput {
+                output1: output1
+                    .try_into()
+                    .map_err(|_| CryptoError::WrongSaltLength)?,
+                output2: Some(output2)
+                    .filter(|o2| !o2.is_empty())
+                    .map(|o2| o2.try_into().map_err(|_| CryptoError::WrongSaltLength))
+                    .transpose()?,
+            })
+        }
     }
 }
 
@@ -1157,6 +1161,142 @@ pub mod test {
                 AuthenticatorDataFlags::from_bits(x),
                 Some(AuthenticatorDataFlags::from_bits_truncate(x))
             );
+        }
+    }
+
+    mod hmac_secret {
+        use std::convert::TryFrom;
+
+        use crate::{
+            crypto::{
+                COSEAlgorithm, COSEEC2Key, COSEKey, COSEKeyType, CryptoError, Curve,
+                PinUvAuthProtocol, SharedSecret,
+            },
+            ctap2::{attestation::HmacSecretResponse, commands::CommandError},
+            AuthenticatorInfo,
+        };
+
+        fn make_test_secret(pin_protocol: u64) -> Result<SharedSecret, CommandError> {
+            let fake_unused_key = COSEKey {
+                alg: COSEAlgorithm::ECDH_ES_HKDF256,
+                key: COSEKeyType::EC2(COSEEC2Key {
+                    curve: Curve::SECP256R1,
+                    x: vec![],
+                    y: vec![],
+                }),
+            };
+
+            let pin_protocol = PinUvAuthProtocol::try_from(&AuthenticatorInfo {
+                pin_protocols: Some(vec![pin_protocol]),
+                ..Default::default()
+            })?;
+
+            let key = {
+                let aes_key = 0..32;
+                let hmac_key = 32..64;
+                match pin_protocol.id() {
+                    1 => aes_key.collect(),
+                    2 => hmac_key.chain(aes_key).collect(),
+                    _ => unimplemented!(),
+                }
+            };
+
+            Ok(SharedSecret::new_test(
+                pin_protocol,
+                key,
+                fake_unused_key.clone(),
+                fake_unused_key,
+            ))
+        }
+
+        const PIN_PROTOCOL_2_IV: [u8; 16] = [0; 16]; // PIN protocol 1 uses a hard-coded all-zero IV
+        const EXPECTED_OUTPUT1: [u8; 32] = [
+            145, 61, 188, 229, 73, 58, 253, 192, 87, 114, 133, 138, 173, 74, 68, 50, 105, 3, 44, 7,
+            205, 92, 54, 139, 137, 207, 7, 105, 89, 85, 211, 130,
+        ];
+        const EXPECTED_OUTPUT2: Option<[u8; 32]> = Some([
+            155, 19, 88, 255, 192, 226, 50, 42, 243, 22, 42, 12, 146, 77, 108, 29, 71, 72, 149,
+            153, 183, 65, 182, 149, 71, 202, 57, 123, 239, 79, 94, 230,
+        ]);
+
+        #[test]
+        fn decrypt_confirmed_returns_none() -> Result<(), CommandError> {
+            let shared_secret = make_test_secret(2)?;
+            for flag in [true, false] {
+                let resp = HmacSecretResponse::Confirmed(flag);
+                let hmac_output = resp.decrypt_secrets(&shared_secret);
+                assert_eq!(hmac_output, None, "Failed for confirmed flag: {:?}", flag);
+            }
+            Ok(())
+        }
+
+        #[test]
+        fn decrypt_one_secret_pin_protocol_1() -> Result<(), CommandError> {
+            const CT_LEN: u8 = 32 * 1;
+            let shared_secret = make_test_secret(1)?;
+            let resp = HmacSecretResponse::Secret((0..CT_LEN).collect());
+            let hmac_output = resp.decrypt_secrets(&shared_secret).unwrap()?;
+            assert_eq!(hmac_output.output1, EXPECTED_OUTPUT1, "Incorrect output1");
+            assert_eq!(hmac_output.output2, None, "Incorrect output2");
+            Ok(())
+        }
+
+        #[test]
+        fn decrypt_two_secrets_pin_protocol_1() -> Result<(), CommandError> {
+            const CT_LEN: u8 = 32 * 2;
+            let shared_secret = make_test_secret(1)?;
+            let resp = HmacSecretResponse::Secret((0..CT_LEN).collect());
+            let hmac_output = resp.decrypt_secrets(&shared_secret).unwrap()?;
+            assert_eq!(hmac_output.output1, EXPECTED_OUTPUT1, "Incorrect output1");
+            assert_eq!(hmac_output.output2, EXPECTED_OUTPUT2, "Incorrect output2");
+            Ok(())
+        }
+
+        #[test]
+        fn decrypt_one_secret_pin_protocol_2() -> Result<(), CommandError> {
+            const CT_LEN: u8 = 32 * 1;
+            let shared_secret = make_test_secret(2)?;
+            let resp = HmacSecretResponse::Secret(
+                PIN_PROTOCOL_2_IV.iter().copied().chain(0..CT_LEN).collect(),
+            );
+            let hmac_output = resp.decrypt_secrets(&shared_secret).unwrap()?;
+            assert_eq!(hmac_output.output1, EXPECTED_OUTPUT1, "Incorrect output1");
+            assert_eq!(hmac_output.output2, None, "Incorrect output2");
+            Ok(())
+        }
+
+        #[test]
+        fn decrypt_two_secrets_pin_protocol_2() -> Result<(), CommandError> {
+            const CT_LEN: u8 = 32 * 2;
+            let shared_secret = make_test_secret(2)?;
+            let resp = HmacSecretResponse::Secret(
+                PIN_PROTOCOL_2_IV.iter().copied().chain(0..CT_LEN).collect(),
+            );
+            let hmac_output = resp.decrypt_secrets(&shared_secret).unwrap()?;
+            assert_eq!(hmac_output.output1, EXPECTED_OUTPUT1, "Incorrect output1");
+            assert_eq!(hmac_output.output2, EXPECTED_OUTPUT2, "Incorrect output2");
+            Ok(())
+        }
+
+        #[test]
+        fn decrypt_wrong_length_pin_protocol_2() -> Result<(), CommandError> {
+            // hmac-secret output can only be multiples of 32 bytes since it operates on whole AES cipher blocks
+            let shared_secret = make_test_secret(2)?;
+            {
+                // Empty cleartext
+                let resp = HmacSecretResponse::Secret(PIN_PROTOCOL_2_IV.to_vec());
+                let hmac_output = resp.decrypt_secrets(&shared_secret).unwrap();
+                assert_eq!(hmac_output, Err(CryptoError::WrongSaltLength));
+            }
+            {
+                // Too long cleartext
+                let resp = HmacSecretResponse::Secret(
+                    PIN_PROTOCOL_2_IV.iter().copied().chain(0..96).collect(),
+                );
+                let hmac_output = resp.decrypt_secrets(&shared_secret).unwrap();
+                assert_eq!(hmac_output, Err(CryptoError::WrongSaltLength));
+            }
+            Ok(())
         }
     }
 }
