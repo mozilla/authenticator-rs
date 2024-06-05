@@ -412,18 +412,7 @@ impl AuthenticationExtensionsPRFInputs {
         )>,
         AuthenticatorError,
     > {
-        if let Some((selected_credential, ev)) = self
-            .eval_by_credential
-            .as_ref()
-            .and_then(|eval_by_credential| {
-                allow_credentials.iter().find_map(|pkcd| {
-                    eval_by_credential
-                        .get(&pkcd.id)
-                        .map(|eval| (Some(pkcd), eval))
-                })
-            })
-            .or(self.eval.as_ref().map(|eval| (None, eval)))
-        {
+        if let Some((selected_credential, ev)) = self.select_eval(allow_credentials) {
             let mut hmac_secret = HmacSecretExtension::new(
                 Self::eval_to_salt(&ev.first).to_vec(),
                 ev.second
@@ -435,6 +424,37 @@ impl AuthenticationExtensionsPRFInputs {
         } else {
             Ok(None)
         }
+    }
+
+    /// Select an `evalByCredential` entry matching any element of `allow_credentials`,
+    /// or otherwise fall back to `eval`, if present, if no match is found.
+    fn select_eval<'allow_cred>(
+        &self,
+        allow_credentials: &'allow_cred [PublicKeyCredentialDescriptor],
+    ) -> Option<(
+        Option<&'allow_cred PublicKeyCredentialDescriptor>,
+        &AuthenticationExtensionsPRFValues,
+    )> {
+        self.select_credential(allow_credentials)
+            .map(|(cred, ev)| (Some(cred), ev))
+            .or(self.eval.as_ref().map(|eval| (None, eval)))
+    }
+
+    /// Select an `evalByCredential` entry matching any element of `allow_credentials`.
+    fn select_credential<'allow_cred>(
+        &self,
+        allow_credentials: &'allow_cred [PublicKeyCredentialDescriptor],
+    ) -> Option<(
+        &'allow_cred PublicKeyCredentialDescriptor,
+        &AuthenticationExtensionsPRFValues,
+    )> {
+        self.eval_by_credential
+            .as_ref()
+            .and_then(|eval_by_credential| {
+                allow_credentials
+                    .iter()
+                    .find_map(|pkcd| eval_by_credential.get(&pkcd.id).map(|eval| (pkcd, eval)))
+            })
     }
 
     /// Convert a PRF eval input to an hmac-secret salt input.
