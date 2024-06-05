@@ -400,6 +400,12 @@ pub struct AuthenticationExtensionsPRFInputs {
 }
 
 impl AuthenticationExtensionsPRFInputs {
+    /// Select an `eval` or `evalByCredential` entry and calculate hmac-secret salt inputs from those inputs.
+    ///
+    /// Returns [None] if the `eval` input was not given and no credential in `allow_credentials` matched any `evalByCredential` entry.
+    /// Otherwise returns the initialized [HmacSecretExtension] and, if an `evalByCredential` entry was used to compute the salt inputs,
+    /// the [PublicKeyCredentialDescriptor] matching that `evalByCredential` entry.
+    /// If present, `allowCredentials` SHOULD be set to contain only that [PublicKeyCredentialDescriptor] value.
     pub fn calculate<'allow_cred>(
         &self,
         secret: &SharedSecret,
