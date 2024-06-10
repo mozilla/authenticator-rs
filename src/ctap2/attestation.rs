@@ -1232,7 +1232,7 @@ pub mod test {
 
         #[test]
         fn decrypt_one_secret_pin_protocol_1() -> Result<(), CommandError> {
-            const CT_LEN: u8 = 32 * 1;
+            const CT_LEN: u8 = 32;
             let shared_secret = make_test_secret(1)?;
             let resp = HmacSecretResponse::Secret((0..CT_LEN).collect());
             let hmac_output = resp.decrypt_secrets(&shared_secret).unwrap()?;
@@ -1254,7 +1254,7 @@ pub mod test {
 
         #[test]
         fn decrypt_one_secret_pin_protocol_2() -> Result<(), CommandError> {
-            const CT_LEN: u8 = 32 * 1;
+            const CT_LEN: u8 = 32;
             let shared_secret = make_test_secret(2)?;
             let resp = HmacSecretResponse::Secret(
                 PIN_PROTOCOL_2_IV.iter().copied().chain(0..CT_LEN).collect(),

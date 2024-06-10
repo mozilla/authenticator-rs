@@ -203,7 +203,6 @@ impl From<AuthenticationExtensionsClientInputs> for GetAssertionExtensions {
                 .or_else(
                     || prf.map(HmacGetSecretOrPrf::PrfUninitialized), // Cannot calculate hmac-secret inputs here because we don't yet know which eval or evalByCredential entry to use
                 ),
-            ..Default::default()
         }
     }
 }
@@ -275,7 +274,6 @@ impl GetAssertion {
                         dev.get_shared_secret()
                             .and_then(|shared_secret| hmac_response.decrypt_secrets(shared_secret))
                             .and_then(Result::ok)
-                            .map(|outputs| outputs.into())
                     } else {
                         None
                     };
