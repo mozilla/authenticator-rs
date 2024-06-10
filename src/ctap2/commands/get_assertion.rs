@@ -81,8 +81,16 @@ pub enum HmacGetSecretOrPrf {
     HmacGetSecret(HmacSecretExtension),
     /// hmac-secret input is to be calculated from PRF inputs, but we haven't yet identified which eval or evalByCredential entry to use.
     PrfUninitialized(AuthenticationExtensionsPRFInputs),
+    /// prf client input with no eval or matchin evalByCredential entry.
+    PrfUnmatched,
     /// hmac-secret inputs set by the prf client extension input.
     Prf(HmacSecretExtension),
+}
+
+impl HmacGetSecretOrPrf {
+    fn skip_serializing(value: &Option<Self>) -> bool {
+        matches!(value, None | Some(Self::PrfUnmatched))
+    }
 }
 
 impl Serialize for HmacGetSecretOrPrf {
@@ -93,8 +101,9 @@ impl Serialize for HmacGetSecretOrPrf {
         match self {
             Self::HmacGetSecret(ext) => ext.serialize(s),
             Self::PrfUninitialized(_) => Err(serde::ser::Error::custom(
-                "PrfUninitialized must be replaced with Prf before serializing",
+                "PrfUninitialized must be replaced with Prf or PrfEmpty before serializing",
             )),
+            Self::PrfUnmatched => unreachable!("PrfEmpty serialization should be skipped"),
             Self::Prf(ext) => ext.serialize(s),
         }
     }
@@ -183,7 +192,10 @@ impl Serialize for HmacSecretExtension {
 pub struct GetAssertionExtensions {
     #[serde(skip_serializing)]
     pub app_id: Option<String>,
-    #[serde(rename = "hmac-secret", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "hmac-secret",
+        skip_serializing_if = "HmacGetSecretOrPrf::skip_serializing"
+    )]
     pub hmac_secret: Option<HmacGetSecretOrPrf>,
 }
 
@@ -280,6 +292,12 @@ impl GetAssertion {
             }
             Some(HmacGetSecretOrPrf::PrfUninitialized(_)) => {
                 unreachable!("Reached GetAssertion.finalize_result without replacing PrfUninitialized instance with Prf")
+            }
+            Some(HmacGetSecretOrPrf::PrfUnmatched) => {
+                result.extensions.prf = Some(AuthenticationExtensionsPRFOutputs {
+                    enabled: None,
+                    results: None,
+                });
             }
             Some(HmacGetSecretOrPrf::Prf(_)) => {
                 result.extensions.prf = Some(AuthenticationExtensionsPRFOutputs {

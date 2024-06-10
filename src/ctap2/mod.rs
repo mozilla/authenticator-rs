@@ -692,7 +692,9 @@ pub fn sign<Dev: FidoDevice>(
                                     get_assertion.allow_list = vec![selected_cred_id.clone()];
                                 }
                             }
-                            Ok(None) => {}
+                            Ok(None) => {
+                                *hmac_get_secret_or_prf = HmacGetSecretOrPrf::PrfUnmatched;
+                            }
                             Err(e) => {
                                 callback.call(Err(e));
                                 return false;
@@ -701,7 +703,7 @@ pub fn sign<Dev: FidoDevice>(
                     }
                 }
 
-                HmacGetSecretOrPrf::Prf(_) => {
+                HmacGetSecretOrPrf::Prf(_) | HmacGetSecretOrPrf::PrfUnmatched => {
                     unreachable!("hmac-secret inputs from PRF already initialized")
                 }
             };
