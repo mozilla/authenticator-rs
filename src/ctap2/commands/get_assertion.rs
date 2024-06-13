@@ -147,9 +147,9 @@ impl Serialize for HmacGetSecretOrPrf {
         match self {
             Self::HmacGetSecret(ext) => ext.serialize(s),
             Self::PrfUninitialized(_) => Err(serde::ser::Error::custom(
-                "PrfUninitialized must be replaced with Prf or PrfEmpty before serializing",
+                "PrfUninitialized must be replaced with Prf or PrfUnmatched before serializing",
             )),
-            Self::PrfUnmatched => unreachable!("PrfEmpty serialization should be skipped"),
+            Self::PrfUnmatched => unreachable!("PrfUnmatched serialization should be skipped"),
             Self::Prf(ext) => ext.serialize(s),
         }
     }
