@@ -394,6 +394,7 @@ pub struct HMACGetSecretOutput {
 }
 
 #[derive(Clone, Debug, Default)]
+#[cfg_attr(test, derive(PartialEq))]
 pub struct AuthenticationExtensionsPRFInputs {
     pub eval: Option<AuthenticationExtensionsPRFValues>,
     pub eval_by_credential: Option<HashMap<Vec<u8>, AuthenticationExtensionsPRFValues>>,

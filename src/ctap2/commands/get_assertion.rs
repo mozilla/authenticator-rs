@@ -68,6 +68,7 @@ impl UserVerification for GetAssertionOptions {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(test, derive(PartialEq))]
 pub struct CalculatedHmacSecretExtension {
     pub public_key: COSEKey,
     pub salt_enc: Vec<u8>,
@@ -76,6 +77,7 @@ pub struct CalculatedHmacSecretExtension {
 
 /// Wrapper type recording whether the hmac-secret input originally came from the hmacGetSecret or the prf client extension input.
 #[derive(Debug, Clone)]
+#[cfg_attr(test, derive(PartialEq))]
 pub enum HmacGetSecretOrPrf {
     /// hmac-secret inputs set by the hmacGetSecret client extension input.
     HmacGetSecret(HmacSecretExtension),
@@ -154,6 +156,7 @@ impl Serialize for HmacGetSecretOrPrf {
 }
 
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(test, derive(PartialEq))]
 pub struct HmacSecretExtension {
     pub salt1: Vec<u8>,
     pub salt2: Option<Vec<u8>>,
@@ -1646,4 +1649,539 @@ pub mod test {
         0x05, // unsigned(5)
         0x01, // unsigned(1)
     ];
+
+    mod hmac_secret {
+        use std::convert::TryFrom;
+
+        use crate::{
+            crypto::{
+                COSEAlgorithm, COSEEC2Key, COSEKey, COSEKeyType, Curve, PinUvAuthProtocol,
+                SharedSecret,
+            },
+            ctap2::{
+                commands::{
+                    client_pin::PinUvAuthTokenPermission,
+                    get_assertion::{
+                        CalculatedHmacSecretExtension, HmacGetSecretOrPrf, HmacSecretExtension,
+                    },
+                    CommandError,
+                },
+                server::{
+                    AuthenticationExtensionsPRFInputs, AuthenticationExtensionsPRFValues,
+                    PublicKeyCredentialDescriptor,
+                },
+            },
+            errors::AuthenticatorError,
+            AuthenticatorInfo,
+        };
+
+        fn make_test_secret(pin_protocol: u64) -> Result<(SharedSecret, COSEKey), CommandError> {
+            let fake_client_key = COSEKey {
+                alg: COSEAlgorithm::ECDH_ES_HKDF256,
+                key: COSEKeyType::EC2(COSEEC2Key {
+                    curve: Curve::SECP256R1,
+                    x: vec![1],
+                    y: vec![2],
+                }),
+            };
+            let fake_peer_key = COSEKey {
+                alg: COSEAlgorithm::ECDH_ES_HKDF256,
+                key: COSEKeyType::EC2(COSEEC2Key {
+                    curve: Curve::SECP256R1,
+                    x: vec![3],
+                    y: vec![4],
+                }),
+            };
+
+            let pin_protocol = PinUvAuthProtocol::try_from(&AuthenticatorInfo {
+                pin_protocols: Some(vec![pin_protocol]),
+                ..Default::default()
+            })?;
+
+            let key = {
+                let aes_key = 0..32;
+                let hmac_key = 32..64;
+                match pin_protocol.id() {
+                    1 => aes_key.collect(),
+                    2 => hmac_key.chain(aes_key).collect(),
+                    _ => unimplemented!(),
+                }
+            };
+
+            Ok((
+                SharedSecret::new_test(pin_protocol, key, fake_client_key.clone(), fake_peer_key),
+                fake_client_key,
+            ))
+        }
+
+        #[test]
+        fn calculate_hmac_get_secret_pin_protocol_1() -> Result<(), AuthenticatorError> {
+            let (shared_secret, client_key) = make_test_secret(1)?;
+            let extension = HmacGetSecretOrPrf::HmacGetSecret(HmacSecretExtension::new(
+                vec![0x01; 32],
+                Some(vec![0x02; 32]),
+            ));
+            let puat = shared_secret.decrypt_pin_token(
+                PinUvAuthTokenPermission::empty(),
+                &shared_secret.encrypt(&[0x03; 32])?,
+            )?;
+            let (extension, selected_cred) =
+                extension.calculate(&shared_secret, &[], Some(puat))?;
+
+            assert_eq!(selected_cred, None);
+            assert_eq!(
+                extension,
+                HmacGetSecretOrPrf::HmacGetSecret(HmacSecretExtension {
+                    salt1: vec![0x01; 32],
+                    salt2: Some(vec![0x02; 32]),
+                    calculated_hmac: Some(CalculatedHmacSecretExtension {
+                        public_key: client_key,
+                        salt_enc: vec![
+                            117, 226, 8, 41, 23, 33, 18, 187, 242, 160, 77, 61, 43, 18, 67, 61,
+                            170, 97, 245, 245, 17, 42, 232, 186, 255, 190, 82, 1, 81, 152, 175, 39,
+                            113, 130, 62, 169, 215, 202, 143, 80, 116, 195, 117, 22, 39, 64, 79,
+                            110, 216, 117, 7, 144, 87, 73, 144, 75, 255, 173, 169, 201, 122, 160,
+                            48, 157
+                        ],
+                        salt_auth: vec![
+                            36, 74, 81, 146, 64, 28, 73, 44, 75, 111, 14, 79, 173, 146, 212, 227
+                        ],
+                    }),
+                    pin_protocol: None,
+                }),
+            );
+
+            Ok(())
+        }
+
+        #[test]
+        fn calculate_prf_eval_pin_protocol_1() -> Result<(), AuthenticatorError> {
+            let (shared_secret, client_key) = make_test_secret(1)?;
+            let extension =
+                HmacGetSecretOrPrf::PrfUninitialized(AuthenticationExtensionsPRFInputs {
+                    eval: Some(AuthenticationExtensionsPRFValues {
+                        first: vec![0x01; 8],
+                        second: Some(vec![0x02; 8]),
+                    }),
+                    eval_by_credential: None,
+                });
+            let puat = shared_secret.decrypt_pin_token(
+                PinUvAuthTokenPermission::empty(),
+                &shared_secret.encrypt(&[0x03; 32])?,
+            )?;
+            let (extension, selected_cred) =
+                extension.calculate(&shared_secret, &[], Some(puat))?;
+
+            assert_eq!(selected_cred, None);
+            assert_eq!(
+                extension,
+                HmacGetSecretOrPrf::Prf(HmacSecretExtension {
+                    salt1: vec![
+                        0x05, 0xf0, 0xb3, 0xb2, 0x3e, 0x7e, 0xcd, 0xac, 0xb0, 0x69, 0xd3, 0x0d,
+                        0x56, 0xd2, 0x30, 0xd2, 0xe1, 0xdb, 0xea, 0xf8, 0x10, 0xb6, 0x34, 0xdb,
+                        0x5c, 0x87, 0x61, 0x77, 0x6b, 0xf5, 0x1e, 0xe2
+                    ],
+                    salt2: Some(vec![
+                        0x60, 0x6b, 0x41, 0xea, 0x4d, 0xb0, 0xfb, 0x18, 0xc1, 0xbc, 0x62, 0x17,
+                        0x3b, 0xf0, 0xd4, 0x06, 0x68, 0xb0, 0x28, 0xf2, 0x68, 0xbe, 0x20, 0x7c,
+                        0xe2, 0xf4, 0x13, 0xa0, 0x08, 0x69, 0xfd, 0x6a
+                    ]),
+                    calculated_hmac: Some(CalculatedHmacSecretExtension {
+                        public_key: client_key,
+                        salt_enc: vec![
+                            23, 99, 220, 93, 59, 246, 109, 157, 247, 33, 138, 91, 142, 40, 203,
+                            234, 96, 212, 26, 15, 56, 160, 191, 142, 138, 106, 2, 207, 219, 180,
+                            39, 31, 155, 232, 119, 179, 0, 65, 9, 37, 184, 194, 135, 173, 187, 197,
+                            51, 38, 68, 57, 197, 68, 249, 41, 143, 197, 46, 53, 72, 60, 109, 33,
+                            112, 175
+                        ],
+                        salt_auth: vec![
+                            27, 222, 224, 22, 170, 39, 171, 5, 98, 207, 176, 58, 23, 108, 223, 174
+                        ],
+                    }),
+                    pin_protocol: None,
+                }),
+            );
+
+            Ok(())
+        }
+
+        #[test]
+        fn calculate_prf_eval_pin_protocol_2() -> Result<(), AuthenticatorError> {
+            let (shared_secret, _) = make_test_secret(2)?;
+            for (second, expected_enc_len) in [(None, 48), (Some(vec![0x02; 8]), 80)] {
+                let extension =
+                    HmacGetSecretOrPrf::PrfUninitialized(AuthenticationExtensionsPRFInputs {
+                        eval: Some(AuthenticationExtensionsPRFValues {
+                            first: vec![0x01; 8],
+                            second: second.clone(),
+                        }),
+                        eval_by_credential: None,
+                    });
+                let puat = shared_secret.decrypt_pin_token(
+                    PinUvAuthTokenPermission::empty(),
+                    &shared_secret.encrypt(&[0x03; 32])?,
+                )?;
+                let (extension, selected_cred) =
+                    extension.calculate(&shared_secret, &[], Some(puat))?;
+
+                assert_eq!(selected_cred, None);
+                assert_matches!(
+                    extension,
+                    HmacGetSecretOrPrf::Prf(HmacSecretExtension {
+                        // PIN protocol 2 uses a random IV, so salt_enc and salt_auth are not static
+                        calculated_hmac: Some(CalculatedHmacSecretExtension {
+                            salt_enc,
+                            salt_auth,
+                            ..
+                        }),
+                        pin_protocol: Some(2),
+                        ..
+                    }) if salt_enc.len() == expected_enc_len && salt_auth.len() == 32,
+                    "Failed with second: {second:?}, expected_enc_len: {expected_enc_len:?}"
+                );
+            }
+            Ok(())
+        }
+
+        #[test]
+        fn calculate_prf_eval_by_cred_fallback_to_eval_pin_protocol_1(
+        ) -> Result<(), AuthenticatorError> {
+            let (shared_secret, client_key) = make_test_secret(1)?;
+            let extension =
+                HmacGetSecretOrPrf::PrfUninitialized(AuthenticationExtensionsPRFInputs {
+                    eval: Some(AuthenticationExtensionsPRFValues {
+                        first: vec![0x01; 8],
+                        second: Some(vec![0x02; 8]),
+                    }),
+                    eval_by_credential: Some(
+                        [(
+                            vec![1, 2, 3, 4],
+                            AuthenticationExtensionsPRFValues {
+                                first: vec![0x04; 8],
+                                second: Some(vec![0x05; 8]),
+                            },
+                        )]
+                        .iter()
+                        .cloned()
+                        .collect(),
+                    ),
+                });
+            let puat = shared_secret.decrypt_pin_token(
+                PinUvAuthTokenPermission::empty(),
+                &shared_secret.encrypt(&[0x03; 32])?,
+            )?;
+            let allow_list = [PublicKeyCredentialDescriptor {
+                id: vec![5, 6, 7, 8],
+                transports: vec![],
+            }];
+            let (extension, selected_cred) =
+                extension.calculate(&shared_secret, &allow_list, Some(puat))?;
+
+            assert_eq!(selected_cred, None);
+            assert_eq!(
+                extension,
+                HmacGetSecretOrPrf::Prf(HmacSecretExtension {
+                    salt1: vec![
+                        0x05, 0xf0, 0xb3, 0xb2, 0x3e, 0x7e, 0xcd, 0xac, 0xb0, 0x69, 0xd3, 0x0d,
+                        0x56, 0xd2, 0x30, 0xd2, 0xe1, 0xdb, 0xea, 0xf8, 0x10, 0xb6, 0x34, 0xdb,
+                        0x5c, 0x87, 0x61, 0x77, 0x6b, 0xf5, 0x1e, 0xe2
+                    ],
+                    salt2: Some(vec![
+                        0x60, 0x6b, 0x41, 0xea, 0x4d, 0xb0, 0xfb, 0x18, 0xc1, 0xbc, 0x62, 0x17,
+                        0x3b, 0xf0, 0xd4, 0x06, 0x68, 0xb0, 0x28, 0xf2, 0x68, 0xbe, 0x20, 0x7c,
+                        0xe2, 0xf4, 0x13, 0xa0, 0x08, 0x69, 0xfd, 0x6a
+                    ]),
+                    calculated_hmac: Some(CalculatedHmacSecretExtension {
+                        public_key: client_key,
+                        salt_enc: vec![
+                            23, 99, 220, 93, 59, 246, 109, 157, 247, 33, 138, 91, 142, 40, 203,
+                            234, 96, 212, 26, 15, 56, 160, 191, 142, 138, 106, 2, 207, 219, 180,
+                            39, 31, 155, 232, 119, 179, 0, 65, 9, 37, 184, 194, 135, 173, 187, 197,
+                            51, 38, 68, 57, 197, 68, 249, 41, 143, 197, 46, 53, 72, 60, 109, 33,
+                            112, 175
+                        ],
+                        salt_auth: vec![
+                            27, 222, 224, 22, 170, 39, 171, 5, 98, 207, 176, 58, 23, 108, 223, 174
+                        ],
+                    }),
+                    pin_protocol: None,
+                }),
+            );
+
+            Ok(())
+        }
+
+        #[test]
+        fn calculate_prf_eval_by_cred_pin_protocol_1() -> Result<(), AuthenticatorError> {
+            let (shared_secret, client_key) = make_test_secret(1)?;
+            let cred_id = PublicKeyCredentialDescriptor {
+                id: vec![1, 2, 3, 4],
+                transports: vec![],
+            };
+            let extension =
+                HmacGetSecretOrPrf::PrfUninitialized(AuthenticationExtensionsPRFInputs {
+                    eval: Some(AuthenticationExtensionsPRFValues {
+                        first: vec![0x01; 8],
+                        second: Some(vec![0x02; 8]),
+                    }),
+                    eval_by_credential: Some(
+                        [
+                            (
+                                vec![9, 10, 11, 12],
+                                AuthenticationExtensionsPRFValues {
+                                    first: vec![0x06; 8],
+                                    second: Some(vec![0x07; 8]),
+                                },
+                            ),
+                            (
+                                cred_id.id.clone(),
+                                AuthenticationExtensionsPRFValues {
+                                    first: vec![0x04; 8],
+                                    second: Some(vec![0x05; 8]),
+                                },
+                            ),
+                        ]
+                        .iter()
+                        .cloned()
+                        .collect(),
+                    ),
+                });
+            let puat = shared_secret.decrypt_pin_token(
+                PinUvAuthTokenPermission::empty(),
+                &shared_secret.encrypt(&[0x03; 32])?,
+            )?;
+            let allow_list = [
+                PublicKeyCredentialDescriptor {
+                    id: vec![5, 6, 7, 8],
+                    transports: vec![],
+                },
+                cred_id,
+                PublicKeyCredentialDescriptor {
+                    id: vec![9, 10, 11, 12],
+                    transports: vec![],
+                },
+            ];
+            let (extension, selected_cred) =
+                extension.calculate(&shared_secret, &allow_list, Some(puat))?;
+
+            assert_eq!(selected_cred, Some(&allow_list[1]));
+            assert_eq!(
+                extension,
+                HmacGetSecretOrPrf::Prf(HmacSecretExtension {
+                    salt1: vec![
+                        0x8d, 0x31, 0xd7, 0xf0, 0x6e, 0xc1, 0x54, 0x1b, 0x71, 0x99, 0x81, 0x6c,
+                        0x47, 0x3b, 0x62, 0x05, 0xd1, 0x2d, 0xbe, 0x8e, 0x2f, 0x04, 0x48, 0x4e,
+                        0xd9, 0x55, 0x63, 0xf3, 0xc0, 0xd9, 0xe8, 0x58
+                    ],
+                    salt2: Some(vec![
+                        0x9c, 0x58, 0x7f, 0x97, 0xcc, 0x5a, 0x91, 0xc8, 0xcf, 0xc9, 0x6a, 0x7c,
+                        0x13, 0x3c, 0x1d, 0x73, 0x91, 0xc5, 0x1b, 0x94, 0x75, 0x48, 0x12, 0x04,
+                        0x4e, 0xbb, 0xa1, 0x7a, 0x90, 0xf5, 0x43, 0x01
+                    ]),
+                    calculated_hmac: Some(CalculatedHmacSecretExtension {
+                        public_key: client_key,
+                        salt_enc: vec![
+                            191, 228, 209, 183, 255, 132, 169, 88, 82, 9, 102, 239, 99, 201, 47,
+                            15, 174, 24, 191, 30, 80, 230, 67, 237, 178, 112, 105, 243, 53, 209,
+                            25, 189, 32, 51, 75, 255, 176, 160, 82, 113, 250, 141, 83, 130, 69,
+                            156, 230, 91, 95, 17, 149, 11, 81, 40, 23, 42, 24, 33, 25, 167, 210,
+                            241, 238, 237
+                        ],
+                        salt_auth: vec![
+                            211, 87, 229, 38, 186, 254, 65, 2, 69, 166, 122, 30, 84, 77, 116, 232
+                        ],
+                    }),
+                    pin_protocol: None,
+                }),
+            );
+
+            Ok(())
+        }
+
+        #[test]
+        fn calculate_prf_only_eval_by_cred_pin_protocol_1() -> Result<(), AuthenticatorError> {
+            let (shared_secret, client_key) = make_test_secret(1)?;
+            let cred_id = PublicKeyCredentialDescriptor {
+                id: vec![1, 2, 3, 4],
+                transports: vec![],
+            };
+            let extension =
+                HmacGetSecretOrPrf::PrfUninitialized(AuthenticationExtensionsPRFInputs {
+                    eval: None,
+                    eval_by_credential: Some(
+                        [
+                            (
+                                vec![9, 10, 11, 12],
+                                AuthenticationExtensionsPRFValues {
+                                    first: vec![0x06; 8],
+                                    second: Some(vec![0x07; 8]),
+                                },
+                            ),
+                            (
+                                cred_id.id.clone(),
+                                AuthenticationExtensionsPRFValues {
+                                    first: vec![0x04; 8],
+                                    second: Some(vec![0x05; 8]),
+                                },
+                            ),
+                        ]
+                        .iter()
+                        .cloned()
+                        .collect(),
+                    ),
+                });
+            let puat = shared_secret.decrypt_pin_token(
+                PinUvAuthTokenPermission::empty(),
+                &shared_secret.encrypt(&[0x03; 32])?,
+            )?;
+            let allow_list = [
+                PublicKeyCredentialDescriptor {
+                    id: vec![5, 6, 7, 8],
+                    transports: vec![],
+                },
+                cred_id,
+                PublicKeyCredentialDescriptor {
+                    id: vec![9, 10, 11, 12],
+                    transports: vec![],
+                },
+            ];
+            let (extension, selected_cred) =
+                extension.calculate(&shared_secret, &allow_list, Some(puat))?;
+
+            assert_eq!(selected_cred, Some(&allow_list[1]));
+            assert_eq!(
+                extension,
+                HmacGetSecretOrPrf::Prf(HmacSecretExtension {
+                    salt1: vec![
+                        0x8d, 0x31, 0xd7, 0xf0, 0x6e, 0xc1, 0x54, 0x1b, 0x71, 0x99, 0x81, 0x6c,
+                        0x47, 0x3b, 0x62, 0x05, 0xd1, 0x2d, 0xbe, 0x8e, 0x2f, 0x04, 0x48, 0x4e,
+                        0xd9, 0x55, 0x63, 0xf3, 0xc0, 0xd9, 0xe8, 0x58
+                    ],
+                    salt2: Some(vec![
+                        0x9c, 0x58, 0x7f, 0x97, 0xcc, 0x5a, 0x91, 0xc8, 0xcf, 0xc9, 0x6a, 0x7c,
+                        0x13, 0x3c, 0x1d, 0x73, 0x91, 0xc5, 0x1b, 0x94, 0x75, 0x48, 0x12, 0x04,
+                        0x4e, 0xbb, 0xa1, 0x7a, 0x90, 0xf5, 0x43, 0x01
+                    ]),
+                    calculated_hmac: Some(CalculatedHmacSecretExtension {
+                        public_key: client_key,
+                        salt_enc: vec![
+                            191, 228, 209, 183, 255, 132, 169, 88, 82, 9, 102, 239, 99, 201, 47,
+                            15, 174, 24, 191, 30, 80, 230, 67, 237, 178, 112, 105, 243, 53, 209,
+                            25, 189, 32, 51, 75, 255, 176, 160, 82, 113, 250, 141, 83, 130, 69,
+                            156, 230, 91, 95, 17, 149, 11, 81, 40, 23, 42, 24, 33, 25, 167, 210,
+                            241, 238, 237
+                        ],
+                        salt_auth: vec![
+                            211, 87, 229, 38, 186, 254, 65, 2, 69, 166, 122, 30, 84, 77, 116, 232
+                        ],
+                    }),
+                    pin_protocol: None,
+                }),
+            );
+
+            Ok(())
+        }
+
+        #[test]
+        fn calculate_prf_unmatched_pin_protocol_1() -> Result<(), AuthenticatorError> {
+            let (shared_secret, _) = make_test_secret(1)?;
+            let extension =
+                HmacGetSecretOrPrf::PrfUninitialized(AuthenticationExtensionsPRFInputs {
+                    eval: None,
+                    eval_by_credential: Some(
+                        [(
+                            vec![1, 2, 3, 4],
+                            AuthenticationExtensionsPRFValues {
+                                first: vec![0x04; 8],
+                                second: Some(vec![0x05; 8]),
+                            },
+                        )]
+                        .iter()
+                        .cloned()
+                        .collect(),
+                    ),
+                });
+            let puat = shared_secret.decrypt_pin_token(
+                PinUvAuthTokenPermission::empty(),
+                &shared_secret.encrypt(&[0x03; 32])?,
+            )?;
+            let allow_list = [PublicKeyCredentialDescriptor {
+                id: vec![5, 6, 7, 8],
+                transports: vec![],
+            }];
+            let (extension, selected_cred) =
+                extension.calculate(&shared_secret, &allow_list, Some(puat))?;
+
+            assert_eq!(selected_cred, None);
+            assert_eq!(extension, HmacGetSecretOrPrf::PrfUnmatched,);
+
+            Ok(())
+        }
+
+        #[test]
+        fn calculate_prf_unmatched_pin_protocol_2() -> Result<(), AuthenticatorError> {
+            let (shared_secret, _) = make_test_secret(2)?;
+            let extension =
+                HmacGetSecretOrPrf::PrfUninitialized(AuthenticationExtensionsPRFInputs {
+                    eval: None,
+                    eval_by_credential: Some(
+                        [(
+                            vec![1, 2, 3, 4],
+                            AuthenticationExtensionsPRFValues {
+                                first: vec![0x04; 8],
+                                second: Some(vec![0x05; 8]),
+                            },
+                        )]
+                        .iter()
+                        .cloned()
+                        .collect(),
+                    ),
+                });
+            let puat = shared_secret.decrypt_pin_token(
+                PinUvAuthTokenPermission::empty(),
+                &shared_secret.encrypt(&[0x03; 32])?,
+            )?;
+            let allow_list = [PublicKeyCredentialDescriptor {
+                id: vec![5, 6, 7, 8],
+                transports: vec![],
+            }];
+            let (extension, selected_cred) =
+                extension.calculate(&shared_secret, &allow_list, Some(puat))?;
+
+            assert_eq!(selected_cred, None);
+            assert_eq!(extension, HmacGetSecretOrPrf::PrfUnmatched);
+
+            Ok(())
+        }
+
+        #[test]
+        #[should_panic(
+            expected = "unreachable code: hmac-secret inputs from PRF already initialized"
+        )]
+        fn calculate_prf_conflict_1() {
+            let (shared_secret, _) = make_test_secret(2).unwrap();
+            let extension = HmacGetSecretOrPrf::PrfUnmatched;
+            extension.calculate(&shared_secret, &[], None).unwrap();
+        }
+
+        #[test]
+        #[should_panic(
+            expected = "unreachable code: hmac-secret inputs from PRF already initialized"
+        )]
+        fn calculate_prf_conflict_2() {
+            let (shared_secret, client_key) = make_test_secret(2).unwrap();
+            let extension = HmacGetSecretOrPrf::Prf(HmacSecretExtension {
+                salt1: vec![],
+                salt2: Some(vec![]),
+                calculated_hmac: Some(CalculatedHmacSecretExtension {
+                    public_key: client_key,
+                    salt_enc: vec![],
+                    salt_auth: vec![],
+                }),
+                pin_protocol: None,
+            });
+            extension.calculate(&shared_secret, &[], None).unwrap();
+        }
+    }
 }
