@@ -22,9 +22,7 @@ use crate::ctap2::commands::credential_management::{
     CredManagementCommand, CredentialList, CredentialListEntry, CredentialManagement,
     CredentialManagementResult, CredentialRpListEntry,
 };
-use crate::ctap2::commands::get_assertion::{
-    GetAssertion, GetAssertionOptions, HmacGetSecretOrPrf,
-};
+use crate::ctap2::commands::get_assertion::{GetAssertion, GetAssertionOptions};
 use crate::ctap2::commands::make_credentials::{
     dummy_make_credentials_cmd, MakeCredentials, MakeCredentialsOptions,
 };
@@ -663,51 +661,33 @@ pub fn sign<Dev: FidoDevice>(
         }
 
         // Third, use the shared secret in the extensions, if requested
-        if let Some(hmac_get_secret_or_prf) = get_assertion.extensions.hmac_secret.as_mut() {
-            match hmac_get_secret_or_prf {
-                HmacGetSecretOrPrf::HmacGetSecret(extension) => {
-                    if let Some(secret) = dev.get_shared_secret() {
-                        match extension
-                            .calculate(secret, pin_uv_auth_result.get_pin_uv_auth_token())
-                        {
-                            Ok(_) => {}
-                            Err(e) => {
-                                callback.call(Err(e));
-                                return false;
-                            }
-                        }
+        get_assertion.extensions.hmac_secret = match get_assertion
+            .extensions
+            .hmac_secret
+            .take()
+            .map(|hmac_get_secret_or_prf| {
+                if let Some(secret) = dev.get_shared_secret() {
+                    let (extension, selected_credential) = hmac_get_secret_or_prf.calculate(
+                        secret,
+                        &get_assertion.allow_list,
+                        pin_uv_auth_result.get_pin_uv_auth_token(),
+                    )?;
+                    if let Some(selected_credential) = selected_credential {
+                        get_assertion.allow_list = vec![selected_credential.clone()];
                     }
+                    Ok(extension)
+                } else {
+                    Ok(hmac_get_secret_or_prf)
                 }
-
-                HmacGetSecretOrPrf::PrfUninitialized(prf) => {
-                    if let Some(secret) = dev.get_shared_secret() {
-                        match prf.calculate(
-                            secret,
-                            &get_assertion.allow_list,
-                            pin_uv_auth_result.get_pin_uv_auth_token(),
-                        ) {
-                            Ok(Some((hmac_secret, selected_credential))) => {
-                                *hmac_get_secret_or_prf = HmacGetSecretOrPrf::Prf(hmac_secret);
-                                if let Some(selected_cred_id) = selected_credential {
-                                    get_assertion.allow_list = vec![selected_cred_id.clone()];
-                                }
-                            }
-                            Ok(None) => {
-                                *hmac_get_secret_or_prf = HmacGetSecretOrPrf::PrfUnmatched;
-                            }
-                            Err(e) => {
-                                callback.call(Err(e));
-                                return false;
-                            }
-                        }
-                    }
-                }
-
-                HmacGetSecretOrPrf::Prf(_) | HmacGetSecretOrPrf::PrfUnmatched => {
-                    unreachable!("hmac-secret inputs from PRF already initialized")
-                }
-            };
-        }
+            })
+            .transpose()
+        {
+            Ok(extension) => extension,
+            Err(e) => {
+                callback.call(Err(e));
+                return false;
+            }
+        };
 
         debug!("------------------------------------------------------------------");
         debug!("{get_assertion:?} using {pin_uv_auth_result:?}");

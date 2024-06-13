@@ -91,6 +91,50 @@ impl HmacGetSecretOrPrf {
     fn skip_serializing(value: &Option<Self>) -> bool {
         matches!(value, None | Some(Self::PrfUnmatched))
     }
+
+    /// Calculate the appropriate hmac-secret or PRF salt inputs from the given inputs.
+    ///
+    /// - If this is a `HmacGetSecret` instance,
+    ///   this returns a new `HmacGetSecret` instance with `calculated_hmac` set, paired with [None].
+    /// - If this is a `PrfUninitialized` instance,
+    ///   this attempts to select a PRF input to calculate salts from.
+    ///   If an input is found, this returns a `Prf` instance with `calculated_hmac` set.
+    ///   If the selected input came from `eval_by_credential`,
+    ///   then this is paired with a [Some] referencing the matching element of `allow_credentials`.
+    ///   If the selected input was `eval`, then this is paired with [None].
+    ///   If no input is found, this returns `PrfUnmatched` and [None].
+    /// - If this is a `Prf` or `PrfUnmatched` instance, this panics.
+    ///
+    /// If the [Option] return value is [Some], the caller SHOULD set `allowCredentials`
+    /// to contain only that [PublicKeyCredentialDescriptor] value.
+    ///
+    /// # Panics
+    /// If this is a `Prf` or `PrfUnmatched` instance.
+    pub fn calculate<'allow_cred>(
+        self,
+        secret: &SharedSecret,
+        allow_credentials: &'allow_cred [PublicKeyCredentialDescriptor],
+        puat: Option<PinUvAuthToken>,
+    ) -> Result<(Self, Option<&'allow_cred PublicKeyCredentialDescriptor>), AuthenticatorError>
+    {
+        Ok(match self {
+            Self::HmacGetSecret(mut extension) => {
+                extension.calculate(secret, puat)?;
+                (Self::HmacGetSecret(extension), None)
+            }
+
+            Self::PrfUninitialized(prf) => match prf.calculate(secret, allow_credentials, puat)? {
+                Some((hmac_secret, selected_credential)) => {
+                    (Self::Prf(hmac_secret), selected_credential)
+                }
+                None => (Self::PrfUnmatched, None),
+            },
+
+            Self::Prf(_) | Self::PrfUnmatched => {
+                unreachable!("hmac-secret inputs from PRF already initialized")
+            }
+        })
+    }
 }
 
 impl Serialize for HmacGetSecretOrPrf {
