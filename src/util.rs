@@ -74,3 +74,45 @@ pub fn decode_hex(s: &str) -> Vec<u8> {
         .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
         .collect()
 }
+
+/// Serialize a heterogeneous map with optional entries in the order they appear.
+///
+/// The macro automatically calculates the number of entries to allocate in the
+/// map, and closes the map.
+///
+/// Arguments:
+/// - An expression of type [serde::Serializer]. This expression will be bound
+///   to a local variable and thus evaluated only once.
+/// - 0 or more entries of the form `$key => $value,`, where `$key` is any
+///   expression and `$value` is an expression of type [Option<T>]. The entry
+///   will be included in the map if and only if the `$value` is [Some].
+macro_rules! serialize_map_optional {
+    (
+        $serializer:expr,
+        $( $key:expr => $value:expr , )*
+    ) => {
+        {
+            let serializer = $serializer;
+            let map_len = 0usize $(+ if $value.is_some() { 1usize } else { 0usize })*;
+            let mut map = serializer.serialize_map(core::option::Option::Some(map_len))?;
+            $(
+                if let core::option::Option::Some(v) = $value {
+                    map.serialize_entry($key, &v)?;
+                }
+            )*
+            map.end()
+        }
+    };
+}
+
+/// Like [serialize_map_optional], but all values are wrapped in [Some].
+macro_rules! serialize_map {
+    (
+        $serializer:expr,
+        $( $key:expr => $value:expr , )*
+    ) => {
+        {
+            serialize_map_optional!($serializer, $( $key => Some($value) , )*)
+        }
+    };
+}

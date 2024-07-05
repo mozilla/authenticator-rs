@@ -96,28 +96,12 @@ impl Serialize for BioEnrollmentParams {
     where
         S: Serializer,
     {
-        let mut map_len = 0;
-        if self.template_id.is_some() {
-            map_len += 1;
-        }
-        if self.template_friendly_name.is_some() {
-            map_len += 1;
-        }
-        if self.timeout_milliseconds.is_some() {
-            map_len += 1;
-        }
-
-        let mut map = serializer.serialize_map(Some(map_len))?;
-        if let Some(template_id) = &self.template_id {
-            map.serialize_entry(&0x01, &ByteBuf::from(template_id.as_slice()))?;
-        }
-        if let Some(template_friendly_name) = &self.template_friendly_name {
-            map.serialize_entry(&0x02, template_friendly_name)?;
-        }
-        if let Some(timeout_milliseconds) = &self.timeout_milliseconds {
-            map.serialize_entry(&0x03, timeout_milliseconds)?;
-        }
-        map.end()
+        serialize_map_optional!(
+            serializer,
+            &0x01 => self.template_id.as_deref().map(ByteBuf::from),
+            &0x02 => &self.template_friendly_name,
+            &0x03 => self.timeout_milliseconds,
+        )
     }
 }
 
@@ -188,31 +172,15 @@ impl Serialize for BioEnrollment {
     where
         S: Serializer,
     {
-        // Need to define how many elements are going to be in the map
-        // beforehand
-        let mut map_len = 2;
         let (id, params) = self.subcommand.to_id_and_param();
-        if params.has_some() {
-            map_len += 1;
-        }
-        if self.pin_uv_auth_param.is_some() {
-            map_len += 2;
-        }
-
-        let mut map = serializer.serialize_map(Some(map_len))?;
-
-        map.serialize_entry(&0x01, &self.modality)?; // Per spec currently always Fingerprint
-        map.serialize_entry(&0x02, &id)?;
-        if params.has_some() {
-            map.serialize_entry(&0x03, &params)?;
-        }
-
-        if let Some(ref pin_uv_auth_param) = self.pin_uv_auth_param {
-            map.serialize_entry(&0x04, &pin_uv_auth_param.pin_protocol.id())?;
-            map.serialize_entry(&0x05, pin_uv_auth_param)?;
-        }
-
-        map.end()
+        serialize_map_optional!(
+            serializer,
+            &0x01 => Some(&self.modality), // Per spec currently always Fingerprint
+            &0x02 => Some(&id),
+            &0x03 => params.has_some().then_some(&params),
+            &0x04 => &self.pin_uv_auth_param.as_ref().map(|p| p.pin_protocol.id()).as_ref(),
+            &0x05 => &self.pin_uv_auth_param,
+        )
     }
 }
 

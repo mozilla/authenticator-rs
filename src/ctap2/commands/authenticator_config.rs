@@ -25,28 +25,12 @@ impl Serialize for SetMinPINLength {
     where
         S: Serializer,
     {
-        let mut map_len = 0;
-        if self.new_min_pin_length.is_some() {
-            map_len += 1;
-        }
-        if self.min_pin_length_rpids.is_some() {
-            map_len += 1;
-        }
-        if self.force_change_pin.is_some() {
-            map_len += 1;
-        }
-
-        let mut map = serializer.serialize_map(Some(map_len))?;
-        if let Some(new_min_pin_length) = self.new_min_pin_length {
-            map.serialize_entry(&0x01, &new_min_pin_length)?;
-        }
-        if let Some(min_pin_length_rpids) = &self.min_pin_length_rpids {
-            map.serialize_entry(&0x02, &min_pin_length_rpids)?;
-        }
-        if let Some(force_change_pin) = self.force_change_pin {
-            map.serialize_entry(&0x03, &force_change_pin)?;
-        }
-        map.end()
+        serialize_map_optional!(
+            serializer,
+            &0x01 => self.new_min_pin_length,
+            &0x02 => &self.min_pin_length_rpids,
+            &0x03 => self.force_change_pin,
+        )
     }
 }
 
@@ -92,37 +76,19 @@ impl Serialize for AuthenticatorConfig {
     where
         S: Serializer,
     {
-        // Need to define how many elements are going to be in the map
-        // beforehand
-        let mut map_len = 1;
-        if self.pin_uv_auth_param.is_some() {
-            map_len += 2;
-        }
-        if self.subcommand.has_params() {
-            map_len += 1;
-        }
+        let (entry01, entry02) = match &self.subcommand {
+            AuthConfigCommand::EnableEnterpriseAttestation => (&0x01, None),
+            AuthConfigCommand::ToggleAlwaysUv => (&0x02, None),
+            AuthConfigCommand::SetMinPINLength(params) => (&0x03, Some(params)),
+        };
 
-        let mut map = serializer.serialize_map(Some(map_len))?;
-
-        match &self.subcommand {
-            AuthConfigCommand::EnableEnterpriseAttestation => {
-                map.serialize_entry(&0x01, &0x01)?;
-            }
-            AuthConfigCommand::ToggleAlwaysUv => {
-                map.serialize_entry(&0x01, &0x02)?;
-            }
-            AuthConfigCommand::SetMinPINLength(params) => {
-                map.serialize_entry(&0x01, &0x03)?;
-                map.serialize_entry(&0x02, &params)?;
-            }
-        }
-
-        if let Some(ref pin_uv_auth_param) = self.pin_uv_auth_param {
-            map.serialize_entry(&0x03, &pin_uv_auth_param.pin_protocol.id())?;
-            map.serialize_entry(&0x04, pin_uv_auth_param)?;
-        }
-
-        map.end()
+        serialize_map_optional!(
+            serializer,
+            &0x01 => Some(entry01),
+            &0x02 => entry02,
+            &0x03 => self.pin_uv_auth_param.as_ref().map(|p| p.pin_protocol.id()),
+            &0x04 => &self.pin_uv_auth_param,
+        )
     }
 }
 

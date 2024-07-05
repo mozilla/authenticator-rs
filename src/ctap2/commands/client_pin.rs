@@ -86,57 +86,18 @@ impl Serialize for ClientPIN {
     where
         S: Serializer,
     {
-        // Need to define how many elements are going to be in the map
-        // beforehand
-        let mut map_len = 1;
-        if self.pin_protocol.is_some() {
-            map_len += 1;
-        }
-        if self.key_agreement.is_some() {
-            map_len += 1;
-        }
-        if self.pin_auth.is_some() {
-            map_len += 1;
-        }
-        if self.new_pin_enc.is_some() {
-            map_len += 1;
-        }
-        if self.pin_hash_enc.is_some() {
-            map_len += 1;
-        }
-        if self.permissions.is_some() {
-            map_len += 1;
-        }
-        if self.rp_id.is_some() {
-            map_len += 1;
-        }
-
-        let mut map = serializer.serialize_map(Some(map_len))?;
-        if let Some(ref pin_protocol) = self.pin_protocol {
-            map.serialize_entry(&1, &pin_protocol.id())?;
-        }
         let command: u8 = self.subcommand as u8;
-        map.serialize_entry(&2, &command)?;
-        if let Some(ref key_agreement) = self.key_agreement {
-            map.serialize_entry(&3, key_agreement)?;
-        }
-        if let Some(ref pin_auth) = self.pin_auth {
-            map.serialize_entry(&4, Bytes::new(pin_auth))?;
-        }
-        if let Some(ref new_pin_enc) = self.new_pin_enc {
-            map.serialize_entry(&5, Bytes::new(new_pin_enc))?;
-        }
-        if let Some(ref pin_hash_enc) = self.pin_hash_enc {
-            map.serialize_entry(&6, Bytes::new(pin_hash_enc))?;
-        }
-        if let Some(ref permissions) = self.permissions {
-            map.serialize_entry(&9, permissions)?;
-        }
-        if let Some(ref rp_id) = self.rp_id {
-            map.serialize_entry(&0x0A, rp_id)?;
-        }
-
-        map.end()
+        serialize_map_optional!(
+            serializer,
+            &1 => self.pin_protocol.as_ref().map(|p| p.id()),
+            &2 => Some(&command),
+            &3 => &self.key_agreement,
+            &4 => self.pin_auth.as_ref().map(|pin_auth| Bytes::new(pin_auth.as_ref())),
+            &5 => self.new_pin_enc.as_ref().map(|new_pin_enc| Bytes::new(new_pin_enc.as_ref())),
+            &6 => self.pin_hash_enc.as_ref().map(|pin_hash_enc| Bytes::new(pin_hash_enc.as_ref())),
+            &9 => self.permissions,
+            &0x0A => &self.rp_id,
+        )
     }
 }
 

@@ -134,11 +134,12 @@ impl Serialize for HmacSecretExtension {
         S: Serializer,
     {
         if let Some(calc) = &self.calculated_hmac {
-            let mut map = serializer.serialize_map(Some(3))?;
-            map.serialize_entry(&1, &calc.public_key)?;
-            map.serialize_entry(&2, serde_bytes::Bytes::new(&calc.salt_enc))?;
-            map.serialize_entry(&3, serde_bytes::Bytes::new(&calc.salt_auth))?;
-            map.end()
+            serialize_map! {
+                serializer,
+                &1 => &calc.public_key,
+                &2 => serde_bytes::Bytes::new(&calc.salt_enc),
+                &3 => serde_bytes::Bytes::new(&calc.salt_auth),
+            }
         } else {
             Err(SerError::custom(
                 "hmac secret has not been calculated before being serialized",
@@ -270,39 +271,16 @@ impl Serialize for GetAssertion {
     where
         S: Serializer,
     {
-        // Need to define how many elements are going to be in the map
-        // beforehand
-        let mut map_len = 2;
-        if !self.allow_list.is_empty() {
-            map_len += 1;
+        serialize_map_optional! {
+            serializer,
+            &1 => Some(&self.rp.id),
+            &2 => Some(&self.client_data_hash),
+            &3 => (!&self.allow_list.is_empty()).then_some(&self.allow_list),
+            &4 => self.extensions.has_content().then_some(&self.extensions),
+            &5 => self.options.has_some().then_some(&self.options),
+            &6 => &self.pin_uv_auth_param,
+            &7 => self.pin_uv_auth_param.as_ref().map(|p| p.pin_protocol.id()),
         }
-        if self.extensions.has_content() {
-            map_len += 1;
-        }
-        if self.options.has_some() {
-            map_len += 1;
-        }
-        if self.pin_uv_auth_param.is_some() {
-            map_len += 2;
-        }
-
-        let mut map = serializer.serialize_map(Some(map_len))?;
-        map.serialize_entry(&1, &self.rp.id)?;
-        map.serialize_entry(&2, &self.client_data_hash)?;
-        if !self.allow_list.is_empty() {
-            map.serialize_entry(&3, &self.allow_list)?;
-        }
-        if self.extensions.has_content() {
-            map.serialize_entry(&4, &self.extensions)?;
-        }
-        if self.options.has_some() {
-            map.serialize_entry(&5, &self.options)?;
-        }
-        if let Some(pin_uv_auth_param) = &self.pin_uv_auth_param {
-            map.serialize_entry(&6, &pin_uv_auth_param)?;
-            map.serialize_entry(&7, &pin_uv_auth_param.pin_protocol.id())?;
-        }
-        map.end()
     }
 }
 

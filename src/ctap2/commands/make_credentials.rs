@@ -417,47 +417,19 @@ impl Serialize for MakeCredentials {
         S: Serializer,
     {
         debug!("Serialize MakeCredentials");
-        // Need to define how many elements are going to be in the map
-        // beforehand
-        let mut map_len = 4;
-        if !self.exclude_list.is_empty() {
-            map_len += 1;
-        }
-        if self.extensions.has_content() {
-            map_len += 1;
-        }
-        if self.options.has_some() {
-            map_len += 1;
-        }
-        if self.pin_uv_auth_param.is_some() {
-            map_len += 2;
-        }
-        if self.enterprise_attestation.is_some() {
-            map_len += 1;
-        }
-
-        let mut map = serializer.serialize_map(Some(map_len))?;
-        map.serialize_entry(&0x01, &self.client_data_hash)?;
-        map.serialize_entry(&0x02, &self.rp)?;
-        map.serialize_entry(&0x03, &self.user)?;
-        map.serialize_entry(&0x04, &self.pub_cred_params)?;
-        if !self.exclude_list.is_empty() {
-            map.serialize_entry(&0x05, &self.exclude_list)?;
-        }
-        if self.extensions.has_content() {
-            map.serialize_entry(&0x06, &self.extensions)?;
-        }
-        if self.options.has_some() {
-            map.serialize_entry(&0x07, &self.options)?;
-        }
-        if let Some(pin_uv_auth_param) = &self.pin_uv_auth_param {
-            map.serialize_entry(&0x08, &pin_uv_auth_param)?;
-            map.serialize_entry(&0x09, &pin_uv_auth_param.pin_protocol.id())?;
-        }
-        if let Some(enterprise_attestation) = self.enterprise_attestation {
-            map.serialize_entry(&0x0a, &enterprise_attestation)?;
-        }
-        map.end()
+        serialize_map_optional!(
+            serializer,
+            &0x01 => Some(&self.client_data_hash),
+            &0x02 => Some(&self.rp),
+            &0x03 => Some(&self.user),
+            &0x04 => Some(&self.pub_cred_params),
+            &0x05 => (!self.exclude_list.is_empty()).then_some(&self.exclude_list),
+            &0x06 => self.extensions.has_content().then_some(&self.extensions),
+            &0x07 => self.options.has_some().then_some(&self.options),
+            &0x08 => &self.pin_uv_auth_param,
+            &0x09 => self.pin_uv_auth_param.as_ref().map(|p| p.pin_protocol.id()),
+            &0x0a => &self.enterprise_attestation,
+        )
     }
 }
 
