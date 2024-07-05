@@ -376,6 +376,23 @@ pub enum AttestationStatement {
     Tpm(serde_cbor::Value),
 }
 
+impl AttestationStatement {
+    /// The [attestation statement format identifier][att-fmt-id].
+    ///
+    /// [att-fmt-id]: https://w3c.github.io/webauthn/#attestation-statement-format-identifier
+    pub fn id(&self) -> &str {
+        match self {
+            Self::None => "none",
+            Self::Packed(..) => "packed",
+            Self::FidoU2F(..) => "fido-u2f",
+            Self::AndroidKey(..) => "android-key",
+            Self::AndroidSafetyNet(..) => "android-safetynet",
+            Self::Apple(..) => "apple",
+            Self::Tpm(..) => "tpm",
+        }
+    }
+}
+
 impl Serialize for AttestationStatement {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -518,45 +535,15 @@ impl Serialize for AttestationObject {
     where
         S: Serializer,
     {
-        let map_len = 3;
-        let mut map = serializer.serialize_map(Some(map_len))?;
-
-        // CTAP2 canonical CBOR order for these entries is ("fmt", "attStmt", "authData")
-        // as strings are sorted by length and then lexically.
-        // see https://www.w3.org/TR/webauthn-2/#attestation-object
-        match self.att_stmt {
-            AttestationStatement::None => {
-                map.serialize_entry(&"fmt", &"none")?; // (1) "fmt"
-                let v = std::collections::BTreeMap::<(), ()>::new();
-                map.serialize_entry(&"attStmt", &v)?; // (2) "attStmt"
-            }
-            AttestationStatement::Packed(ref v) => {
-                map.serialize_entry(&"fmt", &"packed")?; // (1) "fmt"
-                map.serialize_entry(&"attStmt", v)?; // (2) "attStmt"
-            }
-            AttestationStatement::FidoU2F(ref v) => {
-                map.serialize_entry(&"fmt", &"fido-u2f")?; // (1) "fmt"
-                map.serialize_entry(&"attStmt", v)?; // (2) "attStmt"
-            }
-            AttestationStatement::AndroidKey(ref v) => {
-                map.serialize_entry(&"fmt", &"android-key")?; // (1) "fmt"
-                map.serialize_entry(&"attStmt", v)?; // (2) "attStmt"
-            }
-            AttestationStatement::AndroidSafetyNet(ref v) => {
-                map.serialize_entry(&"fmt", &"android-safetynet")?; // (1) "fmt"
-                map.serialize_entry(&"attStmt", v)?; // (2) "attStmt"
-            }
-            AttestationStatement::Apple(ref v) => {
-                map.serialize_entry(&"fmt", &"apple")?; // (1) "fmt"
-                map.serialize_entry(&"attStmt", v)?; // (2) "attStmt"
-            }
-            AttestationStatement::Tpm(ref v) => {
-                map.serialize_entry(&"fmt", &"tpm")?; // (1) "fmt"
-                map.serialize_entry(&"attStmt", v)?; // (2) "attStmt"
-            }
-        }
-        map.serialize_entry(&"authData", &self.auth_data)?; // (3) "authData"
-        map.end()
+        serialize_map!(
+            serializer,
+            // CTAP2 canonical CBOR order for these entries is ("fmt", "attStmt", "authData")
+            // as strings are sorted by length and then lexically.
+            // see https://www.w3.org/TR/webauthn-2/#attestation-object
+            &"fmt" => self.att_stmt.id(),
+            &"attStmt" => &self.att_stmt,
+            &"authData" => &self.auth_data,
+        )
     }
 }
 
