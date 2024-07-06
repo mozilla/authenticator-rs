@@ -713,8 +713,14 @@ impl From<CryptoError> for PinError {
 
 #[cfg(test)]
 mod test {
+    use std::convert::TryFrom;
+
     use super::ClientPinResponse;
-    use crate::crypto::{COSEAlgorithm, COSEEC2Key, COSEKey, COSEKeyType, Curve};
+    use crate::{
+        crypto::{COSEAlgorithm, COSEEC2Key, COSEKey, COSEKeyType, Curve, PinUvAuthProtocol},
+        ctap2::commands::client_pin::{ClientPIN, PINSubcommand, PinUvAuthTokenPermission},
+        AuthenticatorInfo,
+    };
     use serde_cbor::de::from_slice;
 
     #[test]
@@ -847,5 +853,42 @@ mod test {
         let result: ClientPinResponse =
             from_slice(&reference).expect("could not deserialize reference");
         assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn test_serialize_client_pin() {
+        let client_pin = ClientPIN {
+            pin_protocol: Some(
+                PinUvAuthProtocol::try_from(&AuthenticatorInfo {
+                    pin_protocols: Some(vec![2]),
+                    ..Default::default()
+                })
+                .expect("Failed to create PIN protocol"),
+            ),
+            subcommand: PINSubcommand::GetPinRetries,
+            key_agreement: Some(COSEKey {
+                alg: COSEAlgorithm::ECDH_ES_HKDF256,
+                key: COSEKeyType::EC2(COSEEC2Key {
+                    curve: Curve::SECP256R1,
+                    x: vec![],
+                    y: vec![],
+                }),
+            }),
+            pin_auth: Some(vec![1, 2, 3, 4]),
+            new_pin_enc: Some(vec![5, 6, 7, 8]),
+            pin_hash_enc: Some(vec![9, 10, 11, 12]),
+            permissions: Some(PinUvAuthTokenPermission::CredentialManagement.bits()),
+            rp_id: Some("example.org".to_string()),
+        };
+        let serialized = serde_cbor::ser::to_vec(&client_pin).expect("Failed to serialize to CBOR");
+        assert_eq!(
+            serialized,
+            [
+                // Value copied from test failure output as regression test snapshot
+                168, 1, 2, 2, 1, 3, 165, 1, 2, 3, 56, 24, 32, 1, 33, 64, 34, 64, 4, 68, 1, 2, 3, 4,
+                5, 68, 5, 6, 7, 8, 6, 68, 9, 10, 11, 12, 9, 4, 10, 107, 101, 120, 97, 109, 112,
+                108, 101, 46, 111, 114, 103
+            ]
+        );
     }
 }
