@@ -455,3 +455,42 @@ impl PinUvAuthCommand for CredentialManagement {
         self.pin_uv_auth_param.as_ref()
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::ctap2::server::{
+        PublicKeyCredentialDescriptor, PublicKeyCredentialUserEntity, RelyingParty, Transport,
+    };
+
+    use super::CredManagementParams;
+
+    #[test]
+    fn test_serialize_cred_management_params() {
+        let cred_management_params = CredManagementParams {
+            rp_id_hash: Some(RelyingParty::from("example.org").hash()),
+            credential_id: Some(PublicKeyCredentialDescriptor {
+                id: vec![1, 2, 3, 4],
+                transports: vec![Transport::USB, Transport::NFC],
+            }),
+            user: Some(PublicKeyCredentialUserEntity {
+                id: vec![5, 6, 7, 8],
+                name: Some("testuser".to_string()),
+                display_name: Some("Test User".to_string()),
+            }),
+        };
+        let serialized =
+            serde_cbor::ser::to_vec(&cred_management_params).expect("Failed to serialize to CBOR");
+        assert_eq!(
+            serialized,
+            [
+                // Value copied from test failure output as regression test snapshot
+                163, 1, 88, 32, 191, 171, 195, 116, 50, 149, 139, 6, 51, 96, 211, 173, 100, 97, 201,
+                196, 115, 90, 231, 248, 237, 212, 101, 146, 165, 224, 240, 20, 82, 178, 228, 181,
+                2, 162, 98, 105, 100, 68, 1, 2, 3, 4, 100, 116, 121, 112, 101, 106, 112, 117, 98,
+                108, 105, 99, 45, 107, 101, 121, 3, 163, 98, 105, 100, 68, 5, 6, 7, 8, 100, 110,
+                97, 109, 101, 104, 116, 101, 115, 116, 117, 115, 101, 114, 107, 100, 105, 115, 112,
+                108, 97, 121, 78, 97, 109, 101, 105, 84, 101, 115, 116, 32, 85, 115, 101, 114
+            ]
+        );
+    }
+}
