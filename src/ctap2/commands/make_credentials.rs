@@ -596,8 +596,12 @@ pub(crate) fn dummy_make_credentials_cmd() -> MakeCredentials {
 
 #[cfg(test)]
 pub mod test {
+    use std::convert::TryFrom;
+
     use super::{MakeCredentials, MakeCredentialsOptions, MakeCredentialsResult};
-    use crate::crypto::{COSEAlgorithm, COSEEC2Key, COSEKey, COSEKeyType, Curve};
+    use crate::crypto::{
+        COSEAlgorithm, COSEEC2Key, COSEKey, COSEKeyType, Curve, PinUvAuthParam, PinUvAuthProtocol,
+    };
     use crate::ctap2::attestation::test::create_attestation_obj;
     use crate::ctap2::attestation::{
         AAGuid, AttestationCertificate, AttestationObject, AttestationStatement,
@@ -605,15 +609,17 @@ pub mod test {
         AuthenticatorDataFlags, Signature,
     };
     use crate::ctap2::client_data::{Challenge, CollectedClientData, TokenBinding, WebauthnType};
+    use crate::ctap2::commands::make_credentials::MakeCredentialsExtensions;
     use crate::ctap2::commands::{RequestCtap1, RequestCtap2};
-    use crate::ctap2::server::RpIdHash;
     use crate::ctap2::server::{
         AuthenticatorAttachment, PublicKeyCredentialParameters, PublicKeyCredentialUserEntity,
-        RelyingParty,
+        RelyingParty, Transport,
     };
+    use crate::ctap2::server::{PublicKeyCredentialDescriptor, RpIdHash};
     use crate::transport::device_selector::Device;
     use crate::transport::hid::HIDDevice;
     use crate::transport::{FidoDevice, FidoProtocol};
+    use crate::AuthenticatorInfo;
     use base64::Engine;
 
     #[test]
@@ -672,6 +678,92 @@ pub mod test {
         };
 
         assert_eq!(make_cred_result, expected);
+    }
+
+    #[test]
+    fn test_make_credentials_ctap2_all() {
+        let req = MakeCredentials {
+            client_data_hash: CollectedClientData {
+                webauthn_type: WebauthnType::Create,
+                challenge: Challenge::from(vec![0x00, 0x01, 0x02, 0x03]),
+                origin: String::from("example.com"),
+                cross_origin: true,
+                token_binding: Some(TokenBinding::Present(String::from("AAECAw"))),
+            }
+            .hash()
+            .expect("failed to serialize client data"),
+            rp: RelyingParty {
+                id: String::from("example.com"),
+                name: Some(String::from("Acme")),
+            },
+            user: Some(PublicKeyCredentialUserEntity {
+                id: base64::engine::general_purpose::URL_SAFE
+                    .decode("MIIBkzCCATigAwIBAjCCAZMwggE4oAMCAQIwggGTMII=")
+                    .unwrap(),
+                name: Some(String::from("johnpsmith@example.com")),
+                display_name: Some(String::from("John P. Smith")),
+            }),
+            pub_cred_params: vec![
+                PublicKeyCredentialParameters {
+                    alg: COSEAlgorithm::ES256,
+                },
+                PublicKeyCredentialParameters {
+                    alg: COSEAlgorithm::RS256,
+                },
+            ],
+            exclude_list: vec![PublicKeyCredentialDescriptor {
+                id: vec![4, 5, 6, 7],
+                transports: vec![Transport::USB, Transport::NFC],
+            }],
+            extensions: MakeCredentialsExtensions {
+                cred_props: Some(true),
+                cred_protect: Some(
+                    crate::ctap2::server::CredentialProtectionPolicy::UserVerificationRequired,
+                ),
+                hmac_secret: Some(true),
+                min_pin_length: Some(true),
+            },
+            options: MakeCredentialsOptions {
+                resident_key: Some(true),
+                user_verification: Some(true),
+            },
+            pin_uv_auth_param: Some({
+                let mut p = PinUvAuthParam::create_empty();
+                p.pin_protocol = PinUvAuthProtocol::try_from(&AuthenticatorInfo {
+                    pin_protocols: Some(vec![2]),
+                    ..Default::default()
+                })
+                .expect("Failed to create PIN protocol");
+                p
+            }),
+            enterprise_attestation: Some(7),
+        };
+
+        let req_serialized = req
+            .wire_format()
+            .expect("Failed to serialize MakeCredentials request");
+        assert_eq!(
+            req_serialized,
+            [
+                // Value copied from test failure output as regression test snapshot
+                170, 1, 88, 32, 122, 146, 22, 162, 76, 198, 134, 9, 213, 180, 166, 87, 146, 132,
+                116, 119, 180, 172, 60, 27, 146, 142, 207, 8, 158, 125, 4, 28, 226, 254, 21, 122,
+                2, 162, 98, 105, 100, 107, 101, 120, 97, 109, 112, 108, 101, 46, 99, 111, 109, 100,
+                110, 97, 109, 101, 100, 65, 99, 109, 101, 3, 163, 98, 105, 100, 88, 32, 48, 130, 1,
+                147, 48, 130, 1, 56, 160, 3, 2, 1, 2, 48, 130, 1, 147, 48, 130, 1, 56, 160, 3, 2,
+                1, 2, 48, 130, 1, 147, 48, 130, 100, 110, 97, 109, 101, 118, 106, 111, 104, 110,
+                112, 115, 109, 105, 116, 104, 64, 101, 120, 97, 109, 112, 108, 101, 46, 99, 111,
+                109, 107, 100, 105, 115, 112, 108, 97, 121, 78, 97, 109, 101, 109, 74, 111, 104,
+                110, 32, 80, 46, 32, 83, 109, 105, 116, 104, 4, 130, 162, 99, 97, 108, 103, 38,
+                100, 116, 121, 112, 101, 106, 112, 117, 98, 108, 105, 99, 45, 107, 101, 121, 162,
+                99, 97, 108, 103, 57, 1, 0, 100, 116, 121, 112, 101, 106, 112, 117, 98, 108, 105,
+                99, 45, 107, 101, 121, 5, 129, 162, 98, 105, 100, 68, 4, 5, 6, 7, 100, 116, 121,
+                112, 101, 106, 112, 117, 98, 108, 105, 99, 45, 107, 101, 121, 6, 163, 107, 99, 114,
+                101, 100, 80, 114, 111, 116, 101, 99, 116, 3, 107, 104, 109, 97, 99, 45, 115, 101,
+                99, 114, 101, 116, 245, 108, 109, 105, 110, 80, 105, 110, 76, 101, 110, 103, 116,
+                104, 245, 7, 162, 98, 114, 107, 245, 98, 117, 118, 245, 8, 64, 9, 2, 10, 7
+            ]
+        );
     }
 
     #[test]
