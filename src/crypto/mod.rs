@@ -379,6 +379,24 @@ impl PinUvAuthParam {
             permissions: PinUvAuthTokenPermission::empty(),
         }
     }
+
+    #[cfg(test)]
+    pub(crate) fn create_test(
+        pin_protocol: u64,
+        pin_auth: Vec<u8>,
+        permissions: PinUvAuthTokenPermission,
+    ) -> Self {
+        let pin_protocol = PinUvAuthProtocol::try_from(&AuthenticatorInfo {
+            pin_protocols: Some(vec![pin_protocol]),
+            ..Default::default()
+        })
+        .expect("Failed to create PIN protocol");
+        Self {
+            pin_auth,
+            pin_protocol,
+            permissions,
+        }
+    }
 }
 
 impl Serialize for PinUvAuthParam {

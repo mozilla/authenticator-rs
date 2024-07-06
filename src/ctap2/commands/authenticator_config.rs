@@ -226,7 +226,9 @@ impl PinUvAuthCommand for AuthenticatorConfig {
 
 #[cfg(test)]
 mod test {
-    use super::SetMinPINLength;
+    use crate::{crypto::PinUvAuthParam, ctap2::commands::client_pin::PinUvAuthTokenPermission};
+
+    use super::{AuthConfigCommand, AuthenticatorConfig, SetMinPINLength};
 
     #[test]
     fn test_serialize_set_min_pin_length() {
@@ -249,5 +251,71 @@ mod test {
                 245
             ]
         );
+    }
+
+    #[test]
+    fn test_serialize_authenticator_config() {
+        let pin_uv_auth_param = Some(PinUvAuthParam::create_test(
+            2,
+            vec![1, 2, 3, 4],
+            PinUvAuthTokenPermission::CredentialManagement,
+        ));
+
+        {
+            let authenticator_config = AuthenticatorConfig {
+                subcommand: AuthConfigCommand::EnableEnterpriseAttestation,
+                pin_uv_auth_param: pin_uv_auth_param.clone(),
+            };
+            let serialized = serde_cbor::ser::to_vec(&authenticator_config)
+                .expect("Failed to serialize to CBOR");
+            assert_eq!(
+                serialized,
+                [
+                    // Value copied from test failure output as regression test snapshot
+                    163, 1, 1, 3, 2, 4, 68, 1, 2, 3, 4
+                ]
+            );
+        }
+
+        {
+            let authenticator_config = AuthenticatorConfig {
+                subcommand: AuthConfigCommand::ToggleAlwaysUv,
+                pin_uv_auth_param: pin_uv_auth_param.clone(),
+            };
+            let serialized = serde_cbor::ser::to_vec(&authenticator_config)
+                .expect("Failed to serialize to CBOR");
+            assert_eq!(
+                serialized,
+                [
+                    // Value copied from test failure output as regression test snapshot
+                    163, 1, 2, 3, 2, 4, 68, 1, 2, 3, 4
+                ]
+            );
+        }
+
+        {
+            let authenticator_config = AuthenticatorConfig {
+                subcommand: AuthConfigCommand::SetMinPINLength(SetMinPINLength {
+                    new_min_pin_length: Some(42),
+                    min_pin_length_rpids: Some(vec![
+                        "example.org".to_string(),
+                        "www.example.org".to_string(),
+                    ]),
+                    force_change_pin: Some(true),
+                }),
+                pin_uv_auth_param,
+            };
+            let serialized = serde_cbor::ser::to_vec(&authenticator_config)
+                .expect("Failed to serialize to CBOR");
+            assert_eq!(
+                serialized,
+                [
+                    // Value copied from test failure output as regression test snapshot
+                    164, 1, 3, 2, 163, 1, 24, 42, 2, 130, 107, 101, 120, 97, 109, 112, 108, 101, 46,
+                    111, 114, 103, 111, 119, 119, 119, 46, 101, 120, 97, 109, 112, 108, 101, 46,
+                    111, 114, 103, 3, 245, 3, 2, 4, 68, 1, 2, 3, 4
+                ]
+            );
+        }
     }
 }
