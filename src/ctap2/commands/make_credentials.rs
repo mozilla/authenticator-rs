@@ -681,7 +681,7 @@ pub mod test {
     }
 
     #[test]
-    fn test_make_credentials_ctap2_all() {
+    fn test_serialize_make_credentials_ctap2_all() {
         let req = MakeCredentials {
             client_data_hash: CollectedClientData {
                 webauthn_type: WebauthnType::Create,
