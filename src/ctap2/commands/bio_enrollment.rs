@@ -661,7 +661,9 @@ pub enum BioEnrollmentResult {
 
 #[cfg(test)]
 mod test {
-    use super::BioEnrollmentParams;
+    use crate::{crypto::PinUvAuthParam, ctap2::commands::client_pin::PinUvAuthTokenPermission};
+
+    use super::{BioEnrollment, BioEnrollmentCommand, BioEnrollmentModality, BioEnrollmentParams};
 
     #[test]
     fn test_serialize_bio_enrollment_params() {
@@ -677,6 +679,33 @@ mod test {
             [
                 // Value copied from test failure output as regression test snapshot
                 163, 1, 68, 1, 2, 3, 4, 2, 101, 116, 104, 117, 109, 98, 3, 25, 5, 57
+            ]
+        );
+    }
+
+    #[test]
+    fn test_serialize_bio_enrollment() {
+        let bio_enrollment_params = BioEnrollment {
+            modality: BioEnrollmentModality::Other(42),
+            subcommand: BioEnrollmentCommand::SetFriendlyName((
+                vec![1, 2, 3, 4],
+                "thumb".to_string(),
+            )),
+            pin_uv_auth_param: Some(PinUvAuthParam::create_test(
+                2,
+                vec![1, 2, 3, 4],
+                PinUvAuthTokenPermission::CredentialManagement,
+            )),
+            use_legacy_preview: true,
+        };
+        let serialized =
+            serde_cbor::ser::to_vec(&bio_enrollment_params).expect("Failed to serialize to CBOR");
+        assert_eq!(
+            serialized,
+            [
+                // Value copied from test failure output as regression test snapshot
+                165, 1, 24, 42, 2, 5, 3, 162, 1, 68, 1, 2, 3, 4, 2, 101, 116, 104, 117, 109, 98, 4,
+                2, 5, 68, 1, 2, 3, 4
             ]
         );
     }
