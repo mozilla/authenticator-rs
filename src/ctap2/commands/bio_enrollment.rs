@@ -658,3 +658,26 @@ pub enum BioEnrollmentResult {
     FingerprintSensorInfo(FingerprintSensorInfo),
     SampleStatus(LastEnrollmentSampleStatus, u64),
 }
+
+#[cfg(test)]
+mod test {
+    use super::BioEnrollmentParams;
+
+    #[test]
+    fn test_serialize_bio_enrollment_params() {
+        let bio_enrollment_params = BioEnrollmentParams {
+            template_id: Some(vec![1, 2, 3, 4]),
+            template_friendly_name: Some("thumb".to_string()),
+            timeout_milliseconds: Some(1337),
+        };
+        let serialized =
+            serde_cbor::ser::to_vec(&bio_enrollment_params).expect("Failed to serialize to CBOR");
+        assert_eq!(
+            serialized,
+            [
+                // Value copied from test failure output as regression test snapshot
+                163, 1, 68, 1, 2, 3, 4, 2, 101, 116, 104, 117, 109, 98, 3, 25, 5, 57
+            ]
+        );
+    }
+}
