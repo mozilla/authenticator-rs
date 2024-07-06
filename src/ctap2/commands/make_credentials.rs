@@ -419,16 +419,16 @@ impl Serialize for MakeCredentials {
         debug!("Serialize MakeCredentials");
         serialize_map_optional!(
             serializer,
-            &0x01 => Some(&self.client_data_hash),
-            &0x02 => Some(&self.rp),
-            &0x03 => Some(&self.user),
-            &0x04 => Some(&self.pub_cred_params),
-            &0x05 => (!self.exclude_list.is_empty()).then_some(&self.exclude_list),
-            &0x06 => self.extensions.has_content().then_some(&self.extensions),
-            &0x07 => self.options.has_some().then_some(&self.options),
-            &0x08 => &self.pin_uv_auth_param,
-            &0x09 => self.pin_uv_auth_param.as_ref().map(|p| p.pin_protocol.id()),
-            &0x0a => &self.enterprise_attestation,
+            v1: &0x01 => Some(&self.client_data_hash),
+            v2: &0x02 => Some(&self.rp),
+            v3: &0x03 => Some(&self.user),
+            v4: &0x04 => Some(&self.pub_cred_params),
+            v5: &0x05 => (!self.exclude_list.is_empty()).then_some(&self.exclude_list),
+            v6: &0x06 => self.extensions.has_content().then_some(&self.extensions),
+            v7: &0x07 => self.options.has_some().then_some(&self.options),
+            v8: &0x08 => &self.pin_uv_auth_param,
+            v9: &0x09 => self.pin_uv_auth_param.as_ref().map(|p| p.pin_protocol.id()),
+            va: &0x0a => &self.enterprise_attestation,
         )
     }
 }

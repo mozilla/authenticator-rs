@@ -273,13 +273,13 @@ impl Serialize for GetAssertion {
     {
         serialize_map_optional! {
             serializer,
-            &1 => Some(&self.rp.id),
-            &2 => Some(&self.client_data_hash),
-            &3 => (!&self.allow_list.is_empty()).then_some(&self.allow_list),
-            &4 => self.extensions.has_content().then_some(&self.extensions),
-            &5 => self.options.has_some().then_some(&self.options),
-            &6 => &self.pin_uv_auth_param,
-            &7 => self.pin_uv_auth_param.as_ref().map(|p| p.pin_protocol.id()),
+            v1: &1 => Some(&self.rp.id),
+            v2: &2 => Some(&self.client_data_hash),
+            v3: &3 => (!&self.allow_list.is_empty()).then_some(&self.allow_list),
+            v4: &4 => self.extensions.has_content().then_some(&self.extensions),
+            v5: &5 => self.options.has_some().then_some(&self.options),
+            v6: &6 => &self.pin_uv_auth_param,
+            v7: &7 => self.pin_uv_auth_param.as_ref().map(|p| p.pin_protocol.id()),
         }
     }
 }

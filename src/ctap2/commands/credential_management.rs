@@ -38,9 +38,9 @@ impl Serialize for CredManagementParams {
     {
         serialize_map_optional!(
             serializer,
-            &0x01 => self.rp_id_hash.as_ref().map(|r| ByteBuf::from(r.as_ref())),
-            &0x02 => &self.credential_id,
-            &0x03 => &self.user,
+            v1: &0x01 => self.rp_id_hash.as_ref().map(|r| ByteBuf::from(r.as_ref())),
+            v2: &0x02 => &self.credential_id,
+            v3: &0x03 => &self.user,
         )
     }
 }
@@ -105,10 +105,10 @@ impl Serialize for CredentialManagement {
         let (id, params) = self.subcommand.to_id_and_param();
         serialize_map_optional!(
             serializer,
-            &0x01 => Some(&id),
-            &0x02 => params.has_some().then_some(&params),
-            &0x03 => self.pin_uv_auth_param.as_ref().map(|p| p.pin_protocol.id()),
-            &0x04 => &self.pin_uv_auth_param,
+            v1: &0x01 => Some(&id),
+            v2: &0x02 => params.has_some().then_some(&params),
+            v3: &0x03 => self.pin_uv_auth_param.as_ref().map(|p| p.pin_protocol.id()),
+            v4: &0x04 => &self.pin_uv_auth_param,
         )
     }
 }

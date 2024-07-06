@@ -78,25 +78,37 @@ pub fn decode_hex(s: &str) -> Vec<u8> {
 /// Serialize a heterogeneous map with optional entries in the order they appear.
 ///
 /// The macro automatically calculates the number of entries to allocate in the
-/// map, and closes the map.
+/// map, and closes the map. Each key and value expression is evaluated only
+/// once.
 ///
 /// Arguments:
 /// - An expression of type [serde::Serializer]. This expression will be bound
 ///   to a local variable and thus evaluated only once.
-/// - 0 or more entries of the form `$key => $value,`, where `$key` is any
-///   expression and `$value` is an expression of type [Option<T>]. The entry
-///   will be included in the map if and only if the `$value` is [Some].
+/// - 0 or more entries of the form `$ident: $key => $value,`, where `$ident` is
+///   an arbitrary identifier, `$key` is any expression and `$value` is an
+///   expression of type [Option<T>]. The entry will be included in the map if
+///   and only if the `$value` is [Some].
+///
+///   The `$ident` is needed in order to bind each `$value` as a local variable,
+///   in order to evaluate each expression only once. Recommended use is to
+///   simply set `$ident` to `v1`, `v2`, ..., or possibly some descriptive
+///   label.
 macro_rules! serialize_map_optional {
     (
         $serializer:expr,
-        $( $key:expr => $value:expr , )*
+        $( $value_ident:ident : $key:expr => $value:expr , )*
     ) => {
         {
             let serializer = $serializer;
-            let map_len = 0usize $(+ if $value.is_some() { 1usize } else { 0usize })*;
+
+            $(
+                let $value_ident = $value;
+            )*
+
+            let map_len = 0usize $(+ if $value_ident.is_some() { 1usize } else { 0usize })*;
             let mut map = serializer.serialize_map(core::option::Option::Some(map_len))?;
             $(
-                if let core::option::Option::Some(v) = $value {
+                if let core::option::Option::Some(v) = $value_ident {
                     map.serialize_entry($key, &v)?;
                 }
             )*
@@ -105,14 +117,30 @@ macro_rules! serialize_map_optional {
     };
 }
 
-/// Like [serialize_map_optional], but all values are wrapped in [Some].
+/// Serialize a heterogeneous map in the order that entries appear.
+///
+/// The macro automatically calculates the number of entries to allocate in the
+/// map, and closes the map.
+///
+/// Arguments:
+/// - An expression of type [serde::Serializer]. This expression will be bound
+///   to a local variable and thus evaluated only once.
+/// - 0 or more entries of the form `$key => $value,`, where `$key` and `$value`
+/// are both expressions. Each expression is evaluated only once.
 macro_rules! serialize_map {
+    (@count_entry $value:expr) => { () };
     (
         $serializer:expr,
         $( $key:expr => $value:expr , )*
     ) => {
         {
-            serialize_map_optional!($serializer, $( $key => Some($value) , )*)
+            let serializer = $serializer;
+            const MAP_LEN: usize = [$( serialize_map!(@count_entry $value) ),*].len();
+            let mut map = serializer.serialize_map(core::option::Option::Some(MAP_LEN))?;
+            $(
+                map.serialize_entry($key, $value)?;
+            )*
+            map.end()
         }
     };
 }
