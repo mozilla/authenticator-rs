@@ -223,3 +223,31 @@ impl PinUvAuthCommand for AuthenticatorConfig {
         None
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::SetMinPINLength;
+
+    #[test]
+    fn test_serialize_set_min_pin_length() {
+        let set_min_pin_length = SetMinPINLength {
+            new_min_pin_length: Some(42),
+            min_pin_length_rpids: Some(vec![
+                "example.org".to_string(),
+                "www.example.org".to_string(),
+            ]),
+            force_change_pin: Some(true),
+        };
+        let serialized =
+            serde_cbor::ser::to_vec(&set_min_pin_length).expect("Failed to serialize to CBOR");
+        assert_eq!(
+            serialized,
+            [
+                // Value copied from test failure output as regression test snapshot
+                163, 1, 24, 42, 2, 130, 107, 101, 120, 97, 109, 112, 108, 101, 46, 111, 114, 103,
+                111, 119, 119, 119, 46, 101, 120, 97, 109, 112, 108, 101, 46, 111, 114, 103, 3,
+                245
+            ]
+        );
+    }
+}
