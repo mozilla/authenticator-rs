@@ -1785,18 +1785,23 @@ pub mod test {
                 assert_eq!(
                     extension,
                     HmacGetSecretOrPrf::Prf(HmacSecretExtension {
+                        // JS: salt1 = new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array([...new TextEncoder().encode("WebAuthn PRF"), 0, ...new Uint8Array(8).fill(1)])))
                         salt1: vec![
-                            0x05, 0xf0, 0xb3, 0xb2, 0x3e, 0x7e, 0xcd, 0xac, 0xb0, 0x69, 0xd3, 0x0d,
-                            0x56, 0xd2, 0x30, 0xd2, 0xe1, 0xdb, 0xea, 0xf8, 0x10, 0xb6, 0x34, 0xdb,
-                            0x5c, 0x87, 0x61, 0x77, 0x6b, 0xf5, 0x1e, 0xe2
+                            5, 240, 179, 178, 62, 126, 205, 172, 176, 105, 211, 13, 86, 210, 48,
+                            210, 225, 219, 234, 248, 16, 182, 52, 219, 92, 135, 97, 119, 107, 245,
+                            30, 226
                         ],
+                        // JS: salt2 = new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array([...new TextEncoder().encode("WebAuthn PRF"), 0, ...new Uint8Array(8).fill(2)])))
                         salt2: Some(vec![
-                            0x60, 0x6b, 0x41, 0xea, 0x4d, 0xb0, 0xfb, 0x18, 0xc1, 0xbc, 0x62, 0x17,
-                            0x3b, 0xf0, 0xd4, 0x06, 0x68, 0xb0, 0x28, 0xf2, 0x68, 0xbe, 0x20, 0x7c,
-                            0xe2, 0xf4, 0x13, 0xa0, 0x08, 0x69, 0xfd, 0x6a
+                            96, 107, 65, 234, 77, 176, 251, 24, 193, 188, 98, 23, 59, 240, 212, 6,
+                            104, 176, 40, 242, 104, 190, 32, 124, 226, 244, 19, 160, 8, 105, 253,
+                            106
                         ]),
                         calculated_hmac: Some(CalculatedHmacSecretExtension {
                             public_key: client_key,
+                            // JS: aesKey = await crypto.subtle.importKey("raw", new Uint8Array(32).map((b, i) => i), { name: "AES-CBC" }, false, ["encrypt"])
+                            // JS: salt_enc = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-CBC", iv: new Uint8Array(16) }, aesKey, new Uint8Array([...salt1, ...salt2]))).slice(0, 64)
+                            // (Need to strip trailing padding block inserted by WebCrypto)
                             salt_enc: vec![
                                 23, 99, 220, 93, 59, 246, 109, 157, 247, 33, 138, 91, 142, 40, 203,
                                 234, 96, 212, 26, 15, 56, 160, 191, 142, 138, 106, 2, 207, 219,
@@ -1804,6 +1809,8 @@ pub mod test {
                                 187, 197, 51, 38, 68, 57, 197, 68, 249, 41, 143, 197, 46, 53, 72,
                                 60, 109, 33, 112, 175
                             ],
+                            // JS: hmacKeyP1 = await crypto.subtle.importKey("raw", new Uint8Array(32).map((b, i) => i), { name: "HMAC", hash: "SHA-256" }, false, ["sign"])
+                            // JS: salt_auth = new Uint8Array(await crypto.subtle.sign("HMAC", hmacKeyP1, salt_enc)).slice(0, 16)
                             salt_auth: vec![
                                 27, 222, 224, 22, 170, 39, 171, 5, 98, 207, 176, 58, 23, 108, 223,
                                 174
@@ -1854,18 +1861,23 @@ pub mod test {
                 assert_eq!(
                     extension,
                     HmacGetSecretOrPrf::Prf(HmacSecretExtension {
+                        // JS: salt1 = new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array([...new TextEncoder().encode("WebAuthn PRF"), 0, ...new Uint8Array(8).fill(1)])))
                         salt1: vec![
-                            0x05, 0xf0, 0xb3, 0xb2, 0x3e, 0x7e, 0xcd, 0xac, 0xb0, 0x69, 0xd3, 0x0d,
-                            0x56, 0xd2, 0x30, 0xd2, 0xe1, 0xdb, 0xea, 0xf8, 0x10, 0xb6, 0x34, 0xdb,
-                            0x5c, 0x87, 0x61, 0x77, 0x6b, 0xf5, 0x1e, 0xe2
+                            5, 240, 179, 178, 62, 126, 205, 172, 176, 105, 211, 13, 86, 210, 48,
+                            210, 225, 219, 234, 248, 16, 182, 52, 219, 92, 135, 97, 119, 107, 245,
+                            30, 226
                         ],
+                        // JS: salt2 = new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array([...new TextEncoder().encode("WebAuthn PRF"), 0, ...new Uint8Array(8).fill(2)])))
                         salt2: Some(vec![
-                            0x60, 0x6b, 0x41, 0xea, 0x4d, 0xb0, 0xfb, 0x18, 0xc1, 0xbc, 0x62, 0x17,
-                            0x3b, 0xf0, 0xd4, 0x06, 0x68, 0xb0, 0x28, 0xf2, 0x68, 0xbe, 0x20, 0x7c,
-                            0xe2, 0xf4, 0x13, 0xa0, 0x08, 0x69, 0xfd, 0x6a
+                            96, 107, 65, 234, 77, 176, 251, 24, 193, 188, 98, 23, 59, 240, 212, 6,
+                            104, 176, 40, 242, 104, 190, 32, 124, 226, 244, 19, 160, 8, 105, 253,
+                            106
                         ]),
                         calculated_hmac: Some(CalculatedHmacSecretExtension {
                             public_key: client_key,
+                            // JS: aesKey = await crypto.subtle.importKey("raw", new Uint8Array(32).map((b, i) => i), { name: "AES-CBC" }, false, ["encrypt"])
+                            // JS: salt_enc = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-CBC", iv: new Uint8Array(16) }, aesKey, new Uint8Array([...salt1, ...salt2]))).slice(0, 64)
+                            // (Need to strip trailing padding block inserted by WebCrypto)
                             salt_enc: vec![
                                 23, 99, 220, 93, 59, 246, 109, 157, 247, 33, 138, 91, 142, 40, 203,
                                 234, 96, 212, 26, 15, 56, 160, 191, 142, 138, 106, 2, 207, 219,
@@ -1873,6 +1885,8 @@ pub mod test {
                                 187, 197, 51, 38, 68, 57, 197, 68, 249, 41, 143, 197, 46, 53, 72,
                                 60, 109, 33, 112, 175
                             ],
+                            // JS: hmacKeyP1 = await crypto.subtle.importKey("raw", new Uint8Array(32).map((b, i) => i), { name: "HMAC", hash: "SHA-256" }, false, ["sign"])
+                            // JS: salt_auth = new Uint8Array(await crypto.subtle.sign("HMAC", hmacKeyP1, salt_enc)).slice(0, 16)
                             salt_auth: vec![
                                 27, 222, 224, 22, 170, 39, 171, 5, 98, 207, 176, 58, 23, 108, 223,
                                 174
@@ -1942,18 +1956,22 @@ pub mod test {
                 assert_eq!(
                     extension,
                     HmacGetSecretOrPrf::Prf(HmacSecretExtension {
+                        // JS: salt1 = new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array([...new TextEncoder().encode("WebAuthn PRF"), 0, ...new Uint8Array(8).fill(4)])))
                         salt1: vec![
-                            0x8d, 0x31, 0xd7, 0xf0, 0x6e, 0xc1, 0x54, 0x1b, 0x71, 0x99, 0x81, 0x6c,
-                            0x47, 0x3b, 0x62, 0x05, 0xd1, 0x2d, 0xbe, 0x8e, 0x2f, 0x04, 0x48, 0x4e,
-                            0xd9, 0x55, 0x63, 0xf3, 0xc0, 0xd9, 0xe8, 0x58
+                            141, 49, 215, 240, 110, 193, 84, 27, 113, 153, 129, 108, 71, 59, 98, 5,
+                            209, 45, 190, 142, 47, 4, 72, 78, 217, 85, 99, 243, 192, 217, 232, 88
                         ],
+                        // JS: salt2 = new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array([...new TextEncoder().encode("WebAuthn PRF"), 0, ...new Uint8Array(8).fill(5)])))
                         salt2: Some(vec![
-                            0x9c, 0x58, 0x7f, 0x97, 0xcc, 0x5a, 0x91, 0xc8, 0xcf, 0xc9, 0x6a, 0x7c,
-                            0x13, 0x3c, 0x1d, 0x73, 0x91, 0xc5, 0x1b, 0x94, 0x75, 0x48, 0x12, 0x04,
-                            0x4e, 0xbb, 0xa1, 0x7a, 0x90, 0xf5, 0x43, 0x01
+                            156, 88, 127, 151, 204, 90, 145, 200, 207, 201, 106, 124, 19, 60, 29,
+                            115, 145, 197, 27, 148, 117, 72, 18, 4, 78, 187, 161, 122, 144, 245,
+                            67, 1
                         ]),
                         calculated_hmac: Some(CalculatedHmacSecretExtension {
                             public_key: client_key,
+                            // JS: aesKey = await crypto.subtle.importKey("raw", new Uint8Array(32).map((b, i) => i), { name: "AES-CBC" }, false, ["encrypt"])
+                            // JS: salt_enc = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-CBC", iv: new Uint8Array(16) }, aesKey, new Uint8Array([...salt1, ...salt2]))).slice(0, 64)
+                            // (Need to strip trailing padding block inserted by WebCrypto)
                             salt_enc: vec![
                                 191, 228, 209, 183, 255, 132, 169, 88, 82, 9, 102, 239, 99, 201,
                                 47, 15, 174, 24, 191, 30, 80, 230, 67, 237, 178, 112, 105, 243, 53,
@@ -1961,6 +1979,8 @@ pub mod test {
                                 130, 69, 156, 230, 91, 95, 17, 149, 11, 81, 40, 23, 42, 24, 33, 25,
                                 167, 210, 241, 238, 237
                             ],
+                            // JS: hmacKeyP1 = await crypto.subtle.importKey("raw", new Uint8Array(32).map((b, i) => i), { name: "HMAC", hash: "SHA-256" }, false, ["sign"])
+                            // JS: salt_auth = new Uint8Array(await crypto.subtle.sign("HMAC", hmacKeyP1, salt_enc)).slice(0, 16)
                             salt_auth: vec![
                                 211, 87, 229, 38, 186, 254, 65, 2, 69, 166, 122, 30, 84, 77, 116,
                                 232
@@ -2027,18 +2047,22 @@ pub mod test {
                 assert_eq!(
                     extension,
                     HmacGetSecretOrPrf::Prf(HmacSecretExtension {
+                        // JS: salt1 = new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array([...new TextEncoder().encode("WebAuthn PRF"), 0, ...new Uint8Array(8).fill(4)])))
                         salt1: vec![
-                            0x8d, 0x31, 0xd7, 0xf0, 0x6e, 0xc1, 0x54, 0x1b, 0x71, 0x99, 0x81, 0x6c,
-                            0x47, 0x3b, 0x62, 0x05, 0xd1, 0x2d, 0xbe, 0x8e, 0x2f, 0x04, 0x48, 0x4e,
-                            0xd9, 0x55, 0x63, 0xf3, 0xc0, 0xd9, 0xe8, 0x58
+                            141, 49, 215, 240, 110, 193, 84, 27, 113, 153, 129, 108, 71, 59, 98, 5,
+                            209, 45, 190, 142, 47, 4, 72, 78, 217, 85, 99, 243, 192, 217, 232, 88
                         ],
+                        // JS: salt2 = new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array([...new TextEncoder().encode("WebAuthn PRF"), 0, ...new Uint8Array(8).fill(5)])))
                         salt2: Some(vec![
-                            0x9c, 0x58, 0x7f, 0x97, 0xcc, 0x5a, 0x91, 0xc8, 0xcf, 0xc9, 0x6a, 0x7c,
-                            0x13, 0x3c, 0x1d, 0x73, 0x91, 0xc5, 0x1b, 0x94, 0x75, 0x48, 0x12, 0x04,
-                            0x4e, 0xbb, 0xa1, 0x7a, 0x90, 0xf5, 0x43, 0x01
+                            156, 88, 127, 151, 204, 90, 145, 200, 207, 201, 106, 124, 19, 60, 29,
+                            115, 145, 197, 27, 148, 117, 72, 18, 4, 78, 187, 161, 122, 144, 245,
+                            67, 1
                         ]),
                         calculated_hmac: Some(CalculatedHmacSecretExtension {
                             public_key: client_key,
+                            // JS: aesKey = await crypto.subtle.importKey("raw", new Uint8Array(32).map((b, i) => i), { name: "AES-CBC" }, false, ["encrypt"])
+                            // JS: salt_enc = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-CBC", iv: new Uint8Array(16) }, aesKey, new Uint8Array([...salt1, ...salt2]))).slice(0, 64)
+                            // (Need to strip trailing padding block inserted by WebCrypto)
                             salt_enc: vec![
                                 191, 228, 209, 183, 255, 132, 169, 88, 82, 9, 102, 239, 99, 201,
                                 47, 15, 174, 24, 191, 30, 80, 230, 67, 237, 178, 112, 105, 243, 53,
@@ -2046,6 +2070,8 @@ pub mod test {
                                 130, 69, 156, 230, 91, 95, 17, 149, 11, 81, 40, 23, 42, 24, 33, 25,
                                 167, 210, 241, 238, 237
                             ],
+                            // JS: hmacKeyP1 = await crypto.subtle.importKey("raw", new Uint8Array(32).map((b, i) => i), { name: "HMAC", hash: "SHA-256" }, false, ["sign"])
+                            // JS: salt_auth = new Uint8Array(await crypto.subtle.sign("HMAC", hmacKeyP1, salt_enc)).slice(0, 16)
                             salt_auth: vec![
                                 211, 87, 229, 38, 186, 254, 65, 2, 69, 166, 122, 30, 84, 77, 116,
                                 232

@@ -1239,10 +1239,31 @@ pub mod test {
             };
 
             const PIN_PROTOCOL_2_IV: [u8; 16] = [0; 16]; // PIN protocol 1 uses a hard-coded all-zero IV
+
+            /// Generated using AES key 0..32 and ciphertext 0..64:
+            /// ```
+            /// #!/usr/bin/env python3
+            /// from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+            ///
+            /// key = bytes(range(32))
+            /// iv = bytes([0] * 16)
+            /// ciphertext = bytes(range(64))
+            ///
+            /// cipher = Cipher(algorithms.AES256(key), modes.CBC(iv))
+            /// decryptor = cipher.decryptor()
+            /// outputs = list(decryptor.update(ciphertext) + decryptor.finalize())
+            /// EXPECTED_OUTPUT1 = outputs[0:32]
+            /// EXPECTED_OUTPUT2 = outputs[32:64]
+            /// print(EXPECTED_OUTPUT1)
+            /// print(EXPECTED_OUTPUT2)
+            /// ```
+            /// Note: Using WebCrypto to generate these is impractical since they MUST NOT be padded, but WebCrypto inserts PKCS#7 padding.
             const EXPECTED_OUTPUT1: [u8; 32] = [
                 145, 61, 188, 229, 73, 58, 253, 192, 87, 114, 133, 138, 173, 74, 68, 50, 105, 3,
                 44, 7, 205, 92, 54, 139, 137, 207, 7, 105, 89, 85, 211, 130,
             ];
+
+            /// See [EXPECTED_OUTPUT1] for generation instructions
             const EXPECTED_OUTPUT2: Option<[u8; 32]> = Some([
                 155, 19, 88, 255, 192, 226, 50, 42, 243, 22, 42, 12, 146, 77, 108, 29, 71, 72, 149,
                 153, 183, 65, 182, 149, 71, 202, 57, 123, 239, 79, 94, 230,
