@@ -2115,7 +2115,7 @@ pub mod test {
                     extension.calculate(&shared_secret, &allow_list, Some(puat))?;
 
                 assert_eq!(selected_cred, None);
-                assert_eq!(extension, HmacGetSecretOrPrf::PrfUnmatched,);
+                assert_eq!(extension, HmacGetSecretOrPrf::PrfUnmatched);
 
                 Ok(())
             }
