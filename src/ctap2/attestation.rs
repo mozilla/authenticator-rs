@@ -43,7 +43,7 @@ impl HmacSecretResponse {
         hmac_outputs: &[u8],
     ) -> Result<HMACGetSecretOutput, CryptoError> {
         let output_secrets = shared_secret.decrypt(hmac_outputs)?;
-        if output_secrets.len() < 32 {
+        match if output_secrets.len() < 32 {
             Err(CryptoError::WrongSaltLength)
         } else {
             let (output1, output2) = output_secrets.split_at(32);
@@ -51,11 +51,20 @@ impl HmacSecretResponse {
                 output1: output1
                     .try_into()
                     .map_err(|_| CryptoError::WrongSaltLength)?,
-                output2: Some(output2)
-                    .filter(|o2| !o2.is_empty())
-                    .map(|o2| o2.try_into().map_err(|_| CryptoError::WrongSaltLength))
+                output2: (!output2.is_empty())
+                    .then(|| output2.try_into().map_err(|_| CryptoError::WrongSaltLength))
                     .transpose()?,
             })
+        } {
+            err @ Err(CryptoError::WrongSaltLength) => {
+                // TODO: Use Result::inspect_err when stable
+                debug!(
+                    "Bad hmac-secret output length: {} bytes (expected exactly 32 or 64)",
+                    output_secrets.len()
+                );
+                err
+            }
+            other => other,
         }
     }
 }
