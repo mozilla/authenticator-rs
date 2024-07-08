@@ -51,12 +51,6 @@ pub struct RelyingParty {
     pub name: Option<String>,
 }
 
-fn sha256(data: impl AsRef<[u8]>) -> [u8; 32] {
-    let mut hasher = Sha256::new();
-    hasher.update(data);
-    hasher.finalize().into()
-}
-
 impl RelyingParty {
     pub fn from<S>(id: S) -> Self
     where
@@ -69,7 +63,7 @@ impl RelyingParty {
     }
 
     pub fn hash(&self) -> RpIdHash {
-        RpIdHash(sha256(&self.id))
+        RpIdHash(Sha256::digest(&self.id).into())
     }
 }
 
@@ -466,14 +460,11 @@ impl AuthenticationExtensionsPRFInputs {
 
     /// Convert a PRF eval input to an hmac-secret salt input.
     fn eval_to_salt(eval: &[u8]) -> [u8; 32] {
-        sha256(
-            b"WebAuthn PRF"
-                .iter()
-                .chain([0x00].iter())
-                .chain(eval.iter())
-                .copied()
-                .collect::<Vec<u8>>(),
-        )
+        Sha256::new_with_prefix(b"WebAuthn PRF")
+            .chain_update([0x00].iter())
+            .chain_update(eval.iter())
+            .finalize()
+            .into()
     }
 }
 
