@@ -1,7 +1,6 @@
-use super::server::HMACGetSecretOutput;
 use super::utils::{from_slice_stream, read_be_u16, read_be_u32, read_byte};
 use crate::crypto::{COSEAlgorithm, CryptoError, SharedSecret};
-use crate::ctap2::server::{CredentialProtectionPolicy, RpIdHash};
+use crate::ctap2::server::{CredentialProtectionPolicy, HMACGetSecretOutput, RpIdHash};
 use crate::ctap2::utils::serde_parse_err;
 use crate::{crypto::COSEKey, errors::AuthenticatorError};
 use base64::Engine;

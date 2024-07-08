@@ -1,3 +1,4 @@
+use super::commands::get_assertion::HmacSecretExtension;
 use crate::crypto::{COSEAlgorithm, PinUvAuthToken, SharedSecret};
 use crate::{errors::AuthenticatorError, AuthenticatorTransports, KeyHandle};
 use base64::Engine;
@@ -12,8 +13,6 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::convert::{Into, TryFrom};
 use std::fmt;
-
-use super::commands::get_assertion::HmacSecretExtension;
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct RpIdHash(pub [u8; 32]);
