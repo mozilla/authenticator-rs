@@ -670,7 +670,7 @@ pub fn sign<Dev: FidoDevice>(
                     let (extension, selected_credential) = hmac_get_secret_or_prf.calculate(
                         secret,
                         &get_assertion.allow_list,
-                        pin_uv_auth_result.get_pin_uv_auth_token(),
+                        pin_uv_auth_result.get_pin_uv_auth_token().as_ref(),
                     )?;
                     if let Some(selected_credential) = selected_credential {
                         get_assertion.allow_list = vec![selected_credential.clone()];

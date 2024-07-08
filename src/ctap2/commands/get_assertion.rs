@@ -114,7 +114,7 @@ impl HmacGetSecretOrPrf {
         self,
         secret: &SharedSecret,
         allow_credentials: &'allow_cred [PublicKeyCredentialDescriptor],
-        puat: Option<PinUvAuthToken>,
+        puat: Option<&PinUvAuthToken>,
     ) -> Result<(Self, Option<&'allow_cred PublicKeyCredentialDescriptor>), AuthenticatorError>
     {
         Ok(match self {
@@ -177,7 +177,7 @@ impl HmacSecretExtension {
     pub fn calculate(
         &mut self,
         secret: &SharedSecret,
-        puat: Option<PinUvAuthToken>,
+        puat: Option<&PinUvAuthToken>,
     ) -> Result<(), AuthenticatorError> {
         if self.salt1.len() < 32 {
             return Err(CryptoError::WrongSaltLength.into());
@@ -1734,7 +1734,7 @@ pub mod test {
                     &shared_secret.encrypt(&[0x03; 32])?,
                 )?;
                 let (extension, selected_cred) =
-                    extension.calculate(&shared_secret, &[], Some(puat))?;
+                    extension.calculate(&shared_secret, &[], Some(&puat))?;
 
                 assert_eq!(selected_cred, None);
                 assert_eq!(
@@ -1779,7 +1779,7 @@ pub mod test {
                     &shared_secret.encrypt(&[0x03; 32])?,
                 )?;
                 let (extension, selected_cred) =
-                    extension.calculate(&shared_secret, &[], Some(puat))?;
+                    extension.calculate(&shared_secret, &[], Some(&puat))?;
 
                 assert_eq!(selected_cred, None);
                 assert_eq!(
@@ -1855,7 +1855,7 @@ pub mod test {
                     transports: vec![],
                 }];
                 let (extension, selected_cred) =
-                    extension.calculate(&shared_secret, &allow_list, Some(puat))?;
+                    extension.calculate(&shared_secret, &allow_list, Some(&puat))?;
 
                 assert_eq!(selected_cred, None);
                 assert_eq!(
@@ -1950,7 +1950,7 @@ pub mod test {
                     },
                 ];
                 let (extension, selected_cred) =
-                    extension.calculate(&shared_secret, &allow_list, Some(puat))?;
+                    extension.calculate(&shared_secret, &allow_list, Some(&puat))?;
 
                 assert_eq!(selected_cred, Some(&allow_list[1]));
                 assert_eq!(
@@ -2041,7 +2041,7 @@ pub mod test {
                     },
                 ];
                 let (extension, selected_cred) =
-                    extension.calculate(&shared_secret, &allow_list, Some(puat))?;
+                    extension.calculate(&shared_secret, &allow_list, Some(&puat))?;
 
                 assert_eq!(selected_cred, Some(&allow_list[1]));
                 assert_eq!(
@@ -2112,7 +2112,7 @@ pub mod test {
                     transports: vec![],
                 }];
                 let (extension, selected_cred) =
-                    extension.calculate(&shared_secret, &allow_list, Some(puat))?;
+                    extension.calculate(&shared_secret, &allow_list, Some(&puat))?;
 
                 assert_eq!(selected_cred, None);
                 assert_eq!(extension, HmacGetSecretOrPrf::PrfUnmatched);
@@ -2148,7 +2148,7 @@ pub mod test {
                     transports: vec![],
                 }];
                 let (extension, selected_cred) =
-                    extension.calculate(&shared_secret, &allow_list, Some(puat))?;
+                    extension.calculate(&shared_secret, &allow_list, Some(&puat))?;
 
                 assert_eq!(selected_cred, None);
                 assert_eq!(extension, HmacGetSecretOrPrf::PrfUnmatched);

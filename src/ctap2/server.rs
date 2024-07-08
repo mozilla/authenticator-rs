@@ -403,7 +403,7 @@ impl AuthenticationExtensionsPRFInputs {
         &self,
         secret: &SharedSecret,
         allow_credentials: &'allow_cred [PublicKeyCredentialDescriptor],
-        puat: Option<PinUvAuthToken>,
+        puat: Option<&PinUvAuthToken>,
     ) -> Result<
         Option<(
             HmacSecretExtension,
