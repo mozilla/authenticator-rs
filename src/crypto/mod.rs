@@ -1072,8 +1072,7 @@ impl Serialize for COSEKey {
 }
 
 /// Errors that can be returned from COSE functions.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(test, derive(PartialEq))]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum CryptoError {
     // DecodingFailure,
     LibraryFailure,

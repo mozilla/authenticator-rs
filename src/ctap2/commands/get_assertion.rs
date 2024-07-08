@@ -67,8 +67,7 @@ impl UserVerification for GetAssertionOptions {
     }
 }
 
-#[derive(Debug, Clone)]
-#[cfg_attr(test, derive(PartialEq))]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CalculatedHmacSecretExtension {
     pub public_key: COSEKey,
     pub salt_enc: Vec<u8>,
@@ -76,8 +75,7 @@ pub struct CalculatedHmacSecretExtension {
 }
 
 /// Wrapper type recording whether the hmac-secret input originally came from the hmacGetSecret or the prf client extension input.
-#[derive(Debug, Clone)]
-#[cfg_attr(test, derive(PartialEq))]
+#[derive(Debug, Clone, PartialEq)]
 pub enum HmacGetSecretOrPrf {
     /// hmac-secret inputs set by the hmacGetSecret client extension input.
     HmacGetSecret(HmacSecretExtension),
@@ -155,8 +153,7 @@ impl Serialize for HmacGetSecretOrPrf {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-#[cfg_attr(test, derive(PartialEq))]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct HmacSecretExtension {
     pub salt1: Vec<u8>,
     pub salt2: Option<Vec<u8>>,

@@ -387,8 +387,7 @@ pub struct HMACGetSecretOutput {
     pub output2: Option<[u8; 32]>,
 }
 
-#[derive(Clone, Debug, Default)]
-#[cfg_attr(test, derive(PartialEq))]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct AuthenticationExtensionsPRFInputs {
     pub eval: Option<AuthenticationExtensionsPRFValues>,
     pub eval_by_credential: Option<HashMap<Vec<u8>, AuthenticationExtensionsPRFValues>>,
