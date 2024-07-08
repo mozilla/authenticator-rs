@@ -30,6 +30,7 @@ use serde::{
 };
 use serde_bytes::ByteBuf;
 use serde_cbor::{de::from_slice, ser, Value};
+use std::convert::TryFrom;
 use std::fmt;
 use std::io::Cursor;
 
@@ -115,8 +116,7 @@ impl HmacGetSecretOrPrf {
         secret: &SharedSecret,
         allow_credentials: &'allow_cred [PublicKeyCredentialDescriptor],
         puat: Option<&PinUvAuthToken>,
-    ) -> Result<(Self, Option<&'allow_cred PublicKeyCredentialDescriptor>), AuthenticatorError>
-    {
+    ) -> Result<(Self, Option<&'allow_cred PublicKeyCredentialDescriptor>), CryptoError> {
         Ok(match self {
             Self::HmacGetSecret(mut extension) => {
                 extension.calculate(secret, puat)?;
@@ -178,19 +178,18 @@ impl HmacSecretExtension {
         &mut self,
         secret: &SharedSecret,
         puat: Option<&PinUvAuthToken>,
-    ) -> Result<(), AuthenticatorError> {
-        if self.salt1.len() < 32 {
-            return Err(CryptoError::WrongSaltLength.into());
-        }
-        let salt_enc = match &self.salt2 {
-            Some(salt2) => {
-                if salt2.len() < 32 {
-                    return Err(CryptoError::WrongSaltLength.into());
-                }
-                let salts = [&self.salt1[..32], &salt2[..32]].concat(); // salt1 || salt2
-                secret.encrypt(&salts)
+    ) -> Result<(), CryptoError> {
+        let salt_enc = match (
+            <[u8; 32]>::try_from(self.salt1.as_slice()),
+            self.salt2.as_deref().map(<[u8; 32]>::try_from),
+        ) {
+            (Ok(salt1), None) => secret.encrypt(&salt1),
+            (Ok(salt1), Some(Ok(salt2))) => secret.encrypt(&[salt1, salt2].concat()),
+            (Err(_), _) | (_, Some(Err(_))) => {
+                debug!("Invalid hmac-secret salt length(s): salt1: {}, salt2: {:?} (expected 32 and 32|None)",
+                       self.salt1.len(), self.salt2.as_ref().map(Vec::len));
+                Err(CryptoError::WrongSaltLength)
             }
-            None => secret.encrypt(&self.salt1[..32]),
         }?;
         let salt_auth = secret.authenticate(&salt_enc)?;
         let public_key = secret.client_input().clone();
@@ -1752,7 +1751,7 @@ pub mod test {
         mod requires_crypto {
             use super::*;
             use crate::{
-                crypto::PinUvAuthToken,
+                crypto::{CryptoError, PinUvAuthToken},
                 ctap2::{
                     commands::{
                         client_pin::PinUvAuthTokenPermission,
@@ -1814,6 +1813,44 @@ pub mod test {
                     }),
                 );
 
+                Ok(())
+            }
+
+            #[test]
+            fn calculate_hmac_get_secret_wrong_length_salt1() -> Result<(), AuthenticatorError> {
+                let (shared_secret, _, puat) = make_test_secret(1)?;
+                for len in [0, 1, 31, 33, 64] {
+                    let extension = HmacGetSecretOrPrf::HmacGetSecret(HmacSecretExtension::new(
+                        vec![0x01; len],
+                        None,
+                    ));
+                    let result = extension.calculate(&shared_secret, &[], Some(&puat));
+                    assert_eq!(
+                        result,
+                        Err(CryptoError::WrongSaltLength),
+                        "At salt1 length: {}",
+                        len,
+                    );
+                }
+                Ok(())
+            }
+
+            #[test]
+            fn calculate_hmac_get_secret_wrong_length_salt2() -> Result<(), AuthenticatorError> {
+                let (shared_secret, _, puat) = make_test_secret(1)?;
+                for len in [0, 1, 31, 33, 64] {
+                    let extension = HmacGetSecretOrPrf::HmacGetSecret(HmacSecretExtension::new(
+                        vec![0x01; 32],
+                        Some(vec![0x02; len]),
+                    ));
+                    let result = extension.calculate(&shared_secret, &[], Some(&puat));
+                    assert_eq!(
+                        result,
+                        Err(CryptoError::WrongSaltLength),
+                        "At salt2 length: {}",
+                        len,
+                    );
+                }
                 Ok(())
             }
 

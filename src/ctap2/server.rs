@@ -1,5 +1,5 @@
 use super::commands::get_assertion::HmacSecretExtension;
-use crate::crypto::{COSEAlgorithm, PinUvAuthToken, SharedSecret};
+use crate::crypto::{COSEAlgorithm, CryptoError, PinUvAuthToken, SharedSecret};
 use crate::{errors::AuthenticatorError, AuthenticatorTransports, KeyHandle};
 use base64::Engine;
 use serde::de::MapAccess;
@@ -409,7 +409,7 @@ impl AuthenticationExtensionsPRFInputs {
             HmacSecretExtension,
             Option<&'allow_cred PublicKeyCredentialDescriptor>,
         )>,
-        AuthenticatorError,
+        CryptoError,
     > {
         if let Some((selected_credential, ev)) = self.select_eval(allow_credentials) {
             let mut hmac_secret = HmacSecretExtension::new(
