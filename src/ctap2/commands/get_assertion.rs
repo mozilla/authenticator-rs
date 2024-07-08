@@ -83,7 +83,7 @@ pub enum HmacGetSecretOrPrf {
     HmacGetSecret(HmacSecretExtension),
     /// hmac-secret input is to be calculated from PRF inputs, but we haven't yet identified which eval or evalByCredential entry to use.
     PrfUninitialized(AuthenticationExtensionsPRFInputs),
-    /// prf client input with no eval or matchin evalByCredential entry.
+    /// prf client input with no eval or matching evalByCredential entry.
     PrfUnmatched,
     /// hmac-secret inputs set by the prf client extension input.
     Prf(HmacSecretExtension),

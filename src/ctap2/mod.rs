@@ -660,7 +660,7 @@ pub fn sign<Dev: FidoDevice>(
             return false;
         }
 
-        // Third, use the shared secret in the extensions, if requested
+        // Use the shared secret in the extensions, if requested
         get_assertion.extensions.hmac_secret = match get_assertion
             .extensions
             .hmac_secret
