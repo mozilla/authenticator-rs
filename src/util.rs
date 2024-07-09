@@ -144,3 +144,301 @@ macro_rules! serialize_map {
         }
     };
 }
+
+#[cfg(test)]
+mod tests {
+    mod serialize_map_optional {
+        //! Test cases generated using the following Python snippet:
+        //! ```python
+        //! from fido2 import cbor
+        //! cbor._sort_keys = lambda entry: 0  # Disable canonical CBOR map sorting
+        //! c = cbor.encode({
+        //!   0x00: "a",
+        //!   "a" : 0x01,
+        //!   ("b",) : ["c"],
+        //!   ("c", "d") : ["d", "e"],
+        //!   -0x04 : "e",
+        //!   0xff : "f",
+        //!   0xffff : "g",
+        //!   0xffffff : "h",
+        //!   0xffffffff : "i",
+        //!   0xffffffffffffffff : "i",
+        //!   0x0a : -1337,
+        //!   0x0b : 0xffffffffffffffff,
+        //! })
+        //! print(c.hex())
+        //! ```
+
+        use super::super::decode_hex;
+        use serde::{Serialize, Serializer};
+
+        #[test]
+        fn serialize_map_optional_1() {
+            struct Foo;
+            impl Serialize for Foo {
+                fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                    serialize_map_optional!(
+                        serializer,
+                        v0: &0x00 => Some("a"),
+                    )
+                }
+            }
+            assert_eq!(serde_cbor::to_vec(&Foo).unwrap(), decode_hex("a1006161"));
+        }
+
+        #[test]
+        fn serialize_map_optional_2() {
+            struct Foo;
+            impl Serialize for Foo {
+                fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                    serialize_map_optional!(
+                        serializer,
+                        v0: &0x00 => Some("a"),
+                        v1: &"a" => Some(0x01),
+                    )
+                }
+            }
+            assert_eq!(
+                serde_cbor::to_vec(&Foo).unwrap(),
+                decode_hex("a2006161616101")
+            );
+        }
+
+        #[test]
+        fn serialize_map_optional_3() {
+            struct Foo;
+            impl Serialize for Foo {
+                fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                    serialize_map_optional!(
+                        serializer,
+                        v0: &0x00 => Some("a"),
+                        v1: &"a" => Some(0x01),
+                        v2: &["b"] => Some(["c"]),
+                    )
+                }
+            }
+            assert_eq!(
+                serde_cbor::to_vec(&Foo).unwrap(),
+                decode_hex("a3006161616101816162816163")
+            );
+        }
+
+        #[test]
+        fn serialize_map_optional_4() {
+            struct Foo;
+            impl Serialize for Foo {
+                fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                    serialize_map_optional!(
+                        serializer,
+                        v0: &0x00 => Some("a"),
+                        v1: &"a" => Some(0x01),
+                        v2: &["b"] => Some(["c"]),
+                        v3: &["c", "d"] => Some(["d", "e"]),
+                    )
+                }
+            }
+            assert_eq!(
+                serde_cbor::to_vec(&Foo).unwrap(),
+                decode_hex("a400616161610181616281616382616361648261646165")
+            );
+        }
+
+        #[test]
+        fn serialize_map_optional_5() {
+            struct Foo;
+            impl Serialize for Foo {
+                fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                    serialize_map_optional!(
+                        serializer,
+                        v0: &0x00 => Some("a"),
+                        v1: &"a" => Some(0x01),
+                        v2: &["b"] => Some(["c"]),
+                        v3: &["c", "d"] => Some(["d", "e"]),
+                        v4: &-0x04 => Some("e"),
+                    )
+                }
+            }
+            assert_eq!(
+                serde_cbor::to_vec(&Foo).unwrap(),
+                decode_hex("a500616161610181616281616382616361648261646165236165")
+            );
+        }
+
+        #[test]
+        fn serialize_map_optional_6() {
+            struct Foo;
+            impl Serialize for Foo {
+                fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                    serialize_map_optional!(
+                        serializer,
+                        v0: &0x00 => Some("a"),
+                        v1: &"a" => Some(0x01),
+                        v2: &["b"] => Some(["c"]),
+                        v3: &["c", "d"] => Some(["d", "e"]),
+                        v4: &-0x04 => Some("e"),
+                        v5: &0xff => Some("f"),
+                    )
+                }
+            }
+            assert_eq!(
+                serde_cbor::to_vec(&Foo).unwrap(),
+                decode_hex("a60061616161018161628161638261636164826164616523616518ff6166")
+            );
+        }
+
+        #[test]
+        fn serialize_map_optional_7() {
+            struct Foo;
+            impl Serialize for Foo {
+                fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                    serialize_map_optional!(
+                        serializer,
+                        v0: &0x00 => Some("a"),
+                        v1: &"a" => Some(0x01),
+                        v2: &["b"] => Some(["c"]),
+                        v3: &["c", "d"] => Some(["d", "e"]),
+                        v4: &-0x04 => Some("e"),
+                        v5: &0xff => Some("f"),
+                        v6: &0xffff => Some("g"),
+                    )
+                }
+            }
+            assert_eq!(
+                serde_cbor::to_vec(&Foo).unwrap(),
+                decode_hex(
+                    "a70061616161018161628161638261636164826164616523616518ff616619ffff6167"
+                )
+            );
+        }
+
+        #[test]
+        fn serialize_map_optional_8() {
+            struct Foo;
+            impl Serialize for Foo {
+                fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                    serialize_map_optional!(
+                        serializer,
+                        v0: &0x00 => Some("a"),
+                        v1: &"a" => Some(0x01),
+                        v2: &["b"] => Some(["c"]),
+                        v3: &["c", "d"] => Some(["d", "e"]),
+                        v4: &-0x04 => Some("e"),
+                        v5: &0xff => Some("f"),
+                        v6: &0xffff => Some("g"),
+                        v7: &0xffffff => Some("h"),
+                    )
+                }
+            }
+            assert_eq!(
+                serde_cbor::to_vec(&Foo).unwrap(),
+                decode_hex("a80061616161018161628161638261636164826164616523616518ff616619ffff61671a00ffffff6168")
+            );
+        }
+
+        #[test]
+        fn serialize_map_optional_9() {
+            struct Foo;
+            impl Serialize for Foo {
+                fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                    serialize_map_optional!(
+                        serializer,
+                        v0: &0x00 => Some("a"),
+                        v1: &"a" => Some(0x01),
+                        v2: &["b"] => Some(["c"]),
+                        v3: &["c", "d"] => Some(["d", "e"]),
+                        v4: &-0x04 => Some("e"),
+                        v5: &0xff => Some("f"),
+                        v6: &0xffff => Some("g"),
+                        v7: &0xffffff => Some("h"),
+                        v8: &0xffffffffu32 => Some("i"),
+                    )
+                }
+            }
+            assert_eq!(
+                serde_cbor::to_vec(&Foo).unwrap(),
+                decode_hex("a90061616161018161628161638261636164826164616523616518ff616619ffff61671a00ffffff61681affffffff6169")
+            );
+        }
+
+        #[test]
+        fn serialize_map_optional_10() {
+            struct Foo;
+            impl Serialize for Foo {
+                fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                    serialize_map_optional!(
+                        serializer,
+                        v0: &0x00 => Some("a"),
+                        v1: &"a" => Some(0x01),
+                        v2: &["b"] => Some(["c"]),
+                        v3: &["c", "d"] => Some(["d", "e"]),
+                        v4: &-0x04 => Some("e"),
+                        v5: &0xff => Some("f"),
+                        v6: &0xffff => Some("g"),
+                        v7: &0xffffff => Some("h"),
+                        v8: &0xffffffffu32 => Some("i"),
+                        v9: &0xffffffffffffffffu64 => Some("i"),
+                    )
+                }
+            }
+            assert_eq!(
+                serde_cbor::to_vec(&Foo).unwrap(),
+                decode_hex("aa0061616161018161628161638261636164826164616523616518ff616619ffff61671a00ffffff61681affffffff61691bffffffffffffffff6169")
+            );
+        }
+
+        #[test]
+        fn serialize_map_optional_11() {
+            struct Foo;
+            impl Serialize for Foo {
+                fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                    serialize_map_optional!(
+                        serializer,
+                        v0: &0x00 => Some("a"),
+                        v1: &"a" => Some(0x01),
+                        v2: &["b"] => Some(["c"]),
+                        v3: &["c", "d"] => Some(["d", "e"]),
+                        v4: &-0x04 => Some("e"),
+                        v5: &0xff => Some("f"),
+                        v6: &0xffff => Some("g"),
+                        v7: &0xffffff => Some("h"),
+                        v8: &0xffffffffu32 => Some("i"),
+                        v9: &0xffffffffffffffffu64 => Some("i"),
+                        va: &0x0a => Some(-1337),
+                    )
+                }
+            }
+            assert_eq!(
+                serde_cbor::to_vec(&Foo).unwrap(),
+                decode_hex("ab0061616161018161628161638261636164826164616523616518ff616619ffff61671a00ffffff61681affffffff61691bffffffffffffffff61690a390538")
+            );
+        }
+
+        #[test]
+        fn serialize_map_optional_12() {
+            struct Foo;
+            impl Serialize for Foo {
+                fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                    serialize_map_optional!(
+                        serializer,
+                        v0: &0x00 => Some("a"),
+                        v1: &"a" => Some(0x01),
+                        v2: &["b"] => Some(["c"]),
+                        v3: &["c", "d"] => Some(["d", "e"]),
+                        v4: &-0x04 => Some("e"),
+                        v5: &0xff => Some("f"),
+                        v6: &0xffff => Some("g"),
+                        v7: &0xffffff => Some("h"),
+                        v8: &0xffffffffu32 => Some("i"),
+                        v9: &0xffffffffffffffffu64 => Some("i"),
+                        va: &0x0a => Some(-1337),
+                        vb: &0x0b => Some(0xffffffffffffffffu64),
+                    )
+                }
+            }
+            assert_eq!(
+                serde_cbor::to_vec(&Foo).unwrap(),
+                decode_hex("ac0061616161018161628161638261636164826164616523616518ff616619ffff61671a00ffffff61681affffffff61691bffffffffffffffff61690a3905380b1bffffffffffffffff")
+            );
+        }
+    }
+}
