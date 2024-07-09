@@ -7,7 +7,6 @@ use crate::{
 };
 use serde::{
     de::{Error as SerdeError, IgnoredAny, MapAccess, Visitor},
-    ser::SerializeMap,
     Deserialize, Deserializer, Serialize, Serializer,
 };
 use serde_bytes::ByteBuf;

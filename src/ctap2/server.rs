@@ -4,7 +4,6 @@ use base64::Engine;
 use serde::de::MapAccess;
 use serde::{
     de::{Error as SerdeError, Unexpected, Visitor},
-    ser::SerializeMap,
     Deserialize, Deserializer, Serialize, Serializer,
 };
 use serde_bytes::{ByteBuf, Bytes};

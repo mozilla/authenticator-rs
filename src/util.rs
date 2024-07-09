@@ -109,10 +109,10 @@ macro_rules! serialize_map_optional {
             let mut map = serializer.serialize_map(core::option::Option::Some(map_len))?;
             $(
                 if let core::option::Option::Some(v) = $value_ident {
-                    map.serialize_entry($key, &v)?;
+                    ::serde::ser::SerializeMap::serialize_entry(&mut map, $key, &v)?;
                 }
             )*
-            map.end()
+            ::serde::ser::SerializeMap::end(map)
         }
     };
 }
@@ -138,9 +138,9 @@ macro_rules! serialize_map {
             const MAP_LEN: usize = [$( serialize_map!(@count_entry $value) ),*].len();
             let mut map = serializer.serialize_map(core::option::Option::Some(MAP_LEN))?;
             $(
-                map.serialize_entry($key, $value)?;
+                ::serde::ser::SerializeMap::serialize_entry(&mut map, $key, $value)?;
             )*
-            map.end()
+            ::serde::ser::SerializeMap::end(map)
         }
     };
 }

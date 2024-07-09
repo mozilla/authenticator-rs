@@ -2,7 +2,6 @@ use super::commands::CommandError;
 use crate::transport::errors::HIDError;
 use base64::Engine;
 use serde::de::{self, Deserializer, Error as SerdeError, MapAccess, Visitor};
-use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json as json;
 use sha2::{Digest, Sha256};

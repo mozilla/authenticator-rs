@@ -26,7 +26,6 @@ use crate::transport::{FidoDevice, VirtualFidoDevice};
 use crate::u2ftypes::CTAP1RequestAPDU;
 use serde::{
     de::{Error as DesError, MapAccess, Unexpected, Visitor},
-    ser::SerializeMap,
     Deserialize, Deserializer, Serialize, Serializer,
 };
 use serde_cbor::{self, de::from_slice, ser, Value};

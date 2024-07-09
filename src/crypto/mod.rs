@@ -8,7 +8,6 @@ use crate::errors::AuthenticatorError;
 use crate::{ctap2::commands::CommandError, transport::errors::HIDError};
 use serde::{
     de::{Error as SerdeError, MapAccess, Unexpected, Visitor},
-    ser::SerializeMap,
     Deserialize, Deserializer, Serialize, Serializer,
 };
 use serde_bytes::ByteBuf;

@@ -6,7 +6,7 @@ use crate::{
     transport::errors::HIDError,
     AuthenticatorInfo, FidoDevice,
 };
-use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Serialize, Serializer};
 use serde_cbor::{de::from_slice, to_vec, Value};
 
 #[derive(Debug, Clone, Deserialize)]

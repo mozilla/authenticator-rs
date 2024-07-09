@@ -24,7 +24,7 @@ use crate::transport::{FidoDevice, VirtualFidoDevice};
 use crate::u2ftypes::CTAP1RequestAPDU;
 use serde::{
     de::{Error as DesError, MapAccess, Visitor},
-    ser::{Error as SerError, SerializeMap},
+    ser::Error as SerError,
     Deserialize, Deserializer, Serialize, Serializer,
 };
 use serde_bytes::ByteBuf;
