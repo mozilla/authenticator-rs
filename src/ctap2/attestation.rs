@@ -399,10 +399,7 @@ impl Serialize for AttestationStatement {
         S: Serializer,
     {
         match self {
-            Self::None => {
-                let map = serializer.serialize_map(Some(0))?;
-                map.end()
-            }
+            Self::None => serializer.serialize_map(Some(0))?.end(),
             Self::Packed(ref v) => serializer.serialize_some(v),
             Self::FidoU2F(ref v) => serializer.serialize_some(v),
             Self::AndroidKey(ref v) => serializer.serialize_some(v),
