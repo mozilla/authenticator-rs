@@ -105,10 +105,10 @@ macro_rules! serialize_map_optional {
                 let $value_ident = $value;
             )*
 
-            let map_len = 0usize $(+ if $value_ident.is_some() { 1usize } else { 0usize })*;
-            let mut map = serializer.serialize_map(core::option::Option::Some(map_len))?;
+            let map_len = 0usize $(+ if ::core::option::Option::is_some(&$value_ident) { 1usize } else { 0usize })*;
+            let mut map = ::serde::ser::Serializer::serialize_map(serializer, ::core::option::Option::Some(map_len))?;
             $(
-                if let core::option::Option::Some(v) = $value_ident {
+                if let ::core::option::Option::Some(v) = $value_ident {
                     ::serde::ser::SerializeMap::serialize_entry(&mut map, $key, &v)?;
                 }
             )*
@@ -136,7 +136,7 @@ macro_rules! serialize_map {
         {
             let serializer = $serializer;
             const MAP_LEN: usize = [$( serialize_map!(@count_entry $value) ),*].len();
-            let mut map = serializer.serialize_map(core::option::Option::Some(MAP_LEN))?;
+            let mut map = ::serde::ser::Serializer::serialize_map(serializer, ::core::option::Option::Some(MAP_LEN))?;
             $(
                 ::serde::ser::SerializeMap::serialize_entry(&mut map, $key, $value)?;
             )*
