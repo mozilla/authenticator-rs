@@ -67,7 +67,7 @@ pub fn io_err(msg: &str) -> io::Error {
     io::Error::new(io::ErrorKind::Other, msg)
 }
 
-#[cfg(all(test, not(feature = "crypto_dummy")))]
+#[cfg(test)]
 pub fn decode_hex(s: &str) -> Vec<u8> {
     (0..s.len())
         .step_by(2)
