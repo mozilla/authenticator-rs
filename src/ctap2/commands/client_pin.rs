@@ -88,14 +88,14 @@ impl Serialize for ClientPIN {
         let command: u8 = self.subcommand as u8;
         serialize_map_optional!(
             serializer,
-            v1: &1 => self.pin_protocol.as_ref().map(|p| p.id()),
-            v2: &2 => Some(&command),
-            v3: &3 => &self.key_agreement,
-            v4: &4 => self.pin_auth.as_ref().map(|pin_auth| Bytes::new(pin_auth.as_ref())),
-            v5: &5 => self.new_pin_enc.as_ref().map(|new_pin_enc| Bytes::new(new_pin_enc.as_ref())),
-            v6: &6 => self.pin_hash_enc.as_ref().map(|pin_hash_enc| Bytes::new(pin_hash_enc.as_ref())),
-            v9: &9 => self.permissions,
-            va: &0x0A => &self.rp_id,
+            &1 => self.pin_protocol.as_ref().map(|p| p.id()),
+            &2 => Some(&command),
+            &3 => &self.key_agreement,
+            &4 => self.pin_auth.as_ref().map(|pin_auth| Bytes::new(pin_auth.as_ref())),
+            &5 => self.new_pin_enc.as_ref().map(|new_pin_enc| Bytes::new(new_pin_enc.as_ref())),
+            &6 => self.pin_hash_enc.as_ref().map(|pin_hash_enc| Bytes::new(pin_hash_enc.as_ref())),
+            &9 => self.permissions,
+            &0x0A => &self.rp_id,
         )
     }
 }

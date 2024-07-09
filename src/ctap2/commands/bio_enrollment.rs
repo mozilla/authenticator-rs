@@ -97,9 +97,9 @@ impl Serialize for BioEnrollmentParams {
     {
         serialize_map_optional!(
             serializer,
-            v1: &0x01 => self.template_id.as_deref().map(ByteBuf::from),
-            v2: &0x02 => &self.template_friendly_name,
-            v3: &0x03 => self.timeout_milliseconds,
+            &0x01 => self.template_id.as_deref().map(ByteBuf::from),
+            &0x02 => &self.template_friendly_name,
+            &0x03 => self.timeout_milliseconds,
         )
     }
 }
@@ -174,11 +174,11 @@ impl Serialize for BioEnrollment {
         let (id, params) = self.subcommand.to_id_and_param();
         serialize_map_optional!(
             serializer,
-            v1: &0x01 => Some(&self.modality), // Per spec currently always Fingerprint
-            v2: &0x02 => Some(&id),
-            v3: &0x03 => params.has_some().then_some(&params),
-            v4: &0x04 => self.pin_uv_auth_param.as_ref().map(|p| p.pin_protocol.id()),
-            v5: &0x05 => &self.pin_uv_auth_param,
+            &0x01 => Some(&self.modality), // Per spec currently always Fingerprint
+            &0x02 => Some(&id),
+            &0x03 => params.has_some().then_some(&params),
+            &0x04 => self.pin_uv_auth_param.as_ref().map(|p| p.pin_protocol.id()),
+            &0x05 => &self.pin_uv_auth_param,
         )
     }
 }

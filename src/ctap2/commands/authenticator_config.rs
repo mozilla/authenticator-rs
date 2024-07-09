@@ -27,9 +27,9 @@ impl Serialize for SetMinPINLength {
     {
         serialize_map_optional!(
             serializer,
-            v1: &0x01 => self.new_min_pin_length,
-            v2: &0x02 => &self.min_pin_length_rpids,
-            v3: &0x03 => self.force_change_pin,
+            &0x01 => self.new_min_pin_length,
+            &0x02 => &self.min_pin_length_rpids,
+            &0x03 => self.force_change_pin,
         )
     }
 }
@@ -84,10 +84,10 @@ impl Serialize for AuthenticatorConfig {
 
         serialize_map_optional!(
             serializer,
-            v1: &0x01 => Some(entry01),
-            v2: &0x02 => entry02,
-            v3: &0x03 => self.pin_uv_auth_param.as_ref().map(|p| p.pin_protocol.id()),
-            v4: &0x04 => &self.pin_uv_auth_param,
+            &0x01 => Some(entry01),
+            &0x02 => entry02,
+            &0x03 => self.pin_uv_auth_param.as_ref().map(|p| p.pin_protocol.id()),
+            &0x04 => &self.pin_uv_auth_param,
         )
     }
 }
