@@ -1,7 +1,7 @@
 use super::get_info::AuthenticatorInfo;
 use super::{
-    Command, CommandError, CtapResponse, PinUvAuthCommand, RequestCtap1, RequestCtap2, Retryable,
-    StatusCode,
+    Command, CommandError, CtapResponse, PinUvAuthCommand, PinUvAuthResult, RequestCtap1,
+    RequestCtap2, Retryable, StatusCode,
 };
 use crate::consts::{
     PARAMETER_SIZE, U2F_AUTHENTICATE, U2F_DONT_ENFORCE_USER_PRESENCE_AND_SIGN,
@@ -302,6 +302,33 @@ impl GetAssertion {
             options,
             pin_uv_auth_param: None,
         }
+    }
+
+    pub fn process_hmac_secret_and_prf_extension(
+        mut self,
+        shared_secret: Option<(&SharedSecret, &PinUvAuthResult)>,
+    ) -> Result<Self, AuthenticatorError> {
+        self.extensions.hmac_secret = self
+            .extensions
+            .hmac_secret
+            .take()
+            .map(|hmac_get_secret_or_prf| {
+                if let Some((secret, pin_uv_auth_result)) = shared_secret {
+                    let (extension, selected_credential) = hmac_get_secret_or_prf.calculate(
+                        secret,
+                        &self.allow_list,
+                        pin_uv_auth_result.get_pin_uv_auth_token().as_ref(),
+                    )?;
+                    if let Some(selected_credential) = selected_credential {
+                        self.allow_list = vec![selected_credential.clone()];
+                    }
+                    Ok::<_, AuthenticatorError>(extension)
+                } else {
+                    Ok(hmac_get_secret_or_prf)
+                }
+            })
+            .transpose()?;
+        Ok(self)
     }
 
     pub fn finalize_result<Dev: FidoDevice>(&self, dev: &Dev, result: &mut GetAssertionResult) {

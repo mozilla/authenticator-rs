@@ -661,28 +661,10 @@ pub fn sign<Dev: FidoDevice>(
         }
 
         // Use the shared secret in the extensions, if requested
-        get_assertion.extensions.hmac_secret = match get_assertion
-            .extensions
-            .hmac_secret
-            .take()
-            .map(|hmac_get_secret_or_prf| {
-                if let Some(secret) = dev.get_shared_secret() {
-                    let (extension, selected_credential) = hmac_get_secret_or_prf.calculate(
-                        secret,
-                        &get_assertion.allow_list,
-                        pin_uv_auth_result.get_pin_uv_auth_token().as_ref(),
-                    )?;
-                    if let Some(selected_credential) = selected_credential {
-                        get_assertion.allow_list = vec![selected_credential.clone()];
-                    }
-                    Ok(extension)
-                } else {
-                    Ok(hmac_get_secret_or_prf)
-                }
-            })
-            .transpose()
-        {
-            Ok(extension) => extension,
+        get_assertion = match get_assertion.process_hmac_secret_and_prf_extension(
+            dev.get_shared_secret().map(|s| (s, &pin_uv_auth_result)),
+        ) {
+            Ok(value) => value,
             Err(e) => {
                 callback.call(Err(e));
                 return false;
