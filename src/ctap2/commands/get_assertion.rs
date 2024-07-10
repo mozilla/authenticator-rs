@@ -376,7 +376,13 @@ impl GetAssertion {
                     {
                         dev.get_shared_secret()
                             .and_then(|shared_secret| hmac_response.decrypt_secrets(shared_secret))
-                            .and_then(Result::ok)
+                            .and_then(|result| match result {
+                                Ok(ok) => Some(ok),
+                                Err(err) => {
+                                    debug!("Failed to decrypt hmac-secret response: {:?}", err);
+                                    None
+                                }
+                            })
                     } else {
                         None
                     };
@@ -398,7 +404,13 @@ impl GetAssertion {
                     {
                         dev.get_shared_secret()
                             .and_then(|shared_secret| hmac_response.decrypt_secrets(shared_secret))
-                            .and_then(Result::ok)
+                            .and_then(|result| match result {
+                                Ok(ok) => Some(ok),
+                                Err(err) => {
+                                    debug!("Failed to decrypt hmac-secret response: {:?}", err);
+                                    None
+                                }
+                            })
                             .map(|outputs| outputs.into())
                     } else {
                         None
