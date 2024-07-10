@@ -320,7 +320,11 @@ impl GetAssertion {
                     )
                 })
             })
-            .transpose()?
+            .transpose()
+            .map_err(|err| match err {
+                CryptoError::WrongSaltLength => AuthenticatorError::InvalidRelyingPartyInput,
+                e => e.into(),
+            })?
             .map(|(nhs, nal)| (Some(nhs), nal))
             .unwrap_or((None, None));
 
@@ -1848,6 +1852,22 @@ pub mod test {
                         calculated_hmac: Some(_),
                         ..
                     }))
+                );
+            }
+
+            #[test]
+            fn get_assertion_hmac_get_secret_bad_length_returns_invalid_input_error() {
+                let get_assertion = get_assertion_process_hmac_secret(
+                    true,
+                    vec![],
+                    Some(HmacGetSecretOrPrf::HmacGetSecret(HmacSecretExtension::new(
+                        vec![0x01; 31],
+                        None,
+                    ))),
+                );
+                assert_matches!(
+                    get_assertion,
+                    Err(AuthenticatorError::InvalidRelyingPartyInput)
                 );
             }
 
