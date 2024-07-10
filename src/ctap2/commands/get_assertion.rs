@@ -1749,19 +1749,24 @@ pub mod test {
 
         #[cfg(not(feature = "crypto_dummy"))]
         mod requires_crypto {
+            use sha2::{Digest, Sha256};
+
             use super::*;
             use crate::{
                 crypto::{CryptoError, PinUvAuthToken},
                 ctap2::{
+                    client_data::ClientDataHash,
                     commands::{
                         client_pin::PinUvAuthTokenPermission,
                         get_assertion::{
-                            CalculatedHmacSecretExtension, HmacGetSecretOrPrf, HmacSecretExtension,
+                            CalculatedHmacSecretExtension, GetAssertion, GetAssertionExtensions,
+                            HmacGetSecretOrPrf, HmacSecretExtension,
                         },
+                        PinUvAuthResult,
                     },
                     server::{
                         AuthenticationExtensionsPRFInputs, AuthenticationExtensionsPRFValues,
-                        PublicKeyCredentialDescriptor,
+                        PublicKeyCredentialDescriptor, RelyingParty,
                     },
                 },
                 errors::AuthenticatorError,
@@ -1777,6 +1782,254 @@ pub mod test {
                 )?;
 
                 Ok((shared_secret, fake_client_key, puat))
+            }
+
+            fn get_assertion_process_hmac_secret(
+                secret_available: bool,
+                allow_list: Vec<PublicKeyCredentialDescriptor>,
+                hmac_secret: Option<HmacGetSecretOrPrf>,
+            ) -> Result<GetAssertion, AuthenticatorError> {
+                let (shared_secret, _, puat) = make_test_secret(1)?;
+                GetAssertion::new(
+                    ClientDataHash([0x01; 32]),
+                    RelyingParty::from("example.com"),
+                    allow_list,
+                    Default::default(),
+                    GetAssertionExtensions {
+                        hmac_secret,
+                        ..Default::default()
+                    },
+                )
+                .process_hmac_secret_and_prf_extension(
+                    secret_available
+                        .then_some((&shared_secret, &PinUvAuthResult::SuccessGetPinToken(puat))),
+                )
+            }
+
+            #[test]
+            fn get_assertion_hmac_secret_and_prf_absent_uses_no_input() {
+                let get_assertion = get_assertion_process_hmac_secret(true, vec![], None).unwrap();
+                assert_matches!(get_assertion.extensions.hmac_secret, None);
+            }
+
+            #[test]
+            fn get_assertion_prf_no_input_uses_unmatched_input() {
+                let get_assertion = get_assertion_process_hmac_secret(
+                    true,
+                    vec![],
+                    Some(HmacGetSecretOrPrf::PrfUninitialized(
+                        AuthenticationExtensionsPRFInputs {
+                            eval: None,
+                            eval_by_credential: None,
+                        },
+                    )),
+                )
+                .unwrap();
+                assert_matches!(
+                    get_assertion.extensions.hmac_secret,
+                    Some(HmacGetSecretOrPrf::PrfUnmatched)
+                );
+            }
+
+            #[test]
+            fn get_assertion_hmac_get_secret_uses_hmac_get_secret_input() {
+                let get_assertion = get_assertion_process_hmac_secret(
+                    true,
+                    vec![],
+                    Some(HmacGetSecretOrPrf::HmacGetSecret(HmacSecretExtension::new(
+                        vec![0x01; 32],
+                        None,
+                    ))),
+                )
+                .unwrap();
+                assert_matches!(
+                    get_assertion.extensions.hmac_secret,
+                    Some(HmacGetSecretOrPrf::HmacGetSecret(HmacSecretExtension {
+                        calculated_hmac: Some(_),
+                        ..
+                    }))
+                );
+            }
+
+            #[test]
+            fn get_assertion_prf_eval_uses_eval_input() {
+                let get_assertion = get_assertion_process_hmac_secret(
+                    true,
+                    vec![],
+                    Some(HmacGetSecretOrPrf::PrfUninitialized(
+                        AuthenticationExtensionsPRFInputs {
+                            eval: Some(AuthenticationExtensionsPRFValues {
+                                first: vec![1, 2, 3, 4],
+                                second: None,
+                            }),
+                            eval_by_credential: None,
+                        },
+                    )),
+                )
+                .unwrap();
+                assert_matches!(
+                    get_assertion.extensions.hmac_secret,
+                    Some(HmacGetSecretOrPrf::Prf(HmacSecretExtension {
+                        salt1,
+                        ..
+                    })) if salt1 == Sha256::new_with_prefix(b"WebAuthn PRF")
+                    .chain_update([0x00].iter())
+                    .chain_update([1, 2, 3, 4].iter())
+                    .finalize()
+                    .to_vec()
+                );
+            }
+
+            #[test]
+            fn get_assertion_prf_eval_by_credential_unmatched_uses_unmatched_input() {
+                let get_assertion = get_assertion_process_hmac_secret(
+                    true,
+                    vec![PublicKeyCredentialDescriptor {
+                        id: vec![1, 2, 3, 4],
+                        transports: vec![],
+                    }],
+                    Some(HmacGetSecretOrPrf::PrfUninitialized(
+                        AuthenticationExtensionsPRFInputs {
+                            eval: None,
+                            eval_by_credential: Some(
+                                [(
+                                    vec![5, 6, 7, 8],
+                                    AuthenticationExtensionsPRFValues {
+                                        first: vec![9, 10, 11, 12],
+                                        second: None,
+                                    },
+                                )]
+                                .into(),
+                            ),
+                        },
+                    )),
+                )
+                .unwrap();
+                assert_matches!(
+                    get_assertion.extensions.hmac_secret,
+                    Some(HmacGetSecretOrPrf::PrfUnmatched)
+                );
+            }
+
+            #[test]
+            fn get_assertion_prf_eval_by_credential_matched_uses_eval_by_credential_input() {
+                let get_assertion = get_assertion_process_hmac_secret(
+                    true,
+                    vec![PublicKeyCredentialDescriptor {
+                        id: vec![1, 2, 3, 4],
+                        transports: vec![],
+                    }],
+                    Some(HmacGetSecretOrPrf::PrfUninitialized(
+                        AuthenticationExtensionsPRFInputs {
+                            eval: None,
+                            eval_by_credential: Some(
+                                [(
+                                    vec![1, 2, 3, 4],
+                                    AuthenticationExtensionsPRFValues {
+                                        first: vec![9, 10, 11, 12],
+                                        second: None,
+                                    },
+                                )]
+                                .into(),
+                            ),
+                        },
+                    )),
+                )
+                .unwrap();
+                assert_matches!(
+                    get_assertion.extensions.hmac_secret,
+                    Some(HmacGetSecretOrPrf::Prf(HmacSecretExtension {
+                        salt1,
+                        ..
+                    })) if salt1 == Sha256::new_with_prefix(b"WebAuthn PRF")
+                    .chain_update([0x00].iter())
+                    .chain_update([9, 10, 11, 12].iter())
+                    .finalize()
+                    .to_vec()
+                );
+            }
+
+            #[test]
+            fn get_assertion_prf_eval_and_eval_by_credential_unmatched_uses_eval_input() {
+                let get_assertion = get_assertion_process_hmac_secret(
+                    true,
+                    vec![PublicKeyCredentialDescriptor {
+                        id: vec![1, 2, 3, 4],
+                        transports: vec![],
+                    }],
+                    Some(HmacGetSecretOrPrf::PrfUninitialized(
+                        AuthenticationExtensionsPRFInputs {
+                            eval: Some(AuthenticationExtensionsPRFValues {
+                                first: vec![13, 14, 15, 16],
+                                second: None,
+                            }),
+                            eval_by_credential: Some(
+                                [(
+                                    vec![5, 6, 7, 8],
+                                    AuthenticationExtensionsPRFValues {
+                                        first: vec![9, 10, 11, 12],
+                                        second: None,
+                                    },
+                                )]
+                                .into(),
+                            ),
+                        },
+                    )),
+                )
+                .unwrap();
+                assert_matches!(
+                    get_assertion.extensions.hmac_secret,
+                    Some(HmacGetSecretOrPrf::Prf(HmacSecretExtension {
+                        salt1,
+                        ..
+                    })) if salt1 == Sha256::new_with_prefix(b"WebAuthn PRF")
+                    .chain_update([0x00].iter())
+                    .chain_update([13, 14, 15, 16].iter())
+                    .finalize()
+                    .to_vec()
+                );
+            }
+
+            #[test]
+            fn get_assertion_prf_eval_and_eval_by_credential_matched_uses_eval_by_credential_input()
+            {
+                let get_assertion = get_assertion_process_hmac_secret(
+                    true,
+                    vec![PublicKeyCredentialDescriptor {
+                        id: vec![1, 2, 3, 4],
+                        transports: vec![],
+                    }],
+                    Some(HmacGetSecretOrPrf::PrfUninitialized(
+                        AuthenticationExtensionsPRFInputs {
+                            eval: Some(AuthenticationExtensionsPRFValues {
+                                first: vec![13, 14, 15, 16],
+                                second: None,
+                            }),
+                            eval_by_credential: Some(
+                                [(
+                                    vec![1, 2, 3, 4],
+                                    AuthenticationExtensionsPRFValues {
+                                        first: vec![9, 10, 11, 12],
+                                        second: None,
+                                    },
+                                )]
+                                .into(),
+                            ),
+                        },
+                    )),
+                )
+                .unwrap();
+                assert_matches!(
+                    get_assertion.extensions.hmac_secret,
+                    Some(HmacGetSecretOrPrf::Prf(HmacSecretExtension {
+                        salt1,
+                        ..
+                    })) if salt1 == Sha256::new_with_prefix(b"WebAuthn PRF")
+                    .chain_update([0x00].iter())
+                    .chain_update([9, 10, 11, 12].iter())
+                    .finalize()
+                    .to_vec()
+                );
             }
 
             #[test]
