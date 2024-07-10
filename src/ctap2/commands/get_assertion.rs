@@ -1686,13 +1686,25 @@ pub mod test {
                 COSEAlgorithm, COSEEC2Key, COSEKey, COSEKeyType, Curve, PinUvAuthProtocol,
                 SharedSecret,
             },
-            ctap2::commands::{
-                get_assertion::{
-                    CalculatedHmacSecretExtension, HmacGetSecretOrPrf, HmacSecretExtension,
+            ctap2::{
+                attestation::{
+                    AuthenticatorData, AuthenticatorDataFlags, Extension, HmacSecretResponse,
                 },
-                CommandError,
+                client_data::ClientDataHash,
+                commands::{
+                    get_assertion::{
+                        CalculatedHmacSecretExtension, GetAssertion, GetAssertionExtensions,
+                        HmacGetSecretOrPrf, HmacSecretExtension,
+                    },
+                    CommandError,
+                },
+                server::{
+                    AuthenticationExtensionsClientOutputs, AuthenticationExtensionsPRFOutputs,
+                    AuthenticatorAttachment, RelyingParty, RpIdHash,
+                },
             },
-            AuthenticatorInfo,
+            transport::platform::device::Device,
+            Assertion, AuthenticatorInfo, FidoDevice, GetAssertionResult,
         };
 
         fn make_test_secret_without_puat(
@@ -2173,6 +2185,49 @@ pub mod test {
 
                 Ok(())
             }
+
+            #[test]
+            fn finalize_result_hmac_get_secret_input_with_secret_output_becomes_client_output() {
+                let result = finalize_result_with_hmac_secret_input_and_output(
+                    Some(HmacGetSecretOrPrf::HmacGetSecret(HmacSecretExtension::new(
+                        vec![],
+                        None,
+                    ))),
+                    Some(HmacSecretResponse::Secret(vec![0x01; ONE_OUTPUT_LEN_PP2])),
+                )
+                .expect("Failed to run test");
+                assert_matches!(
+                    result.extensions,
+                    AuthenticationExtensionsClientOutputs {
+                        hmac_get_secret: Some(_),
+                        prf: None,
+                        ..
+                    }
+                );
+            }
+
+            #[test]
+            fn finalize_result_prf_input_with_secret_output_becomes_results_output() {
+                let result = finalize_result_with_hmac_secret_input_and_output(
+                    Some(HmacGetSecretOrPrf::Prf(HmacSecretExtension::new(
+                        vec![],
+                        None,
+                    ))),
+                    Some(HmacSecretResponse::Secret(vec![0x01; ONE_OUTPUT_LEN_PP2])),
+                )
+                .expect("Failed to run test");
+                assert_matches!(
+                    result.extensions,
+                    AuthenticationExtensionsClientOutputs {
+                        hmac_get_secret: None,
+                        prf: Some(AuthenticationExtensionsPRFOutputs {
+                            enabled: None,
+                            results: Some(_),
+                        }),
+                        ..
+                    }
+                );
+            }
         }
 
         #[test]
@@ -2202,6 +2257,162 @@ pub mod test {
                 pin_protocol: None,
             });
             extension.calculate(&shared_secret, &[], None).unwrap();
+        }
+
+        fn finalize_result_with_hmac_secret_input_and_output(
+            hmac_secret_input: Option<HmacGetSecretOrPrf>,
+            hmac_secret_response: Option<HmacSecretResponse>,
+        ) -> Result<GetAssertionResult, CommandError> {
+            let get_assertion = GetAssertion::new(
+                ClientDataHash([0x01; 32]),
+                RelyingParty::from("example.com"),
+                vec![],
+                Default::default(),
+                GetAssertionExtensions {
+                    hmac_secret: hmac_secret_input,
+                    ..Default::default()
+                },
+            );
+            let mut result = GetAssertionResult {
+                assertion: Assertion {
+                    credentials: None,
+                    auth_data: AuthenticatorData {
+                        rp_id_hash: RpIdHash([0x01; 32]),
+                        flags: AuthenticatorDataFlags::empty(),
+                        counter: 0,
+                        credential_data: None,
+                        extensions: Extension {
+                            cred_protect: None,
+                            hmac_secret: hmac_secret_response,
+                            min_pin_length: None,
+                        },
+                    },
+                    signature: vec![],
+                    user: None,
+                },
+                attachment: AuthenticatorAttachment::Unknown,
+                extensions: AuthenticationExtensionsClientOutputs::default(),
+            };
+
+            let mut dev = Device::new_skipping_serialization("commands/get_assertion")
+                .expect("Failed to create mock Device");
+            let (shared_secret, _) = make_test_secret_without_puat(2)?;
+            dev.set_shared_secret(shared_secret);
+            get_assertion.finalize_result(&dev, &mut result);
+            Ok(result)
+        }
+
+        /// Encrypted salt output for pin protocol 2: iv || ct
+        const ONE_OUTPUT_LEN_PP2: usize = 16 + 32;
+
+        #[test]
+        fn finalize_result_no_input_with_no_output_becomes_no_client_output() {
+            let result = finalize_result_with_hmac_secret_input_and_output(None, None)
+                .expect("Failed to run test");
+            assert_matches!(result.extensions.hmac_get_secret, None);
+        }
+
+        #[test]
+        fn finalize_result_no_input_with_secret_output_becomes_no_client_output() {
+            let result = finalize_result_with_hmac_secret_input_and_output(
+                None,
+                Some(HmacSecretResponse::Secret(vec![0x01; ONE_OUTPUT_LEN_PP2])),
+            )
+            .expect("Failed to run test");
+            assert_matches!(
+                result.extensions,
+                AuthenticationExtensionsClientOutputs {
+                    hmac_get_secret: None,
+                    prf: None,
+                    ..
+                }
+            );
+        }
+
+        #[test]
+        fn finalize_result_hmac_get_secret_input_with_no_output_becomes_no_client_output() {
+            let result = finalize_result_with_hmac_secret_input_and_output(
+                Some(HmacGetSecretOrPrf::HmacGetSecret(HmacSecretExtension::new(
+                    vec![],
+                    None,
+                ))),
+                None,
+            )
+            .expect("Failed to run test");
+            assert_matches!(
+                result.extensions,
+                AuthenticationExtensionsClientOutputs {
+                    hmac_get_secret: None,
+                    prf: None,
+                    ..
+                }
+            );
+        }
+
+        #[test]
+        fn finalize_result_hmac_get_secret_input_with_confirmed_output_becomes_no_client_output() {
+            let result = finalize_result_with_hmac_secret_input_and_output(
+                Some(HmacGetSecretOrPrf::HmacGetSecret(HmacSecretExtension::new(
+                    vec![],
+                    None,
+                ))),
+                Some(HmacSecretResponse::Confirmed(true)),
+            )
+            .expect("Failed to run test");
+            assert_matches!(
+                result.extensions,
+                AuthenticationExtensionsClientOutputs {
+                    hmac_get_secret: None,
+                    prf: None,
+                    ..
+                }
+            );
+        }
+
+        #[test]
+        fn finalize_result_prf_input_with_no_output_becomes_empty_client_output() {
+            let result = finalize_result_with_hmac_secret_input_and_output(
+                Some(HmacGetSecretOrPrf::Prf(HmacSecretExtension::new(
+                    vec![],
+                    None,
+                ))),
+                None,
+            )
+            .expect("Failed to run test");
+            assert_matches!(
+                result.extensions,
+                AuthenticationExtensionsClientOutputs {
+                    hmac_get_secret: None,
+                    prf: Some(AuthenticationExtensionsPRFOutputs {
+                        enabled: None,
+                        results: None,
+                    }),
+                    ..
+                }
+            );
+        }
+
+        #[test]
+        fn finalize_result_prf_input_with_confirmed_output_becomes_empty_client_output() {
+            let result = finalize_result_with_hmac_secret_input_and_output(
+                Some(HmacGetSecretOrPrf::Prf(HmacSecretExtension::new(
+                    vec![],
+                    None,
+                ))),
+                Some(HmacSecretResponse::Confirmed(true)),
+            )
+            .expect("Failed to run test");
+            assert_matches!(
+                result.extensions,
+                AuthenticationExtensionsClientOutputs {
+                    hmac_get_secret: None,
+                    prf: Some(AuthenticationExtensionsPRFOutputs {
+                        enabled: None,
+                        results: None,
+                    }),
+                    ..
+                }
+            );
         }
     }
 }
