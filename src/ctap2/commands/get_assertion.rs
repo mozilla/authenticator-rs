@@ -312,13 +312,22 @@ impl GetAssertion {
             .hmac_secret
             .take()
             .and_then(|hmac_get_secret_or_prf| {
-                shared_secret.map(|(secret, pin_uv_auth_result)| {
-                    hmac_get_secret_or_prf.calculate(
+                if let Some((secret, pin_uv_auth_result)) = shared_secret {
+                    Some(hmac_get_secret_or_prf.calculate(
                         secret,
                         &self.allow_list,
                         pin_uv_auth_result.get_pin_uv_auth_token().as_ref(),
-                    )
-                })
+                    ))
+                } else {
+                    match hmac_get_secret_or_prf {
+                        HmacGetSecretOrPrf::HmacGetSecret(_) => None,
+                        HmacGetSecretOrPrf::PrfUninitialized(_)
+                        | HmacGetSecretOrPrf::PrfUnmatched
+                        | HmacGetSecretOrPrf::Prf(_) => {
+                            Some(Ok((HmacGetSecretOrPrf::PrfUnmatched, None)))
+                        }
+                    }
+                }
             })
             .transpose()
             .map_err(|err| match err {
@@ -1824,6 +1833,28 @@ pub mod test {
                     Some(HmacGetSecretOrPrf::PrfUninitialized(
                         AuthenticationExtensionsPRFInputs {
                             eval: None,
+                            eval_by_credential: None,
+                        },
+                    )),
+                )
+                .unwrap();
+                assert_matches!(
+                    get_assertion.extensions.hmac_secret,
+                    Some(HmacGetSecretOrPrf::PrfUnmatched)
+                );
+            }
+
+            #[test]
+            fn get_assertion_prf_no_secret_uses_unmatched_input() {
+                let get_assertion = get_assertion_process_hmac_secret(
+                    false,
+                    vec![],
+                    Some(HmacGetSecretOrPrf::PrfUninitialized(
+                        AuthenticationExtensionsPRFInputs {
+                            eval: Some(AuthenticationExtensionsPRFValues {
+                                first: vec![1, 2, 3, 4],
+                                second: None,
+                            }),
                             eval_by_credential: None,
                         },
                     )),
