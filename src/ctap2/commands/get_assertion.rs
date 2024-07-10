@@ -308,26 +308,30 @@ impl GetAssertion {
         mut self,
         shared_secret: Option<(&SharedSecret, &PinUvAuthResult)>,
     ) -> Result<Self, AuthenticatorError> {
-        self.extensions.hmac_secret = self
+        let (new_hmac_secret, new_allow_list) = self
             .extensions
             .hmac_secret
             .take()
-            .map(|hmac_get_secret_or_prf| {
-                if let Some((secret, pin_uv_auth_result)) = shared_secret {
-                    let (extension, selected_credential) = hmac_get_secret_or_prf.calculate(
+            .and_then(|hmac_get_secret_or_prf| {
+                shared_secret.map(|(secret, pin_uv_auth_result)| {
+                    hmac_get_secret_or_prf.calculate(
                         secret,
                         &self.allow_list,
                         pin_uv_auth_result.get_pin_uv_auth_token().as_ref(),
-                    )?;
-                    if let Some(selected_credential) = selected_credential {
-                        self.allow_list = vec![selected_credential.clone()];
-                    }
-                    Ok::<_, AuthenticatorError>(extension)
-                } else {
-                    Ok(hmac_get_secret_or_prf)
-                }
+                    )
+                })
             })
-            .transpose()?;
+            .transpose()?
+            .map(|(nhs, nal)| (Some(nhs), nal))
+            .unwrap_or((None, None));
+
+        (self.extensions.hmac_secret, self.allow_list) = (
+            new_hmac_secret,
+            new_allow_list
+                .map(|selected_credential| vec![selected_credential.clone()])
+                .unwrap_or(self.allow_list),
+        );
+
         Ok(self)
     }
 
