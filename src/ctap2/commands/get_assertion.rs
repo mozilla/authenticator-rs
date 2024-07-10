@@ -319,6 +319,10 @@ impl GetAssertion {
                         pin_uv_auth_result.get_pin_uv_auth_token().as_ref(),
                     ))
                 } else {
+                    debug!(
+                        "Shared secret not available - will not send hmac-secret extension input: {:?}",
+                        hmac_get_secret_or_prf
+                    );
                     match hmac_get_secret_or_prf {
                         HmacGetSecretOrPrf::HmacGetSecret(_) => None,
                         HmacGetSecretOrPrf::PrfUninitialized(_)
