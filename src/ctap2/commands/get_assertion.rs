@@ -822,6 +822,7 @@ pub mod test {
     use crate::ctap2::client_data::{
         Challenge, ClientDataHash, CollectedClientData, TokenBinding, WebauthnType,
     };
+    use crate::ctap2::commands::client_pin::PinUvAuthTokenPermission;
     use crate::ctap2::commands::get_assertion::{
         CalculatedHmacSecretExtension, GetAssertionExtensions, HmacGetSecretOrPrf,
         HmacSecretExtension,
@@ -1073,6 +1074,61 @@ pub mod test {
                 32, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
                 7, 7, 7, 7, 7, 7, 3, 80, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 5, 161,
                 98, 117, 112, 245, 6, 64, 7, 1
+            ]
+        );
+    }
+
+    #[test]
+    fn test_serialize_get_assertion_ctap2_pin_protocol_2() {
+        let assertion = GetAssertion {
+            client_data_hash: ClientDataHash([0; 32]),
+            rp: RelyingParty::from("example.com"),
+            allow_list: vec![],
+            extensions: GetAssertionExtensions {
+                app_id: None,
+                hmac_secret: Some(HmacGetSecretOrPrf::HmacGetSecret(
+                    HmacSecretExtension::new_test(
+                        vec![32; 32],
+                        None,
+                        CalculatedHmacSecretExtension {
+                            public_key: COSEKey {
+                                alg: COSEAlgorithm::ECDH_ES_HKDF256,
+                                key: COSEKeyType::EC2(COSEEC2Key {
+                                    curve: Curve::SECP256R1,
+                                    x: vec![],
+                                    y: vec![],
+                                }),
+                            },
+                            salt_enc: vec![7; 32],
+                            salt_auth: vec![8; 16],
+                        },
+                        Some(2),
+                    ),
+                )),
+            },
+            options: GetAssertionOptions {
+                user_presence: None,
+                user_verification: None,
+            },
+            pin_uv_auth_param: Some(PinUvAuthParam::create_test(
+                2,
+                vec![9; 4],
+                PinUvAuthTokenPermission::GetAssertion,
+            )),
+        };
+        let req_serialized = assertion
+            .wire_format()
+            .expect("Failed to serialize GetAssertion request");
+        assert_eq!(
+            req_serialized,
+            [
+                // Value copied from test failure output as regression test snapshot
+                165, 1, 107, 101, 120, 97, 109, 112, 108, 101, 46, 99, 111, 109, 2, 88, 32, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 4, 161, 107, 104, 109, 97, 99, 45, 115, 101, 99, 114, 101, 116, 164, 1, 165, 1,
+                2, 3, 56, 24, 32, 1, 33, 64, 34, 64, 2, 88, 32, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+                7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 3, 80, 8, 8, 8, 8, 8,
+                8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 4, 2, 6, 68, 9, 9, 9, 9, 7, 2
             ]
         );
     }
