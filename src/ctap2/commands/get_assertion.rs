@@ -819,7 +819,9 @@ pub mod test {
     };
     use crate::crypto::{COSEAlgorithm, COSEEC2Key, COSEKey, COSEKeyType, Curve, PinUvAuthParam};
     use crate::ctap2::attestation::{AAGuid, AuthenticatorData, AuthenticatorDataFlags};
-    use crate::ctap2::client_data::{Challenge, CollectedClientData, TokenBinding, WebauthnType};
+    use crate::ctap2::client_data::{
+        Challenge, ClientDataHash, CollectedClientData, TokenBinding, WebauthnType,
+    };
     use crate::ctap2::commands::get_assertion::{
         CalculatedHmacSecretExtension, GetAssertionExtensions, HmacGetSecretOrPrf,
         HmacSecretExtension,
@@ -833,8 +835,8 @@ pub mod test {
         do_credential_list_filtering_ctap1, do_credential_list_filtering_ctap2,
     };
     use crate::ctap2::server::{
-        AuthenticatorAttachment, PublicKeyCredentialDescriptor, PublicKeyCredentialUserEntity,
-        RelyingParty, RpIdHash, Transport,
+        AuthenticationExtensionsPRFInputs, AuthenticatorAttachment, PublicKeyCredentialDescriptor,
+        PublicKeyCredentialUserEntity, RelyingParty, RpIdHash, Transport,
     };
     use crate::transport::device_selector::Device;
     use crate::transport::hid::HIDDevice;
@@ -1071,6 +1073,65 @@ pub mod test {
                 32, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
                 7, 7, 7, 7, 7, 7, 3, 80, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 5, 161,
                 98, 117, 112, 245, 6, 64, 7, 1
+            ]
+        );
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "PrfUninitialized must be replaced with Prf or PrfUnmatched before serializing"
+    )]
+    fn test_serialize_prf_uninitialized() {
+        let assertion = GetAssertion {
+            client_data_hash: ClientDataHash([0; 32]),
+            rp: RelyingParty::from("example.com"),
+            allow_list: vec![],
+            extensions: GetAssertionExtensions {
+                app_id: None,
+                hmac_secret: Some(HmacGetSecretOrPrf::PrfUninitialized(
+                    AuthenticationExtensionsPRFInputs {
+                        eval: None,
+                        eval_by_credential: None,
+                    },
+                )),
+            },
+            options: GetAssertionOptions {
+                user_presence: None,
+                user_verification: None,
+            },
+            pin_uv_auth_param: None,
+        };
+        assertion
+            .wire_format()
+            .expect("Failed to serialize GetAssertion request");
+    }
+
+    #[test]
+    fn test_serialize_prf_unmatched() {
+        let assertion = GetAssertion {
+            client_data_hash: ClientDataHash([0; 32]),
+            rp: RelyingParty::from("example.com"),
+            allow_list: vec![],
+            extensions: GetAssertionExtensions {
+                app_id: None,
+                hmac_secret: Some(HmacGetSecretOrPrf::PrfUnmatched),
+            },
+            options: GetAssertionOptions {
+                user_presence: None,
+                user_verification: None,
+            },
+            pin_uv_auth_param: None,
+        };
+        let req_serialized = assertion
+            .wire_format()
+            .expect("Failed to serialize GetAssertion request");
+        assert_eq!(
+            req_serialized,
+            [
+                // Value copied from test failure output as regression test snapshot
+                163, 1, 107, 101, 120, 97, 109, 112, 108, 101, 46, 99, 111, 109, 2, 88, 32, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 4, 160
             ]
         );
     }
