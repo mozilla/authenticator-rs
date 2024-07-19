@@ -84,10 +84,10 @@ pub fn decode_hex(s: &str) -> Vec<u8> {
 /// Arguments:
 /// - An expression of type [serde::Serializer]. This expression will be bound
 ///   to a local variable and thus evaluated only once.
-/// - 0 to 10 (inclusive) more entries of the form `$key => $value,`, where
-///   `$key` is any expression and `$value` is an expression of type
-///   [Option<T>]. The entry will be included in the map if and only if the
-///   `$value` is [Some]. Each key and value expression is evaluated only once.
+/// - 0 to 10 (inclusive) entries of the form `$key => $value,`, where `$key` is
+///   any expression and `$value` is an expression of type [Option<T>]. The
+///   entry will be included in the map if and only if the `$value` is [Some].
+///   Each key and value expression is evaluated only once.
 /// - The 11th entry and forward instead needs to take the form `$ident: $key =>
 ///   $value,`, where `$ident` is an arbitrary identifier. These `$ident`s are
 ///   needed in order to bind each `$value` as a local variable, in order to
