@@ -8,7 +8,6 @@ use crate::errors::AuthenticatorError;
 use crate::{ctap2::commands::CommandError, transport::errors::HIDError};
 use serde::{
     de::{Error as SerdeError, MapAccess, Unexpected, Visitor},
-    ser::SerializeMap,
     Deserialize, Deserializer, Serialize, Serializer,
 };
 use serde_bytes::ByteBuf;
@@ -394,6 +393,24 @@ impl PinUvAuthParam {
             pin_auth: vec![],
             pin_protocol,
             permissions: PinUvAuthTokenPermission::empty(),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn create_test(
+        pin_protocol: u64,
+        pin_auth: Vec<u8>,
+        permissions: PinUvAuthTokenPermission,
+    ) -> Self {
+        let pin_protocol = PinUvAuthProtocol::try_from(&AuthenticatorInfo {
+            pin_protocols: Some(vec![pin_protocol]),
+            ..Default::default()
+        })
+        .expect("Failed to create PIN protocol");
+        Self {
+            pin_auth,
+            pin_protocol,
+            permissions,
         }
     }
 }
@@ -1039,35 +1056,36 @@ impl Serialize for COSEKey {
     where
         S: Serializer,
     {
-        let map_len = match &self.key {
-            COSEKeyType::OKP(_) => 4,
-            COSEKeyType::EC2(_) => 5,
-            COSEKeyType::RSA(_) => 4,
-        };
-        let mut map = serializer.serialize_map(Some(map_len))?;
         match &self.key {
             COSEKeyType::OKP(key) => {
-                map.serialize_entry(&1, &COSEKeyTypeId::OKP)?;
-                map.serialize_entry(&3, &self.alg)?;
-                map.serialize_entry(&-1, &key.curve)?;
-                map.serialize_entry(&-2, &serde_bytes::Bytes::new(&key.x))?;
+                serialize_map!(
+                    serializer,
+                    &1 => &COSEKeyTypeId::OKP,
+                    &3 => &self.alg,
+                    &-1 => &key.curve,
+                    &-2 => &serde_bytes::Bytes::new(&key.x),
+                )
             }
             COSEKeyType::EC2(key) => {
-                map.serialize_entry(&1, &COSEKeyTypeId::EC2)?;
-                map.serialize_entry(&3, &self.alg)?;
-                map.serialize_entry(&-1, &key.curve)?;
-                map.serialize_entry(&-2, &serde_bytes::Bytes::new(&key.x))?;
-                map.serialize_entry(&-3, &serde_bytes::Bytes::new(&key.y))?;
+                serialize_map!(
+                    serializer,
+                    &1 => &COSEKeyTypeId::EC2,
+                    &3 => &self.alg,
+                    &-1 => &key.curve,
+                    &-2 => &serde_bytes::Bytes::new(&key.x),
+                    &-3 => &serde_bytes::Bytes::new(&key.y),
+                )
             }
             COSEKeyType::RSA(key) => {
-                map.serialize_entry(&1, &COSEKeyTypeId::RSA)?;
-                map.serialize_entry(&3, &self.alg)?;
-                map.serialize_entry(&-1, &serde_bytes::Bytes::new(&key.n))?;
-                map.serialize_entry(&-2, &serde_bytes::Bytes::new(&key.e))?;
+                serialize_map!(
+                    serializer,
+                    &1 => &COSEKeyTypeId::RSA,
+                    &3 => &self.alg,
+                    &-1 => &serde_bytes::Bytes::new(&key.n),
+                    &-2 => &serde_bytes::Bytes::new(&key.e),
+                )
             }
         }
-
-        map.end()
     }
 }
 

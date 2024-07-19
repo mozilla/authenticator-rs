@@ -25,7 +25,7 @@ use crate::transport::{FidoDevice, VirtualFidoDevice};
 use crate::u2ftypes::CTAP1RequestAPDU;
 use serde::{
     de::{Error as DesError, MapAccess, Visitor},
-    ser::{Error as SerError, SerializeMap},
+    ser::Error as SerError,
     Deserialize, Deserializer, Serialize, Serializer,
 };
 use serde_bytes::ByteBuf;
@@ -171,6 +171,21 @@ impl HmacSecretExtension {
         }
     }
 
+    #[cfg(test)]
+    pub fn new_test(
+        salt1: Vec<u8>,
+        salt2: Option<Vec<u8>>,
+        calculated_hmac: CalculatedHmacSecretExtension,
+        pin_protocol: Option<u64>,
+    ) -> Self {
+        HmacSecretExtension {
+            salt1,
+            salt2,
+            calculated_hmac: Some(calculated_hmac),
+            pin_protocol,
+        }
+    }
+
     /// Calculate inputs for the `hmac-secret` extension.
     /// See "authenticatorGetAssertion additional behaviors"
     /// in https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-20210615.html#sctn-hmac-secret-extension
@@ -214,15 +229,13 @@ impl Serialize for HmacSecretExtension {
         S: Serializer,
     {
         if let Some(calc) = &self.calculated_hmac {
-            let mut map =
-                serializer.serialize_map(Some(3 + self.pin_protocol.map(|_| 1).unwrap_or(0)))?;
-            map.serialize_entry(&1, &calc.public_key)?;
-            map.serialize_entry(&2, serde_bytes::Bytes::new(&calc.salt_enc))?;
-            map.serialize_entry(&3, serde_bytes::Bytes::new(&calc.salt_auth))?;
-            if let Some(pin_protocol) = &self.pin_protocol {
-                map.serialize_entry(&4, pin_protocol)?;
+            serialize_map_optional! {
+                serializer,
+                &1 => Some(&calc.public_key),
+                &2 => Some(serde_bytes::Bytes::new(&calc.salt_enc)),
+                &3 => Some(serde_bytes::Bytes::new(&calc.salt_auth)),
+                &4 => &self.pin_protocol,
             }
-            map.end()
         } else {
             Err(SerError::custom(
                 "hmac secret has not been calculated before being serialized",
@@ -471,39 +484,16 @@ impl Serialize for GetAssertion {
     where
         S: Serializer,
     {
-        // Need to define how many elements are going to be in the map
-        // beforehand
-        let mut map_len = 2;
-        if !self.allow_list.is_empty() {
-            map_len += 1;
+        serialize_map_optional! {
+            serializer,
+            &1 => Some(&self.rp.id),
+            &2 => Some(&self.client_data_hash),
+            &3 => (!&self.allow_list.is_empty()).then_some(&self.allow_list),
+            &4 => self.extensions.has_content().then_some(&self.extensions),
+            &5 => self.options.has_some().then_some(&self.options),
+            &6 => &self.pin_uv_auth_param,
+            &7 => self.pin_uv_auth_param.as_ref().map(|p| p.pin_protocol.id()),
         }
-        if self.extensions.has_content() {
-            map_len += 1;
-        }
-        if self.options.has_some() {
-            map_len += 1;
-        }
-        if self.pin_uv_auth_param.is_some() {
-            map_len += 2;
-        }
-
-        let mut map = serializer.serialize_map(Some(map_len))?;
-        map.serialize_entry(&1, &self.rp.id)?;
-        map.serialize_entry(&2, &self.client_data_hash)?;
-        if !self.allow_list.is_empty() {
-            map.serialize_entry(&3, &self.allow_list)?;
-        }
-        if self.extensions.has_content() {
-            map.serialize_entry(&4, &self.extensions)?;
-        }
-        if self.options.has_some() {
-            map.serialize_entry(&5, &self.options)?;
-        }
-        if let Some(pin_uv_auth_param) = &self.pin_uv_auth_param {
-            map.serialize_entry(&6, &pin_uv_auth_param)?;
-            map.serialize_entry(&7, &pin_uv_auth_param.pin_protocol.id())?;
-        }
-        map.end()
     }
 }
 
@@ -818,6 +808,7 @@ impl<'de> Deserialize<'de> for GetAssertionResponse {
 
 #[cfg(test)]
 pub mod test {
+
     use super::{
         Assertion, CommandError, GetAssertion, GetAssertionOptions, GetAssertionResult, HIDError,
         StatusCode,
@@ -826,13 +817,18 @@ pub mod test {
         Capability, HIDCmd, SW_CONDITIONS_NOT_SATISFIED, SW_NO_ERROR, U2F_CHECK_IS_REGISTERED,
         U2F_REQUEST_USER_PRESENCE,
     };
+    use crate::crypto::{COSEAlgorithm, COSEEC2Key, COSEKey, COSEKeyType, Curve, PinUvAuthParam};
     use crate::ctap2::attestation::{AAGuid, AuthenticatorData, AuthenticatorDataFlags};
     use crate::ctap2::client_data::{Challenge, CollectedClientData, TokenBinding, WebauthnType};
+    use crate::ctap2::commands::get_assertion::{
+        CalculatedHmacSecretExtension, GetAssertionExtensions, HmacGetSecretOrPrf,
+        HmacSecretExtension,
+    };
     use crate::ctap2::commands::get_info::tests::AAGUID_RAW;
     use crate::ctap2::commands::get_info::{
         AuthenticatorInfo, AuthenticatorOptions, AuthenticatorVersion,
     };
-    use crate::ctap2::commands::RequestCtap1;
+    use crate::ctap2::commands::{RequestCtap1, RequestCtap2};
     use crate::ctap2::preflight::{
         do_credential_list_filtering_ctap1, do_credential_list_filtering_ctap2,
     };
@@ -1004,6 +1000,79 @@ pub mod test {
         }];
         let response = device.send_cbor(&assertion).unwrap();
         assert_eq!(response, expected);
+    }
+
+    #[test]
+    fn test_serialize_get_assertion_ctap2() {
+        let client_data = CollectedClientData {
+            webauthn_type: WebauthnType::Create,
+            challenge: Challenge::from(vec![0x00, 0x01, 0x02, 0x03]),
+            origin: String::from("example.com"),
+            cross_origin: false,
+            token_binding: Some(TokenBinding::Present(String::from("AAECAw"))),
+        };
+        let assertion = GetAssertion {
+            client_data_hash: client_data.hash().expect("failed to serialize client data"),
+            rp: RelyingParty::from("example.com"),
+            allow_list: vec![PublicKeyCredentialDescriptor {
+                id: vec![
+                    0x3E, 0xBD, 0x89, 0xBF, 0x77, 0xEC, 0x50, 0x97, 0x55, 0xEE, 0x9C, 0x26, 0x35,
+                    0xEF, 0xAA, 0xAC, 0x7B, 0x2B, 0x9C, 0x5C, 0xEF, 0x17, 0x36, 0xC3, 0x71, 0x7D,
+                    0xA4, 0x85, 0x34, 0xC8, 0xC6, 0xB6, 0x54, 0xD7, 0xFF, 0x94, 0x5F, 0x50, 0xB5,
+                    0xCC, 0x4E, 0x78, 0x05, 0x5B, 0xDD, 0x39, 0x6B, 0x64, 0xF7, 0x8D, 0xA2, 0xC5,
+                    0xF9, 0x62, 0x00, 0xCC, 0xD4, 0x15, 0xCD, 0x08, 0xFE, 0x42, 0x00, 0x38,
+                ],
+                transports: vec![Transport::USB],
+            }],
+            extensions: GetAssertionExtensions {
+                app_id: Some("https://example.com".to_string()),
+                hmac_secret: Some(HmacGetSecretOrPrf::HmacGetSecret(
+                    HmacSecretExtension::new_test(
+                        vec![32; 32],
+                        None,
+                        CalculatedHmacSecretExtension {
+                            public_key: COSEKey {
+                                alg: COSEAlgorithm::ECDH_ES_HKDF256,
+                                key: COSEKeyType::EC2(COSEEC2Key {
+                                    curve: Curve::SECP256R1,
+                                    x: vec![],
+                                    y: vec![],
+                                }),
+                            },
+                            salt_enc: vec![7; 32],
+                            salt_auth: vec![8; 16],
+                        },
+                        None,
+                    ),
+                )),
+            },
+            options: GetAssertionOptions {
+                user_presence: Some(true),
+                user_verification: None,
+            },
+            pin_uv_auth_param: Some(PinUvAuthParam::create_empty()),
+        };
+        let req_serialized = assertion
+            .wire_format()
+            .expect("Failed to serialize GetAssertion request");
+        assert_eq!(
+            req_serialized,
+            [
+                // Value copied from test failure output as regression test snapshot
+                167, 1, 107, 101, 120, 97, 109, 112, 108, 101, 46, 99, 111, 109, 2, 88, 32, 117, 53,
+                53, 125, 73, 110, 51, 200, 24, 127, 234, 141, 17, 50, 100, 170, 164, 82, 62, 19,
+                64, 20, 159, 190, 0, 63, 16, 135, 84, 195, 45, 128, 3, 129, 162, 98, 105, 100, 88,
+                64, 62, 189, 137, 191, 119, 236, 80, 151, 85, 238, 156, 38, 53, 239, 170, 172, 123,
+                43, 156, 92, 239, 23, 54, 195, 113, 125, 164, 133, 52, 200, 198, 182, 84, 215, 255,
+                148, 95, 80, 181, 204, 78, 120, 5, 91, 221, 57, 107, 100, 247, 141, 162, 197, 249,
+                98, 0, 204, 212, 21, 205, 8, 254, 66, 0, 56, 100, 116, 121, 112, 101, 106, 112,
+                117, 98, 108, 105, 99, 45, 107, 101, 121, 4, 161, 107, 104, 109, 97, 99, 45, 115,
+                101, 99, 114, 101, 116, 163, 1, 165, 1, 2, 3, 56, 24, 32, 1, 33, 64, 34, 64, 2, 88,
+                32, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+                7, 7, 7, 7, 7, 7, 3, 80, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 5, 161,
+                98, 117, 112, 245, 6, 64, 7, 1
+            ]
+        );
     }
 
     fn fill_device_ctap1(device: &mut Device, cid: [u8; 4], flags: u8, answer_status: [u8; 2]) {

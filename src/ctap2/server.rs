@@ -5,7 +5,6 @@ use base64::Engine;
 use serde::de::MapAccess;
 use serde::{
     de::{Error as SerdeError, Unexpected, Visitor},
-    ser::SerializeMap,
     Deserialize, Deserializer, Serialize, Serializer,
 };
 use serde_bytes::{ByteBuf, Bytes};
@@ -94,10 +93,11 @@ impl Serialize for PublicKeyCredentialParameters {
     where
         S: Serializer,
     {
-        let mut map = serializer.serialize_map(Some(2))?;
-        map.serialize_entry("alg", &self.alg)?;
-        map.serialize_entry("type", "public-key")?;
-        map.end()
+        serialize_map!(
+            serializer,
+            "alg" => &self.alg,
+            "type" => "public-key",
+        )
     }
 }
 
@@ -199,15 +199,16 @@ impl Serialize for PublicKeyCredentialDescriptor {
     where
         S: Serializer,
     {
-        // TODO(MS): Transports is OPTIONAL, but some older tokens don't understand it
-        //           and return a CBOR-Parsing error. It is only a hint for the token,
-        //           so we'll leave it out for the moment
-        let mut map = serializer.serialize_map(Some(2))?;
-        // let mut map = serializer.serialize_map(Some(3))?;
-        map.serialize_entry("id", Bytes::new(&self.id))?;
-        map.serialize_entry("type", "public-key")?;
-        // map.serialize_entry("transports", &self.transports)?;
-        map.end()
+        serialize_map!(
+            serializer,
+            "id" => Bytes::new(&self.id),
+            "type" => "public-key",
+
+            // TODO(MS): Transports is OPTIONAL, but some older tokens don't understand it
+            //           and return a CBOR-Parsing error. It is only a hint for the token,
+            //           so we'll leave it out for the moment
+            // "transports" => &self.transports,
+        )
     }
 }
 
