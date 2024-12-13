@@ -143,6 +143,7 @@ pub(crate) trait PinUvAuthCommand: RequestCtap2 {
     fn get_pin_uv_auth_param(&self) -> Option<&PinUvAuthParam>;
     fn set_uv_option(&mut self, uv: Option<bool>);
     fn get_rp_id(&self) -> Option<&String>;
+    fn hmac_requested(&self) -> bool;
     fn can_skip_user_verification(
         &mut self,
         info: &AuthenticatorInfo,

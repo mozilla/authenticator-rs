@@ -421,6 +421,10 @@ impl PinUvAuthCommand for CredentialManagement {
     fn get_pin_uv_auth_param(&self) -> Option<&PinUvAuthParam> {
         self.pin_uv_auth_param.as_ref()
     }
+
+    fn hmac_requested(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]

@@ -224,6 +224,10 @@ impl PinUvAuthCommand for BioEnrollment {
     fn get_pin_uv_auth_param(&self) -> Option<&PinUvAuthParam> {
         self.pin_uv_auth_param.as_ref()
     }
+
+    fn hmac_requested(&self) -> bool {
+        false
+    }
 }
 
 impl RequestCtap2 for BioEnrollment {

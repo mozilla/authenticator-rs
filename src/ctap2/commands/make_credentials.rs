@@ -468,6 +468,14 @@ impl PinUvAuthCommand for MakeCredentials {
     fn get_pin_uv_auth_param(&self) -> Option<&PinUvAuthParam> {
         self.pin_uv_auth_param.as_ref()
     }
+
+    fn hmac_requested(&self) -> bool {
+        !(self.extensions.hmac_secret.is_none()
+            || matches!(
+                self.extensions.hmac_secret,
+                Some(HmacCreateSecretOrPrf::HmacCreateSecret(false))
+            ))
+    }
 }
 
 impl Serialize for MakeCredentials {
