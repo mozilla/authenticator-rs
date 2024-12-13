@@ -288,9 +288,9 @@ fn get_pin_uv_auth_param<Dev: FidoDevice, T: PinUvAuthCommand + RequestCtap2>(
             // If the device supports internal user-verification (e.g. fingerprints),
             // skip PIN-stuff
 
-            // We may need the shared secret for HMAC-extension, so we
+            // We need the shared secret for HMAC-extension, if it was requested, so we
             // have to establish one
-            if info.supports_hmac_secret() {
+            if cmd.hmac_requested() && info.supports_hmac_secret() {
                 let _shared_secret = dev.establish_shared_secret(alive)?;
             }
             // CTAP 2.1, Section 6.1.1, Step 1.1.2.1.2.

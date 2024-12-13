@@ -188,6 +188,10 @@ impl PinUvAuthCommand for AuthenticatorConfig {
     fn get_rp_id(&self) -> Option<&String> {
         None
     }
+
+    fn hmac_requested(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]
