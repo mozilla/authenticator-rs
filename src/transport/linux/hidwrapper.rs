@@ -52,3 +52,6 @@ include!("ioctl_riscv64.rs");
 
 #[cfg(all(target_arch = "loongarch64", target_endian = "little"))]
 include!("ioctl_loongarch64.rs");
+
+#[cfg(all(target_arch = "sparc64", target_endian = "big"))]
+include!("ioctl_sparc64.rs");
