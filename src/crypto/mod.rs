@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use crate::ctap2::commands::client_pin::PinUvAuthTokenPermission;
-use crate::ctap2::commands::get_info::AuthenticatorInfo;
+use crate::ctap2::commands::get_info::{AuthenticatorInfo, AuthenticatorVersion};
 use crate::errors::AuthenticatorError;
 use crate::{ctap2::commands::CommandError, transport::errors::HIDError};
 use serde::{
@@ -157,14 +157,9 @@ impl TryFrom<&AuthenticatorInfo> for PinUvAuthProtocol {
                 .ok_or(CommandError::UnsupportedPinProtocol)
         } else {
             match info.max_supported_version() {
-                crate::ctap2::commands::get_info::AuthenticatorVersion::U2F_V2 => {
-                    Err(CommandError::UnsupportedPinProtocol)
-                }
-                crate::ctap2::commands::get_info::AuthenticatorVersion::FIDO_2_0 => {
-                    Ok(PinUvAuthProtocol(Box::new(PinUvAuth1 {})))
-                }
-                crate::ctap2::commands::get_info::AuthenticatorVersion::FIDO_2_1_PRE
-                | crate::ctap2::commands::get_info::AuthenticatorVersion::FIDO_2_1 => {
+                AuthenticatorVersion::U2F_V2 => Err(CommandError::UnsupportedPinProtocol),
+                AuthenticatorVersion::FIDO_2_0 => Ok(PinUvAuthProtocol(Box::new(PinUvAuth1 {}))),
+                AuthenticatorVersion::FIDO_2_1_PRE | AuthenticatorVersion::FIDO_2_1 => {
                     Ok(PinUvAuthProtocol(Box::new(PinUvAuth2 {})))
                 }
             }
