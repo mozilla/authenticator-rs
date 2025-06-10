@@ -40,9 +40,18 @@ pub use backend::ecdsa_p256_sha256_sign_raw;
 
 pub struct PinUvAuthProtocol(Box<dyn PinProtocolImpl + Send + Sync>);
 impl PinUvAuthProtocol {
+    pub fn from_id(id: u64) -> Option<Self> {
+        match id {
+            1 => Some(Self(Box::new(PinUvAuth1 {}))),
+            2 => Some(Self(Box::new(PinUvAuth2 {}))),
+            _ => None,
+        }
+    }
+
     pub fn id(&self) -> u64 {
         self.0.protocol_id()
     }
+
     pub fn encapsulate(&self, peer_cose_key: &COSEKey) -> Result<SharedSecret, CryptoError> {
         self.0.encapsulate(peer_cose_key)
     }
@@ -141,13 +150,11 @@ impl TryFrom<&AuthenticatorInfo> for PinUvAuthProtocol {
         // has no preference, it SHOULD select the one listed first in
         // pinUvAuthProtocols."
         if let Some(pin_protocols) = &info.pin_protocols {
-            for proto_id in pin_protocols.iter() {
-                match proto_id {
-                    1 => return Ok(PinUvAuthProtocol(Box::new(PinUvAuth1 {}))),
-                    2 => return Ok(PinUvAuthProtocol(Box::new(PinUvAuth2 {}))),
-                    _ => continue,
-                }
-            }
+            pin_protocols
+                .iter()
+                .copied()
+                .find_map(PinUvAuthProtocol::from_id)
+                .ok_or(CommandError::UnsupportedPinProtocol)
         } else {
             match info.max_supported_version() {
                 crate::ctap2::commands::get_info::AuthenticatorVersion::U2F_V2 => {
@@ -162,7 +169,6 @@ impl TryFrom<&AuthenticatorInfo> for PinUvAuthProtocol {
                 }
             }
         }
-        Err(CommandError::UnsupportedPinProtocol)
     }
 }
 
