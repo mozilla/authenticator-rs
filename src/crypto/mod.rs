@@ -158,14 +158,14 @@ impl TryFrom<&AuthenticatorInfo> for PinUvAuthProtocol {
         } else {
             match info.max_supported_version() {
                 crate::ctap2::commands::get_info::AuthenticatorVersion::U2F_V2 => {
-                    return Err(CommandError::UnsupportedPinProtocol)
+                    Err(CommandError::UnsupportedPinProtocol)
                 }
                 crate::ctap2::commands::get_info::AuthenticatorVersion::FIDO_2_0 => {
-                    return Ok(PinUvAuthProtocol(Box::new(PinUvAuth1 {})))
+                    Ok(PinUvAuthProtocol(Box::new(PinUvAuth1 {})))
                 }
                 crate::ctap2::commands::get_info::AuthenticatorVersion::FIDO_2_1_PRE
                 | crate::ctap2::commands::get_info::AuthenticatorVersion::FIDO_2_1 => {
-                    return Ok(PinUvAuthProtocol(Box::new(PinUvAuth2 {})))
+                    Ok(PinUvAuthProtocol(Box::new(PinUvAuth2 {})))
                 }
             }
         }
