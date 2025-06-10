@@ -157,7 +157,9 @@ impl TryFrom<&AuthenticatorInfo> for PinUvAuthProtocol {
                 .ok_or(CommandError::UnsupportedPinProtocol)
         } else {
             match info.max_supported_version() {
-                AuthenticatorVersion::U2F_V2 => Err(CommandError::UnsupportedPinProtocol),
+                AuthenticatorVersion::U2F_V2 | AuthenticatorVersion::Unknown => {
+                    Err(CommandError::UnsupportedPinProtocol)
+                }
                 AuthenticatorVersion::FIDO_2_0 => Ok(PinUvAuthProtocol(Box::new(PinUvAuth1 {}))),
                 AuthenticatorVersion::FIDO_2_1_PRE | AuthenticatorVersion::FIDO_2_1 => {
                     Ok(PinUvAuthProtocol(Box::new(PinUvAuth2 {})))
