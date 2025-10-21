@@ -44,12 +44,12 @@ fn ecdh_openssl_raw(client_private: EcKey<Private>, peer_public: EcKey<Public>) 
     Ok(shared_point)
 }
 
-/// Ephemeral ECDH over P256. Takes a DER SubjectPublicKeyInfo that encodes a public key. Generates
-/// an ephemeral P256 key pair. Returns
+/// Ephemeral ECDH over P256. Generates an ephemeral P256 key pair. Returns
 ///  1) the x coordinate of the shared point, and
 ///  2) the uncompressed SEC 1 encoding of the ephemeral public key.
-pub fn ecdhe_p256_raw(peer_spki: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
-    let peer_public = EcKey::public_key_from_der(peer_spki)?;
+pub fn ecdhe_p256_raw(peer: &super::COSEEC2Key) -> Result<(Vec<u8>, Vec<u8>)> {
+    let peer_spki = peer.der_spki()?;
+    let peer_public = EcKey::public_key_from_der(&peer_spki)?;
 
     // Hard-coding the P256 group here is easier than extracting a group name from peer_public and
     // comparing it with P256. We'll fail in key derivation if peer_public is on the wrong curve.
@@ -140,12 +140,13 @@ pub fn random_bytes(count: usize) -> Result<Vec<u8>> {
 
 #[cfg(test)]
 pub fn test_ecdh_p256_raw(
-    peer_spki: &[u8],
+    peer: &super::COSEEC2Key,
     client_public_x: &[u8],
     client_public_y: &[u8],
     client_private: &[u8],
 ) -> Result<Vec<u8>> {
-    let peer_public = EcKey::public_key_from_der(peer_spki)?;
+    let peer_spki = peer.der_spki()?;
+    let peer_public = EcKey::public_key_from_der(&peer_spki)?;
     let group = peer_public.group();
 
     let mut client_pub_sec1 = vec![];
