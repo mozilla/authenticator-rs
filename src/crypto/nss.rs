@@ -158,14 +158,15 @@ pub fn ecdsa_p256_sha256_sign_raw(private: &[u8], data: &[u8]) -> Result<Vec<u8>
     der::sequence(&[&der::integer(r)?, &der::integer(s)?])
 }
 
-/// Ephemeral ECDH over P256. Takes a DER SubjectPublicKeyInfo that encodes a public key. Generates
-/// an ephemeral P256 key pair. Returns
+/// Ephemeral ECDH over P256. Generates an ephemeral P256 key pair. Returns
 ///  1) the x coordinate of the shared point, and
 ///  2) the uncompressed SEC 1 encoding of the ephemeral public key.
-pub fn ecdhe_p256_raw(peer_spki: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
+pub fn ecdhe_p256_raw(peer: &super::COSEEC2Key) -> Result<(Vec<u8>, Vec<u8>)> {
+    let peer_spki = peer.der_spki()?;
+
     nss_gk_api::init();
 
-    let peer_public = nss_public_key_from_der_spki(peer_spki)?;
+    let peer_public = nss_public_key_from_der_spki(&peer_spki)?;
 
     let (client_private, client_public) = generate_p256_nss()?;
 
@@ -374,14 +375,15 @@ pub fn random_bytes(count: usize) -> Result<Vec<u8>> {
 
 #[cfg(test)]
 pub fn test_ecdh_p256_raw(
-    peer_spki: &[u8],
+    peer: &super::COSEEC2Key,
     client_public_x: &[u8],
     client_public_y: &[u8],
     client_private: &[u8],
 ) -> Result<Vec<u8>> {
     nss_gk_api::init();
 
-    let peer_public = nss_public_key_from_der_spki(peer_spki)?;
+    let peer_spki = peer.der_spki()?;
+    let peer_public = nss_public_key_from_der_spki(&peer_spki)?;
 
     // NSS has no mechanism to import a raw elliptic curve coordinate as a private key.
     // We need to encode it in an RFC 5208 PrivateKeyInfo:
