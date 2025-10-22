@@ -4,10 +4,7 @@
 
 // Shared code for platforms that use raw HID access (Linux, FreeBSD, etc.)
 
-#![cfg_attr(
-    feature = "cargo-clippy",
-    allow(clippy::cast_lossless, clippy::needless_lifetimes)
-)]
+#![allow(clippy::cast_lossless, clippy::needless_lifetimes)]
 
 #[cfg(target_os = "linux")]
 use std::io;

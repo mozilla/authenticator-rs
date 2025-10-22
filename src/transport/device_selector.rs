@@ -10,8 +10,6 @@ use std::time::Duration;
 pub type DeviceID = <Device as HIDDevice>::Id;
 pub type DeviceBuildParameters = <Device as HIDDevice>::BuildParameters;
 
-trait DeviceSelectorEventMarker {}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlinkResult {
     DeviceSelected,

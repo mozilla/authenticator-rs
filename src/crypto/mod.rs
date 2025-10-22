@@ -88,7 +88,6 @@ impl Clone for PinUvAuthProtocol {
 /// CTAP 2.1, Section 6.5.4. PIN/UV Auth Protocol Abstract Definition
 trait PinProtocolImpl: ClonablePinProtocolImpl {
     fn protocol_id(&self) -> u64;
-    fn initialize(&self);
     fn encrypt(&self, key: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, CryptoError>;
     fn decrypt(&self, key: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError>;
     fn authenticate(&self, key: &[u8], message: &[u8]) -> Result<Vec<u8>, CryptoError>;
@@ -189,8 +188,6 @@ impl PinProtocolImpl for PinUvAuth1 {
         1
     }
 
-    fn initialize(&self) {}
-
     fn encrypt(&self, key: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {
         // [CTAP 2.1]
         // encrypt(key, demPlaintext) → ciphertext
@@ -233,8 +230,6 @@ impl PinProtocolImpl for PinUvAuth2 {
     fn protocol_id(&self) -> u64 {
         2
     }
-
-    fn initialize(&self) {}
 
     fn encrypt(&self, key: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {
         // [CTAP 2.1]
