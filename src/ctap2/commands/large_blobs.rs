@@ -1,7 +1,7 @@
 use crate::{
     crypto::{PinUvAuthParam, PinUvAuthToken},
     ctap2::server::UserVerificationRequirement,
-    errors::AuthenticatorError,
+    errors::{AuthenticatorError, UnsupportedOption},
     transport::errors::HIDError,
     FidoDevice,
 };
@@ -69,6 +69,10 @@ impl PinUvAuthCommand for LargeBlobs {
     fn get_rp_id(&self) -> Option<&String> {
         None
     }
+
+    fn hmac_requested(&self) -> bool {
+        false
+    }
 }
 
 impl Serialize for LargeBlobs {
@@ -132,9 +136,9 @@ impl RequestCtap2 for LargeBlobs {
         }
 
         let status: StatusCode = input[0].into();
-        let payload = &input[1..];
         if status.is_ok() {
-            if payload.len() > 1 {
+            if input.len() > 1 {
+                let payload = &input[1..];
                 Ok(payload.to_vec())
             } else {
                 // Some subcommands return only an OK-status without any data
@@ -142,6 +146,7 @@ impl RequestCtap2 for LargeBlobs {
             }
         } else {
             let data: Option<Value> = if input.len() > 1 {
+                let payload = &input[1..];
                 Some(from_slice(payload).map_err(CommandError::Deserializing)?)
             } else {
                 None
@@ -314,7 +319,7 @@ impl<'de> Deserialize<'de> for LargeBlobsResponse {
 
                             let byte_len = large_blob.len() as u64;
                             let large_blob_array: Vec<LargeBlobArrayElement> =
-                                from_slice(large_blob).unwrap();
+                                from_slice(large_blob).map_err(M::Error::custom)?;
                             let mut hash = [0u8; 16];
                             hash.copy_from_slice(hash_slice);
                             response = Some(LargeBlobsResponse {
@@ -354,11 +359,18 @@ where
     // Spec:
     // A per-authenticator constant, maxFragmentLength, is here defined as the value of maxMsgSize (from the authenticatorGetInfo response) minus 64.
     // If no maxMsgSize is given in the authenticatorGetInfo response) then it defaults to 1024, leaving maxFragmentLength to default to 960.
-    let max_fragment_length = dev
+    //
+    // In the highly unlikely case of a max_msg_size smaller than 65 (leaving zero-byte fragment-length), we error out, saying that largeBlobs is unsupported.
+    let max_msg_size = dev
         .get_authenticator_info()
         .and_then(|i| i.max_msg_size)
-        .unwrap_or(1024)
-        - 64;
+        .unwrap_or(1024);
+    if max_msg_size <= 64 {
+        return Err(AuthenticatorError::UnsupportedOption(
+            UnsupportedOption::LargeBlobs,
+        ));
+    }
+    let max_fragment_length = max_msg_size - 64;
     let mut bytes = vec![];
     let mut offset = 0;
     loop {
@@ -404,11 +416,18 @@ where
     // Spec:
     // A per-authenticator constant, maxFragmentLength, is here defined as the value of maxMsgSize (from the authenticatorGetInfo response) minus 64.
     // If no maxMsgSize is given in the authenticatorGetInfo response) then it defaults to 1024, leaving maxFragmentLength to default to 960.
-    let max_fragment_length = dev
+    //
+    // In the highly unlikely case of a max_msg_size smaller than 65 (leaving zero-byte fragment-length), we error out, saying that largeBlobs is unsupported.
+    let max_msg_size = dev
         .get_authenticator_info()
         .and_then(|i| i.max_msg_size)
-        .unwrap_or(1024)
-        - 64;
+        .unwrap_or(1024);
+    if max_msg_size <= 64 {
+        return Err(AuthenticatorError::UnsupportedOption(
+            UnsupportedOption::LargeBlobs,
+        ));
+    }
+    let max_fragment_length = max_msg_size - 64;
     let total_length = bytes.len();
     let mut offset = initial_offset;
     for chunk in bytes.chunks(max_fragment_length) {
