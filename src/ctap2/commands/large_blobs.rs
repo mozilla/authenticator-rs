@@ -39,9 +39,7 @@ impl PinUvAuthCommand for LargeBlobs {
             data.extend([0x0c, 0x00]);
             data.extend((self.offset as u32).to_le_bytes());
             if let Some(ref set) = self.set {
-                let mut hasher = Sha256::new();
-                hasher.update(set.as_slice());
-                data.extend(hasher.finalize().as_slice());
+                data.extend(Sha256::digest(set.as_slice()));
             }
             param = Some(token.derive(&data).map_err(CommandError::Crypto)?);
         }
@@ -301,9 +299,7 @@ impl<'de> Deserialize<'de> for LargeBlobsResponse {
                             let (mut large_blob, mut hash_slice) =
                                 payload.split_at(payload.len() - 16);
 
-                            let mut hasher = Sha256::new();
-                            hasher.update(large_blob);
-                            let expected_hash = hasher.finalize();
+                            let expected_hash = Sha256::digest(large_blob);
                             // The initial serialized large-blob array is the value of the serialized large-blob array on a fresh authenticator, as well as immediately after a reset. It is the byte string h'8076be8b528d0075f7aae98d6fa57a6d3c', which is an empty CBOR array (80) followed by LEFT(SHA-256(h'80'), 16).
                             let default_large_blob = [0x80];
                             let default_hash = [
@@ -311,7 +307,7 @@ impl<'de> Deserialize<'de> for LargeBlobsResponse {
                                 0x6f, 0xa5, 0x7a, 0x6d, 0x3c,
                             ];
                             // Once complete, the platform MUST confirm that the embedded SHA-256 hash is correct, based on the definition above. If not, the configuration is corrupt and the platform MUST discard it and act as if the initial serialized large-blob array was received.
-                            if &expected_hash.as_slice()[0..16] != hash_slice {
+                            if &expected_hash[0..16] != hash_slice {
                                 warn!("Large blob array hash doesn't match with the expected value! Assuming an empty array.");
                                 large_blob = &default_large_blob;
                                 hash_slice = &default_hash;
