@@ -4,7 +4,7 @@
 
 use aes_gcm::{
     aead::{Aead, AeadCore, KeyInit, OsRng, Payload},
-    Aes256Gcm, Key,
+    Aes256Gcm,
 };
 use authenticator::{
     authenticatorservice::{AuthenticatorService, RegisterArgs, SignArgs},
@@ -21,6 +21,7 @@ use authenticator::{
     statecallback::StateCallback,
     Pin, StatusPinUv, StatusUpdate,
 };
+use generic_array::GenericArray;
 use getopts::{Matches, Options};
 use sha2::{Digest, Sha256};
 use std::sync::mpsc::{channel, RecvError};
@@ -157,8 +158,14 @@ fn register_user(
                     // Let nonce be a fresh, random, 12-byte value.
                     let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
                     // Let ciphertext be the AEAD_AES_256_GCM authenticated encryption of plaintext using key, nonce, and the associated data as specified above.
-                    let gcm_key = Key::<Aes256Gcm>::from_slice(&key);
-                    let cipher = Aes256Gcm::new(gcm_key);
+                    //
+                    // Note: Because of bug https://github.com/RustCrypto/traits/issues/2036 and/or https://github.com/fizyk20/generic-array/issues/158 we can't use the
+                    // simple version below, but have to request the new generic-array 1.x in
+                    // our Cargo.toml and use it directly here, as aes_gcm uses the old version
+                    // that got 'broken' by a dot-release
+                    // let gcm_key = Key::<Aes256Gcm>::from_slice(&key);
+                    // let cipher = Aes256Gcm::new(gcm_key);
+                    let cipher = Aes256Gcm::new(GenericArray::from_slice(&key).as_ref());
                     let mut payload = Payload::from(plaintext.as_ref());
                     // Associated data: The value 0x626c6f62 ("blob") || uint64LittleEndian(origSize).
                     let mut aad = b"blob".to_vec();
@@ -259,8 +266,13 @@ fn extract_associated_large_blobs(key: Vec<u8>, array: Vec<LargeBlobArrayElement
     let valid_elements = array
         .iter()
         .filter_map(|e| {
-            let gcm_key = Key::<Aes256Gcm>::from_slice(&key);
-            let cipher = Aes256Gcm::new(gcm_key);
+            // Note: Because of bug https://github.com/RustCrypto/traits/issues/2036 and/or https://github.com/fizyk20/generic-array/issues/158 we can't use the
+            // simple version below, but have to request the new generic-array 1.x in
+            // our Cargo.toml and use it directly here, as aes_gcm uses the old version
+            // that got 'broken' by a dot-release
+            // let gcm_key = Key::<Aes256Gcm>::from_slice(&key);
+            // let cipher = Aes256Gcm::new(gcm_key);
+            let cipher = Aes256Gcm::new(GenericArray::from_slice(&key).as_ref());
             let mut payload = Payload::from(e.ciphertext.as_slice());
             // Associated data: The value 0x626c6f62 ("blob") || uint64LittleEndian(origSize).
             let mut aad = b"blob".to_vec();
