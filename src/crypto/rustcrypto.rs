@@ -11,14 +11,8 @@ pub type Result<T> = std::result::Result<T, CryptoError>;
 fn cose_key_to_public(peer: &super::COSEEC2Key) -> Result<p256::PublicKey> {
     // SEC 1 encoded uncompressed point
     let peer = p256::EncodedPoint::from_affine_coordinates(
-        peer.x
-            .as_slice()
-            .try_into()
-            .map_err(|_| CryptoError::MalformedInput)?,
-        peer.y
-            .as_slice()
-            .try_into()
-            .map_err(|_| CryptoError::MalformedInput)?,
+        peer.x.as_slice().into(),
+        peer.y.as_slice().into(),
         false,
     );
     p256::PublicKey::from_encoded_point(&peer)
@@ -51,11 +45,7 @@ pub fn encrypt_aes_256_cbc_no_pad(key: &[u8], iv: Option<&[u8]>, data: &[u8]) ->
         Err(_) => return Err(CryptoError::LibraryFailure),
     };
 
-    let iv = iv.unwrap_or(&[0u8; AES_BLOCK_SIZE]);
-    let iv = match iv.try_into() {
-        Ok(iv) => iv,
-        Err(_) => return Err(CryptoError::LibraryFailure),
-    };
+    let iv = iv.unwrap_or(&[0u8; AES_BLOCK_SIZE]).into();
 
     // Validate that the data is an exact multiple of the block size since we have no
     // padding available.
@@ -90,11 +80,7 @@ pub fn decrypt_aes_256_cbc_no_pad(key: &[u8], iv: Option<&[u8]>, data: &[u8]) ->
         Err(_) => return Err(CryptoError::LibraryFailure),
     };
 
-    let iv = iv.unwrap_or(&[0u8; AES_BLOCK_SIZE]);
-    let iv = match iv.try_into() {
-        Ok(iv) => iv,
-        Err(_) => return Err(CryptoError::LibraryFailure),
-    };
+    let iv = iv.unwrap_or(&[0u8; AES_BLOCK_SIZE]).into();
 
     // See comments in `encrypt_aes_256_cbc_no_pad` for rationale.
     let blocks = data.chunks_exact(AES_BLOCK_SIZE);

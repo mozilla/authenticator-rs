@@ -261,11 +261,7 @@ pub(crate) trait UserVerification {
 
 impl UserVerification for MakeCredentialsOptions {
     fn ask_user_verification(&self) -> bool {
-        if let Some(e) = self.user_verification {
-            e
-        } else {
-            false
-        }
+        self.user_verification.unwrap_or(false)
     }
 }
 

@@ -18,16 +18,19 @@ macro_rules! try_or {
     };
 }
 
+#[cfg(all(not(test), any(target_os = "linux", target_os = "freebsd", target_os = "openbsd")))]
 pub trait Signed {
     fn is_negative(&self) -> bool;
 }
 
+#[cfg(all(not(test), any(target_os = "linux", target_os = "freebsd", target_os = "openbsd")))]
 impl Signed for i32 {
     fn is_negative(&self) -> bool {
         *self < 0
     }
 }
 
+#[cfg(all(not(test), any(target_os = "linux", target_os = "freebsd", target_os = "openbsd")))]
 impl Signed for usize {
     fn is_negative(&self) -> bool {
         (*self as isize) < 0

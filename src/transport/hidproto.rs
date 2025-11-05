@@ -47,6 +47,7 @@ pub enum Data {
     Usage { data: u32 },
     Input,
     Output,
+    #[allow(dead_code)] // we only read this on linux
     ReportCount { data: u32 },
 }
 
