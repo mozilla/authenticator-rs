@@ -17,7 +17,7 @@ const UDEV_SUBSYSTEM: &str = "hidraw";
 const POLLIN: c_short = 0x0001;
 const POLL_TIMEOUT: c_int = 100;
 
-fn poll(fds: &mut Vec<::libc::pollfd>) -> io::Result<()> {
+fn poll(fds: &mut [::libc::pollfd]) -> io::Result<()> {
     let nfds = fds.len() as c_ulong;
 
     let rv = unsafe { ::libc::poll((fds[..]).as_mut_ptr(), nfds, POLL_TIMEOUT) };
