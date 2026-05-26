@@ -569,12 +569,27 @@ pub struct AttestationObject {
 }
 
 impl AttestationObject {
+    // Apply the AttestationConveyancePreference "none" transform from
+    // https://w3c.github.io/webauthn/#sctn-createCredential. If the
+    // attestation is self attestation (zero AAGUID, "packed" format, no x5c)
+    // the spec says no action is needed. Otherwise the attestation statement
+    // is replaced with the empty "none" statement, but the
+    // attestedCredentialData (including the AAGUID, which identifies the
+    // make/model of the authenticator but no individual user/device) is left
+    // intact.
     pub fn anonymize(&mut self) {
-        // Remove the attestation statement and the AAGUID from the authenticator data.
-        self.att_stmt = AttestationStatement::None;
-        if let Some(credential_data) = self.auth_data.credential_data.as_mut() {
-            credential_data.aaguid = AAGuid::default();
+        if let AttestationStatement::Packed(ref packed) = self.att_stmt {
+            if packed.attestation_cert.is_empty()
+                && self
+                    .auth_data
+                    .credential_data
+                    .as_ref()
+                    .is_some_and(|d| d.aaguid == AAGuid::default())
+            {
+                return;
+            }
         }
+        self.att_stmt = AttestationStatement::None;
     }
 }
 
@@ -1057,30 +1072,71 @@ pub mod test {
     #[test]
     fn test_anonymize_att_obj() {
         // Anonymize should prevent identifying data in the attestation statement from being
-        // serialized.
+        // serialized, but should preserve the AAGUID per the WebAuthn spec's
+        // AttestationConveyancePreference "none" transform.
         let mut att_obj = create_attestation_obj();
 
         // This test assumes that the sample attestation object contains identifying information
         assert_ne!(att_obj.att_stmt, AttestationStatement::None);
-        assert_ne!(
+        let original_aaguid = att_obj
+            .auth_data
+            .credential_data
+            .as_ref()
+            .expect("credential_data should be Some")
+            .aaguid
+            .clone();
+        assert_ne!(original_aaguid, AAGuid::default());
+
+        att_obj.anonymize();
+
+        // Write the attestation object out to bytes and read it back. The result should not
+        // have an attestation statement, but the AAGUID should be preserved.
+        let encoded_att_obj = to_vec(&att_obj).expect("could not serialize anonymized att_obj");
+        let att_obj: AttestationObject =
+            from_slice(&encoded_att_obj).expect("could not deserialize anonymized att_obj");
+
+        assert_eq!(att_obj.att_stmt, AttestationStatement::None);
+        assert_eq!(
             att_obj
                 .auth_data
                 .credential_data
                 .as_ref()
                 .expect("credential_data should be Some")
                 .aaguid,
-            AAGuid::default()
+            original_aaguid
         );
+    }
+
+    #[test]
+    fn test_anonymize_self_attestation_is_noop() {
+        // Per the WebAuthn spec, if the attestation is self attestation (zero
+        // AAGUID, "packed" format, no x5c) the "none" transform is a no-op.
+        let mut att_obj = create_attestation_obj();
+
+        // Convert to a self attestation: clear the AAGUID and drop x5c.
+        att_obj
+            .auth_data
+            .credential_data
+            .as_mut()
+            .expect("credential_data should be Some")
+            .aaguid = AAGuid::default();
+        let self_att = AttestationStatement::Packed(AttestationStatementPacked {
+            alg: COSEAlgorithm::ES256,
+            sig: Signature(vec![0x01, 0x02, 0x03, 0x04]),
+            attestation_cert: vec![],
+        });
+        att_obj.att_stmt = self_att;
+
+        let expected_att_stmt = AttestationStatement::Packed(AttestationStatementPacked {
+            alg: COSEAlgorithm::ES256,
+            sig: Signature(vec![0x01, 0x02, 0x03, 0x04]),
+            attestation_cert: vec![],
+        });
 
         att_obj.anonymize();
 
-        // Write the attestation object out to bytes and read it back. The result should not
-        // have an attestation statement, and it should have the default AAGUID.
-        let encoded_att_obj = to_vec(&att_obj).expect("could not serialize anonymized att_obj");
-        let att_obj: AttestationObject =
-            from_slice(&encoded_att_obj).expect("could not deserialize anonymized att_obj");
-
-        assert_eq!(att_obj.att_stmt, AttestationStatement::None);
+        // The self attestation should be preserved unchanged.
+        assert_eq!(att_obj.att_stmt, expected_att_stmt);
         assert_eq!(
             att_obj
                 .auth_data
