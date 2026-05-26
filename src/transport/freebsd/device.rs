@@ -169,7 +169,7 @@ impl HIDDevice for Device {
     }
 
     fn get_property(&self, _prop_name: &str) -> io::Result<String> {
-        Err(io::Error::new(io::ErrorKind::Other, "Not implemented"))
+        Err(io::Error::other("Not implemented"))
     }
 
     fn get_device_info(&self) -> U2FDeviceInfo {

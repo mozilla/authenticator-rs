@@ -67,7 +67,7 @@ pub fn from_unix_result<T: Signed>(rv: T) -> io::Result<T> {
 }
 
 pub fn io_err(msg: &str) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, msg)
+    io::Error::other(msg)
 }
 
 #[cfg(test)]

@@ -398,7 +398,7 @@ impl MakeCredentials {
         //      Note: a CTAP 2.0 authenticator is allowed to create a discoverable credential even
         //      if one was not requested, so there is a case in which we cannot confidently
         //      return `rk=false` here. We omit the response entirely in this case.
-        let dev_supports_rk = maybe_info.map_or(false, |info| info.options.resident_key);
+        let dev_supports_rk = maybe_info.is_some_and(|info| info.options.resident_key);
         let requested_rk = self.options.resident_key.unwrap_or(false);
         let max_supported_version = maybe_info.map_or(AuthenticatorVersion::U2F_V2, |info| {
             info.max_supported_version()

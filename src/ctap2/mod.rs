@@ -476,7 +476,7 @@ pub fn register<Dev: FidoDevice>(
     // that does not support this extension.)"
     let dev_supports_cred_protect = dev
         .get_authenticator_info()
-        .map_or(false, |info| info.supports_cred_protect());
+        .is_some_and(|info| info.supports_cred_protect());
     if args.extensions.enforce_credential_protection_policy == Some(true)
         && args.extensions.credential_protection_policy
             != Some(CredentialProtectionPolicy::UserVerificationOptional)

@@ -64,7 +64,7 @@ extern "system" {
 }
 
 fn from_wide_ptr(ptr: *const u16, len: usize) -> String {
-    assert!(!ptr.is_null() && len % 2 == 0);
+    assert!(!ptr.is_null() && len.is_multiple_of(2));
     let slice = unsafe { slice::from_raw_parts(ptr, len / 2) };
     OsString::from_wide(slice).to_string_lossy().into_owned()
 }
@@ -95,7 +95,7 @@ impl DeviceInfoSet {
         self.set
     }
 
-    pub fn devices(&self) -> DeviceInfoSetIter {
+    pub fn devices(&self) -> DeviceInfoSetIter<'_> {
         DeviceInfoSetIter::new(self)
     }
 }
