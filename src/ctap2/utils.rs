@@ -32,8 +32,8 @@ pub fn read_be_u16<R: Read, E: de::Error>(data: &mut R) -> Result<u16, E> {
 }
 
 pub fn read_byte<R: Read, E: de::Error>(data: &mut R) -> Result<u8, E> {
-    match data.bytes().next() {
-        Some(Ok(s)) => Ok(s),
-        _ => Err(serde_parse_err("u8")),
-    }
+    let mut buf = [0; 1];
+    data.read_exact(&mut buf)
+        .map_err(|_| serde_parse_err("u8"))?;
+    Ok(buf[0])
 }

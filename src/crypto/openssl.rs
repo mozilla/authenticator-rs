@@ -77,7 +77,7 @@ pub fn encrypt_aes_256_cbc_no_pad(key: &[u8], iv: Option<&[u8]>, data: &[u8]) ->
     encrypter.pad(false);
 
     let in_len = data.len();
-    if in_len % AES_BLOCK_SIZE != 0 {
+    if !in_len.is_multiple_of(AES_BLOCK_SIZE) {
         return Err(CryptoError::LibraryFailure);
     }
 
@@ -101,7 +101,7 @@ pub fn decrypt_aes_256_cbc_no_pad(key: &[u8], iv: Option<&[u8]>, data: &[u8]) ->
     encrypter.pad(false);
 
     let in_len = data.len();
-    if in_len % AES_BLOCK_SIZE != 0 {
+    if !in_len.is_multiple_of(AES_BLOCK_SIZE) {
         return Err(CryptoError::LibraryFailure);
     }
 

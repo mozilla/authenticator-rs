@@ -42,13 +42,9 @@ jobs:
           - OS: ubuntu-latest
             TARGET: x86_64-unknown-linux-gnu
             NATIVE_BUILD: true
-            # XXX: This version downgrade is required because 1.8.x has too high of an MSRV
-            # and the lockfile isn't checked in for tests to use, so the latest dependency version
-            # is always used instead.
             ADD_INSTALL: |
               sudo apt-get update
               sudo apt-get install -y libudev-dev
-              cargo update -p base64ct --precise 1.6.0
             BUILD_OPTIONS: --features crypto_rust --no-default-features
 
           # Mac dummy crypto

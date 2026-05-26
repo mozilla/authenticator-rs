@@ -1132,7 +1132,7 @@ pub struct U2FRegisterAnswer<'a> {
 }
 
 // We will only return MalformedInput here
-pub fn parse_u2f_der_certificate(data: &[u8]) -> Result<U2FRegisterAnswer, CryptoError> {
+pub fn parse_u2f_der_certificate(data: &[u8]) -> Result<U2FRegisterAnswer<'_>, CryptoError> {
     // So we don't panic below, when accessing individual bytes
     if data.len() < 4 {
         return Err(CryptoError::MalformedInput);
