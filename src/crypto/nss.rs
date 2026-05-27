@@ -1,14 +1,19 @@
 use super::CryptoError;
-use nss_gk_api::p11::{
+use nss_rs::p11::{
     PK11Origin, PK11_CreateContextBySymKey, PK11_Decrypt, PK11_DigestFinal, PK11_DigestOp,
     PK11_Encrypt, PK11_ExportDERPrivateKeyInfo, PK11_GenerateKeyPairWithOpFlags,
     PK11_GenerateRandom, PK11_HashBuf, PK11_ImportDERPrivateKeyInfoAndReturnKey, PK11_ImportSymKey,
-    PK11_PubDeriveWithKDF, PK11_SignWithMechanism, PrivateKey, PublicKey,
-    SECKEY_DecodeDERSubjectPublicKeyInfo, SECKEY_ExtractPublicKey, SECOidTag, Slot,
-    SubjectPublicKeyInfo, AES_BLOCK_SIZE, PK11_ATTR_EXTRACTABLE, PK11_ATTR_INSENSITIVE,
-    PK11_ATTR_SESSION, SHA256_LENGTH,
+    PK11_PubDeriveWithKDF, PK11_SignWithMechanism, PrivateKey, PublicKey, SECOidTag, Slot,
+    PK11_ATTR_EXTRACTABLE, PK11_ATTR_INSENSITIVE, PK11_ATTR_SESSION,
 };
-use nss_gk_api::{IntoResult, SECItem, SECItemBorrowed, ScopedSECItem, PR_FALSE};
+
+// nss-rs exposes these as raw bindgen u32 constants; shadow as usize for ergonomic use.
+const AES_BLOCK_SIZE: usize = nss_rs::p11::AES_BLOCK_SIZE as usize;
+const SHA256_LENGTH: usize = nss_rs::p11::SHA256_LENGTH as usize;
+use nss_rs::nss_prelude::PRBool;
+use nss_rs::{IntoResult, SECItem, SECItemBorrowed, ScopedSECItem};
+
+const PR_FALSE: PRBool = 0;
 use pkcs11_bindings::{
     CKA_DERIVE, CKA_ENCRYPT, CKA_SIGN, CKD_NULL, CKF_DERIVE, CKM_AES_CBC, CKM_ECDH1_DERIVE,
     CKM_ECDSA_SHA256, CKM_EC_KEY_PAIR_GEN, CKM_SHA256_HMAC, CKM_SHA512_HMAC,
@@ -20,27 +25,15 @@ use std::ptr;
 use super::der;
 
 #[cfg(test)]
-use nss_gk_api::p11::PK11_VerifyWithMechanism;
+use nss_rs::p11::PK11_VerifyWithMechanism;
 
-impl From<nss_gk_api::Error> for CryptoError {
-    fn from(e: nss_gk_api::Error) -> Self {
+impl From<nss_rs::Error> for CryptoError {
+    fn from(e: nss_rs::Error) -> Self {
         CryptoError::Backend(format!("{e}"))
     }
 }
 
 pub type Result<T> = std::result::Result<T, CryptoError>;
-
-fn nss_public_key_from_der_spki(spki: &[u8]) -> Result<PublicKey> {
-    // TODO: replace this with an nss-gk-api function
-    // https://github.com/mozilla/nss-gk-api/issues/7
-    let mut spki_item = SECItemBorrowed::wrap(spki);
-    let spki_item_ptr: *mut SECItem = spki_item.as_mut();
-    let nss_spki = unsafe {
-        SubjectPublicKeyInfo::from_ptr(SECKEY_DecodeDERSubjectPublicKeyInfo(spki_item_ptr))?
-    };
-    let public_key = unsafe { PublicKey::from_ptr(SECKEY_ExtractPublicKey(*nss_spki))? };
-    Ok(public_key)
-}
 
 /// ECDH using NSS types. Computes the x coordinate of scalar multiplication of `peer_public` by
 /// `client_private`.
@@ -71,7 +64,7 @@ fn generate_p256_nss() -> Result<(PrivateKey, PublicKey)> {
     // comparing it with P256. We'll fail in `PK11_GenerateKeyPairWithOpFlags` if peer_public is on
     // the wrong curve.
     let oid_bytes = der::object_id(der::OID_SECP256R1_BYTES)?;
-    let mut oid = SECItemBorrowed::wrap(&oid_bytes);
+    let mut oid = SECItemBorrowed::wrap(&oid_bytes)?;
     let oid_ptr: *mut SECItem = oid.as_mut();
 
     let slot = Slot::internal()?;
@@ -106,7 +99,7 @@ fn generate_p256_nss() -> Result<(PrivateKey, PublicKey)> {
 
 /// This returns a PKCS#8 ECPrivateKey and an uncompressed SEC1 public key.
 pub fn gen_p256() -> Result<(Vec<u8>, Vec<u8>)> {
-    nss_gk_api::init();
+    nss_rs::init()?;
 
     let (client_private, client_public) = generate_p256_nss()?;
 
@@ -122,7 +115,7 @@ pub fn gen_p256() -> Result<(Vec<u8>, Vec<u8>)> {
 }
 
 pub fn ecdsa_p256_sha256_sign_raw(private: &[u8], data: &[u8]) -> Result<Vec<u8>> {
-    nss_gk_api::init();
+    nss_rs::init()?;
 
     let slot = Slot::internal()?;
 
@@ -130,7 +123,7 @@ pub fn ecdsa_p256_sha256_sign_raw(private: &[u8], data: &[u8]) -> Result<Vec<u8>
         let mut imported_private_ptr = ptr::null_mut();
         PK11_ImportDERPrivateKeyInfoAndReturnKey(
             *slot,
-            SECItemBorrowed::wrap(private).as_mut(),
+            SECItemBorrowed::wrap(private)?.as_mut(),
             ptr::null_mut(),
             ptr::null_mut(),
             PR_FALSE,
@@ -148,8 +141,8 @@ pub fn ecdsa_p256_sha256_sign_raw(private: &[u8], data: &[u8]) -> Result<Vec<u8>
             *imported_private,
             CKM_ECDSA_SHA256,
             ptr::null_mut(),
-            SECItemBorrowed::wrap(&signature_buf).as_mut(),
-            SECItemBorrowed::wrap(data).as_mut(),
+            SECItemBorrowed::wrap(&signature_buf)?.as_mut(),
+            SECItemBorrowed::wrap(data)?.as_mut(),
         )
         .into_result()?;
     }
@@ -164,9 +157,9 @@ pub fn ecdsa_p256_sha256_sign_raw(private: &[u8], data: &[u8]) -> Result<Vec<u8>
 pub fn ecdhe_p256_raw(peer: &super::COSEEC2Key) -> Result<(Vec<u8>, Vec<u8>)> {
     let peer_spki = peer.der_spki()?;
 
-    nss_gk_api::init();
+    nss_rs::init()?;
 
-    let peer_public = nss_public_key_from_der_spki(&peer_spki)?;
+    let peer_public = nss_rs::ec::import_ec_public_key_from_spki(&peer_spki)?;
 
     let (client_private, client_public) = generate_p256_nss()?;
 
@@ -178,7 +171,7 @@ pub fn ecdhe_p256_raw(peer: &super::COSEEC2Key) -> Result<(Vec<u8>, Vec<u8>)> {
 /// AES-256-CBC encryption for data that is a multiple of the AES block size (16 bytes) in length.
 /// Uses the zero IV if `iv` is None.
 pub fn encrypt_aes_256_cbc_no_pad(key: &[u8], iv: Option<&[u8]>, data: &[u8]) -> Result<Vec<u8>> {
-    nss_gk_api::init();
+    nss_rs::init()?;
 
     if key.len() != 32 {
         return Err(CryptoError::LibraryFailure);
@@ -207,13 +200,13 @@ pub fn encrypt_aes_256_cbc_no_pad(key: &[u8], iv: Option<&[u8]>, data: &[u8]) ->
             CKM_AES_CBC,
             PK11Origin::PK11_OriginUnwrap,
             CKA_ENCRYPT,
-            SECItemBorrowed::wrap(key).as_mut(),
+            SECItemBorrowed::wrap(key)?.as_mut(),
             ptr::null_mut(),
         )
         .into_result()?
     };
 
-    let mut params = SECItemBorrowed::wrap(iv);
+    let mut params = SECItemBorrowed::wrap(iv)?;
     let params_ptr: *mut SECItem = params.as_mut();
     let mut out_len: c_uint = 0;
     let mut out = vec![0; data.len()];
@@ -239,7 +232,7 @@ pub fn encrypt_aes_256_cbc_no_pad(key: &[u8], iv: Option<&[u8]>, data: &[u8]) ->
 /// AES-256-CBC decryption for data that is a multiple of the AES block size (16 bytes) in length.
 /// Uses the zero IV if `iv` is None.
 pub fn decrypt_aes_256_cbc_no_pad(key: &[u8], iv: Option<&[u8]>, data: &[u8]) -> Result<Vec<u8>> {
-    nss_gk_api::init();
+    nss_rs::init()?;
 
     if key.len() != 32 {
         return Err(CryptoError::LibraryFailure);
@@ -268,13 +261,13 @@ pub fn decrypt_aes_256_cbc_no_pad(key: &[u8], iv: Option<&[u8]>, data: &[u8]) ->
             CKM_AES_CBC,
             PK11Origin::PK11_OriginUnwrap,
             CKA_ENCRYPT,
-            SECItemBorrowed::wrap(key).as_mut(),
+            SECItemBorrowed::wrap(key)?.as_mut(),
             ptr::null_mut(),
         )
         .into_result()?
     };
 
-    let mut params = SECItemBorrowed::wrap(iv);
+    let mut params = SECItemBorrowed::wrap(iv)?;
     let params_ptr: *mut SECItem = params.as_mut();
     let mut out_len: c_uint = 0;
     let mut out = vec![0; data.len()];
@@ -299,7 +292,7 @@ pub fn decrypt_aes_256_cbc_no_pad(key: &[u8], iv: Option<&[u8]>, data: &[u8]) ->
 
 /// Textbook HMAC-SHA256
 pub fn hmac_sha256(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
-    nss_gk_api::init();
+    nss_rs::init()?;
 
     let data_len = match u32::try_from(data.len()) {
         Ok(data_len) => data_len,
@@ -313,7 +306,7 @@ pub fn hmac_sha256(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
             CKM_SHA256_HMAC,
             PK11Origin::PK11_OriginUnwrap,
             CKA_SIGN,
-            SECItemBorrowed::wrap(key).as_mut(),
+            SECItemBorrowed::wrap(key)?.as_mut(),
             ptr::null_mut(),
         )
         .into_result()?
@@ -341,7 +334,7 @@ pub fn hmac_sha256(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
 
 /// Textbook SHA256
 pub fn sha256(data: &[u8]) -> Result<Vec<u8>> {
-    nss_gk_api::init();
+    nss_rs::init()?;
 
     let data_len: i32 = match i32::try_from(data.len()) {
         Ok(data_len) => data_len,
@@ -361,7 +354,7 @@ pub fn sha256(data: &[u8]) -> Result<Vec<u8>> {
 }
 
 pub fn random_bytes(count: usize) -> Result<Vec<u8>> {
-    nss_gk_api::init();
+    nss_rs::init()?;
 
     let count_cint: c_int = match c_int::try_from(count) {
         Ok(c) => c,
@@ -380,10 +373,10 @@ pub fn test_ecdh_p256_raw(
     client_public_y: &[u8],
     client_private: &[u8],
 ) -> Result<Vec<u8>> {
-    nss_gk_api::init();
+    nss_rs::init()?;
 
     let peer_spki = peer.der_spki()?;
-    let peer_public = nss_public_key_from_der_spki(&peer_spki)?;
+    let peer_public = nss_rs::ec::import_ec_public_key_from_spki(&peer_spki)?;
 
     // NSS has no mechanism to import a raw elliptic curve coordinate as a private key.
     // We need to encode it in an RFC 5208 PrivateKeyInfo:
@@ -435,7 +428,7 @@ pub fn test_ecdh_p256_raw(
 
     // Now we can import the private key.
     let slot = Slot::internal()?;
-    let mut priv_key_info_item = SECItemBorrowed::wrap(&priv_key_info);
+    let mut priv_key_info_item = SECItemBorrowed::wrap(&priv_key_info)?;
     let priv_key_info_item_ptr: *mut SECItem = priv_key_info_item.as_mut();
     let mut client_private_ptr = ptr::null_mut();
     unsafe {
@@ -451,7 +444,7 @@ pub fn test_ecdh_p256_raw(
             ptr::null_mut(),
         )
     };
-    let client_private = unsafe { PrivateKey::from_ptr(client_private_ptr) }?;
+    let client_private = PrivateKey::from_ptr(client_private_ptr)?;
 
     let shared_point = ecdh_nss_raw(client_private, peer_public)?;
 
@@ -464,17 +457,17 @@ pub fn test_ecdsa_p256_sha256_verify_raw(
     signature: &[u8],
     data: &[u8],
 ) -> Result<()> {
-    nss_gk_api::init();
+    nss_rs::init()?;
 
     let signature = der::read_p256_sig(signature)?;
-    let public = nss_public_key_from_der_spki(public)?;
+    let public = nss_rs::ec::import_ec_public_key_from_spki(public)?;
     unsafe {
         PK11_VerifyWithMechanism(
             *public,
             CKM_ECDSA_SHA256,
             ptr::null_mut(),
-            SECItemBorrowed::wrap(&signature).as_mut(),
-            SECItemBorrowed::wrap(data).as_mut(),
+            SECItemBorrowed::wrap(&signature)?.as_mut(),
+            SECItemBorrowed::wrap(data)?.as_mut(),
             ptr::null_mut(),
         )
         .into_result()?
