@@ -1,6 +1,6 @@
 [package]
 name = "authenticator"
-version = "0.5.0"
+version = "0.6.0"
 authors = [ "Dana Keeler <dkeeler@mozilla.com>", "J.C. Jones <jc@mozilla.com>", "John Schanck <jschanck@mozilla.com>", "Kyle Machulis <kyle@nonpolynomial.com>", "Martin Sirringhaus <martin.sirringhaus@suse.com", "Tim Taubert <ttaubert@mozilla.com>" ]
 keywords = ["ctap2", "u2f", "fido", "webauthn"]
 categories = ["cryptography", "hardware-support", "os"]
@@ -68,7 +68,7 @@ cfg-if = "1.0"
 # Crypto backends
 openssl-sys = { version = "0.9", optional = true}
 openssl = { version = "0.10", optional = true}
-nss-rs = { git = "https://github.com/mozilla/nss-rs", version = "^0.12", optional = true }
+nss-rs = { git = "https://github.com/mozilla/nss-rs", version = ">=0.12", optional = true }
 pkcs11-bindings = { version = "0.1.4", optional = true }
 aes = { version = "0.8", optional = true }
 cbc = { version = "0.1", default-features = false, features = ["std"], optional = true }
