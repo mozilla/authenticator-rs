@@ -463,7 +463,34 @@ impl<'de> Deserialize<'de> for AuthenticatorInfo {
                             parse_next_optional_value!(transports, map);
                         }
                         0x0a => {
-                            parse_next_optional_value!(algorithms, map);
+                            if algorithms.is_some() {
+                                return Err(serde::de::Error::duplicate_field("algorithms"));
+                            }
+                            // Parse the advertised algorithm list leniently. An
+                            // authenticator may advertise COSE algorithms that we don't
+                            // recognize (e.g. Ed25519 variants). Per CTAP2 we must ignore
+                            // unknown algorithm identifiers rather than rejecting the entire
+                            // GetInfo response.
+                            let raw: Vec<Value> = map.next_value()?;
+                            let parsed = raw
+                                .into_iter()
+                                .filter_map(|v| {
+                                    match serde_cbor::value::from_value::<
+                                        PublicKeyCredentialParameters,
+                                    >(v)
+                                    {
+                                        Ok(p) => Some(p),
+                                        Err(e) => {
+                                            warn!(
+                                                "GetInfo: ignoring unsupported algorithm: {:?}",
+                                                e
+                                            );
+                                            None
+                                        }
+                                    }
+                                })
+                                .collect();
+                            algorithms = Some(parsed);
                         }
                         0x0b => {
                             parse_next_optional_value!(max_ser_large_blob_array, map);
@@ -1129,6 +1156,58 @@ pub mod tests {
                 aaguid: AAGuid(AAGUID_RAW),
                 ..Default::default()
             },
+        );
+    }
+
+    #[test]
+    fn parse_authenticator_info_unknown_algorithm() {
+        // An authenticator may advertise COSE algorithms that we don't
+        // recognize (here -20, which is unassigned). Per CTAP2 such unknown
+        // algorithm identifiers must be ignored rather than causing us to
+        // reject the entire GetInfo response. Known algorithms in the same
+        // list (including the Ed25519 variants -8/-19) must still be parsed.
+        use std::collections::BTreeMap;
+        let alg_entry = |alg: i128| {
+            let mut m = BTreeMap::new();
+            m.insert(Value::Text("alg".to_string()), Value::Integer(alg));
+            m.insert(
+                Value::Text("type".to_string()),
+                Value::Text("public-key".to_string()),
+            );
+            Value::Map(m)
+        };
+        let mut info = BTreeMap::new();
+        info.insert(
+            Value::Integer(0x01),
+            Value::Array(vec![Value::Text("FIDO_2_0".to_string())]),
+        );
+        info.insert(Value::Integer(0x03), Value::Bytes(AAGUID_RAW.to_vec()));
+        info.insert(
+            Value::Integer(0x0a),
+            // -7 (ES256), -8 (EdDSA) and -19 (Ed25519) are known; -20 is not.
+            Value::Array(vec![
+                alg_entry(-7),
+                alg_entry(-8),
+                alg_entry(-19),
+                alg_entry(-20),
+            ]),
+        );
+        let payload = serde_cbor::to_vec(&Value::Map(info)).unwrap();
+
+        let parsed = from_slice::<AuthenticatorInfo>(&payload).unwrap();
+        assert_eq!(
+            parsed.algorithms,
+            Some(vec![
+                PublicKeyCredentialParameters {
+                    alg: COSEAlgorithm::ES256
+                },
+                PublicKeyCredentialParameters {
+                    alg: COSEAlgorithm::EDDSA
+                },
+                PublicKeyCredentialParameters {
+                    alg: COSEAlgorithm::Ed25519
+                },
+            ]),
         );
     }
 
