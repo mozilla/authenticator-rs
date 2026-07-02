@@ -9,13 +9,27 @@ use crate::transport::hid::HIDDevice;
 use crate::transport::platform::{hidraw, monitor};
 use crate::transport::{FidoDevice, FidoProtocol, HIDError, SharedSecret};
 use crate::u2ftypes::U2FDeviceInfo;
-use crate::util::from_unix_result;
+use crate::util::{from_unix_result, io_err};
 use std::fs::OpenOptions;
 use std::hash::{Hash, Hasher};
 use std::io;
 use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
+
+/// USB HID read timeout, in milliseconds.
+///
+/// This is needed to prevent devices (particularly virtual `uhid` bridge devices) that *don't*
+/// respond in a timely manner from [causing the browser to hang][0].
+///
+/// [CTAP 2.3 §11.2.9.1.7][1] says devices SHOULD send `CTAPHID_KEEPALIVE` every 100ms while
+/// processing a `CTAPHID_MSG` or `CTAPHID_CBOR`. This gives devices 2 seconds to send a
+/// `CTAPHID_KEEPALIVE`. [`HIDDevice::sendrecv`][] lets an application interrupt an authenticator
+/// sending `CTAPHID_KEEPALIVE` forever.
+///
+/// [0]: https://bugzilla.mozilla.org/show_bug.cgi?id=1958831
+/// [1]: https://fidoalliance.og/specs/fido-v2.3-ps-20260226/fido-client-to-authenticator-protocol-v2.3-ps-20260226.html#usb-hid-keepalive
+const READ_TIMEOUT: i32 = 2000;
 
 #[derive(Debug)]
 pub struct Device {
@@ -50,6 +64,18 @@ impl Hash for Device {
 
 impl Read for Device {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        // Check that we can actually read from the device.
+        let mut pfd: libc::pollfd = unsafe { std::mem::zeroed() };
+        pfd.fd = self.fd.as_raw_fd();
+        pfd.events = libc::POLLIN;
+        let nfds = unsafe { libc::poll(&mut pfd, 1, READ_TIMEOUT) };
+        if nfds == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        if nfds == 0 {
+            return Err(io_err("no response from device"));
+        }
+
         let bufp = buf.as_mut_ptr() as *mut libc::c_void;
         let rv = unsafe { libc::read(self.fd.as_raw_fd(), bufp, buf.len()) };
         from_unix_result(rv as usize)
