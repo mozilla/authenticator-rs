@@ -203,7 +203,7 @@ impl DeviceInterfaceDetailData {
         unsafe { (*data).cbSize = cb_size as minwindef::UINT };
 
         // Compute offset of `SP_DEVICE_INTERFACE_DETAIL_DATA_W.DevicePath`.
-        let offset = memoffset::offset_of!(setupapi::SP_DEVICE_INTERFACE_DETAIL_DATA_W, DevicePath);
+        let offset = mem::offset_of!(setupapi::SP_DEVICE_INTERFACE_DETAIL_DATA_W, DevicePath);
 
         Some(Self {
             data,
