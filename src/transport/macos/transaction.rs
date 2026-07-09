@@ -41,6 +41,7 @@ impl Transaction {
                 &dyn Fn() -> bool,
             ) + Sync
             + Send
+            + Clone
             + 'static,
         T: 'static,
     {

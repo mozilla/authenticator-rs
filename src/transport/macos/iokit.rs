@@ -12,6 +12,7 @@ use core_foundation::base::*;
 use core_foundation::dictionary::*;
 use core_foundation::number::*;
 use core_foundation::runloop::*;
+use core_foundation::set::*;
 use core_foundation::string::*;
 use std::ops::Deref;
 use std::os::raw::c_void;
@@ -52,7 +53,7 @@ pub struct __IOHIDManager {
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
-pub struct IOHIDDeviceRef(*const c_void);
+pub struct IOHIDDeviceRef(pub(crate) *const c_void);
 
 unsafe impl Send for IOHIDDeviceRef {}
 unsafe impl Sync for IOHIDDeviceRef {}
@@ -188,6 +189,7 @@ extern "C" {
         allocator: CFAllocatorRef,
         options: IOHIDManagerOptions,
     ) -> IOHIDManagerRef;
+    pub fn IOHIDManagerCopyDevices(manager: IOHIDManagerRef) -> CFSetRef;
     pub fn IOHIDManagerSetDeviceMatching(manager: IOHIDManagerRef, matching: CFDictionaryRef);
     pub fn IOHIDManagerRegisterDeviceMatchingCallback(
         manager: IOHIDManagerRef,

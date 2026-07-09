@@ -10,6 +10,7 @@ use crate::transport::platform::iokit::*;
 use crate::util::io_err;
 use core_foundation::base::*;
 use core_foundation::runloop::*;
+use core_foundation::set::*;
 use runloop::RunLoop;
 use std::collections::HashMap;
 use std::os::raw::c_void;
@@ -50,6 +51,7 @@ where
             &dyn Fn() -> bool,
         ) + Send
         + Sync
+        + Clone
         + 'static,
 {
     pub fn new(
@@ -100,12 +102,23 @@ where
             );
 
             let rv = IOHIDManagerOpen(self.manager, kIOHIDManagerOptionNone);
-            if rv == 0 {
-                Ok(())
-            } else {
-                Err(io_err(&format!("Couldn't open HID Manager, rv={rv}")))
+            if rv != 0 {
+                return Err(io_err(&format!("Couldn't open HID Manager, rv={rv}")));
             }
         }
+
+        // Enumerate all existing devices simultaneously, like what Linux does. This mitigates
+        // against a race condition in DeviceSelector if there is a slow device.
+        let devices = self.get_devices();
+        let _ = self
+            .selector_sender
+            .send(DeviceSelectorEvent::DevicesAdded(devices.clone()));
+
+        for device in devices {
+            self.add_device(device);
+        }
+
+        Ok(())
     }
 
     pub fn stop(&mut self) {
@@ -119,6 +132,26 @@ where
         unsafe { IOHIDManagerClose(self.manager, kIOHIDManagerOptionNone) };
     }
 
+    /// Set up a runloop for a new device.
+    fn add_device(&mut self, device_ref: IOHIDDeviceRef) {
+        let selector_sender = self.selector_sender.clone();
+        let status_sender = self.status_sender.clone();
+        let (tx, rx) = channel();
+        let f = self.new_device_cb.clone();
+
+        // Create a new per-device runloop.
+        let runloop = RunLoop::new(move |alive| {
+            // Ensure that the runloop is still alive.
+            if alive() {
+                f((device_ref, rx), selector_sender, status_sender, alive);
+            }
+        });
+
+        if let Ok(runloop) = runloop {
+            self.map.insert(device_ref, DeviceData { tx, runloop });
+        }
+    }
+
     fn remove_device(&mut self, device_ref: IOHIDDeviceRef) {
         if let Some(DeviceData { tx, runloop }) = self.map.remove(&device_ref) {
             let _ = self
@@ -129,6 +162,27 @@ where
 
             // Wait until the runloop stopped.
             runloop.cancel();
+        }
+    }
+
+    /// Get all currently-connected devices.
+    fn get_devices(&mut self) -> Vec<IOHIDDeviceRef> {
+        unsafe {
+            let devices = IOHIDManagerCopyDevices(self.manager);
+            if devices.is_null() {
+                // IOHIDManagerCopyDevices returns null on zero devices (undocumented!)
+                return Vec::with_capacity(0);
+            }
+
+            let s: CFSet<IOHIDDeviceRef> = CFSet::wrap_under_get_rule(devices);
+            let mut refs: Vec<IOHIDDeviceRef> = Vec::with_capacity(s.len());
+
+            CFSetGetValues(
+                s.as_concrete_TypeRef(),
+                refs.as_mut_ptr() as *mut *const c_void,
+            );
+            refs.set_len(s.len());
+            refs
         }
     }
 
@@ -163,25 +217,17 @@ where
         device_ref: IOHIDDeviceRef,
     ) {
         let this = unsafe { &mut *(context as *mut Self) };
+        // IOHIDManager sends a DeviceMatchingCallback for every already-connected device, but
+        // get_devices will have already handled this.
+        if this.map.contains_key(&device_ref) {
+            debug!("Ignoring duplicate device: {device_ref:?}");
+            return;
+        }
+
         let _ = this
             .selector_sender
             .send(DeviceSelectorEvent::DevicesAdded(vec![device_ref]));
-        let selector_sender = this.selector_sender.clone();
-        let status_sender = this.status_sender.clone();
-        let (tx, rx) = channel();
-        let f = &this.new_device_cb;
-
-        // Create a new per-device runloop.
-        let runloop = RunLoop::new(move |alive| {
-            // Ensure that the runloop is still alive.
-            if alive() {
-                f((device_ref, rx), selector_sender, status_sender, alive);
-            }
-        });
-
-        if let Ok(runloop) = runloop {
-            this.map.insert(device_ref, DeviceData { tx, runloop });
-        }
+        this.add_device(device_ref);
     }
 
     extern "C" fn on_device_removal(
