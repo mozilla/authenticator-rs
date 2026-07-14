@@ -166,7 +166,7 @@ where
     }
 
     /// Get all currently-connected devices.
-    fn get_devices(&mut self) -> Vec<IOHIDDeviceRef> {
+    fn get_devices(&self) -> Vec<IOHIDDeviceRef> {
         unsafe {
             let devices = IOHIDManagerCopyDevices(self.manager);
             if devices.is_null() {
@@ -174,7 +174,7 @@ where
                 return Vec::with_capacity(0);
             }
 
-            let s: CFSet<IOHIDDeviceRef> = CFSet::wrap_under_get_rule(devices);
+            let s: CFSet<IOHIDDeviceRef> = CFSet::wrap_under_create_rule(devices);
             let mut refs: Vec<IOHIDDeviceRef> = Vec::with_capacity(s.len());
 
             CFSetGetValues(
