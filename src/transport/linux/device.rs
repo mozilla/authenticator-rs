@@ -65,14 +65,19 @@ impl Hash for Device {
 impl Read for Device {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         // Check that we can actually read from the device.
-        let mut pfd: libc::pollfd = unsafe { std::mem::zeroed() };
-        pfd.fd = self.fd.as_raw_fd();
-        pfd.events = libc::POLLIN;
+        let mut pfd = libc::pollfd {
+            fd: self.fd.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
         let nfds = unsafe { libc::poll(&mut pfd, 1, READ_TIMEOUT) };
-        if nfds == -1 {
+        if nfds == -1 || pfd.revents & libc::POLLERR != 0 {
             return Err(io::Error::last_os_error());
         }
-        if nfds == 0 {
+        if pfd.revents & libc::POLLNVAL != 0 {
+            return Err(io::Error::from_raw_os_error(libc::EBADF));
+        }
+        if nfds == 0 || pfd.revents & libc::POLLIN == 0 {
             return Err(io_err("no response from device"));
         }
 
