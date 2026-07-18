@@ -588,6 +588,24 @@ pub fn register<Dev: FidoDevice>(
     false
 }
 
+fn ensure_hmac_secret_shared_secret<Dev: FidoDevice>(
+    get_assertion: &GetAssertion,
+    dev: &mut Dev,
+    alive: &dyn Fn() -> bool,
+) -> Result<(), HIDError> {
+    if get_assertion.hmac_requested()
+        && dev.get_shared_secret().is_none()
+        && dev.get_protocol() == FidoProtocol::CTAP2
+        && dev
+            .get_authenticator_info()
+            .is_some_and(|info| info.supports_hmac_secret())
+    {
+        dev.establish_shared_secret(alive)?;
+    }
+
+    Ok(())
+}
+
 pub fn sign<Dev: FidoDevice>(
     dev: &mut Dev,
     args: SignArgs,
@@ -701,6 +719,11 @@ pub fn sign<Dev: FidoDevice>(
             .into()));
             return false;
         }
+
+        unwrap_result!(
+            ensure_hmac_secret_shared_secret(&get_assertion, dev, alive),
+            callback
+        );
 
         // Use the shared secret in the extensions, if requested
         get_assertion = match get_assertion.process_hmac_secret_and_prf_extension(
@@ -1575,4 +1598,100 @@ pub(crate) fn configure_authenticator(
         }
     }
     false
+}
+
+#[cfg(all(test, not(feature = "crypto_dummy")))]
+mod tests {
+    use super::*;
+    use crate::{
+        crypto::{COSEEC2Key, COSEKey, COSEKeyType, Curve, PinUvAuthProtocol},
+        ctap2::commands::{
+            client_pin::{ClientPinResponse, GetKeyAgreement},
+            get_assertion::{GetAssertionExtensions, HmacGetSecretOrPrf, HmacSecretExtension},
+        },
+        transport::platform::device::Device,
+        util::decode_hex,
+        AuthenticatorInfo,
+    };
+    use std::convert::TryFrom;
+
+    #[test]
+    fn hmac_secret_without_puat_establishes_shared_secret_and_serializes_input() {
+        let info = AuthenticatorInfo {
+            extensions: vec!["hmac-secret".to_string()],
+            pin_protocols: Some(vec![1]),
+            ..Default::default()
+        };
+        let pin_protocol = PinUvAuthProtocol::try_from(&info).expect("PIN protocol");
+        let mut dev = Device::new_skipping_serialization("ctap2/hmac-secret").expect("mock device");
+        dev.set_authenticator_info(info);
+        dev.add_upcoming_ctap2_request(&GetKeyAgreement::new(pin_protocol));
+        dev.add_upcoming_ctap_response(ClientPinResponse {
+            key_agreement: Some(COSEKey {
+                alg: COSEAlgorithm::ECDH_ES_HKDF256,
+                key: COSEKeyType::EC2(COSEEC2Key {
+                    curve: Curve::SECP256R1,
+                    x: decode_hex(
+                        "0501D5BC78DA9252560A26CB08FCC60CBE0B6D3B8E1D1FCEE514FAC0AF675168",
+                    ),
+                    y: decode_hex(
+                        "D551B3ED46F665731F95B4532939C25D91DB7EB844BD96D4ABD4083785F8DF47",
+                    ),
+                }),
+            }),
+            ..Default::default()
+        });
+
+        let mut get_assertion = GetAssertion::new(
+            ClientDataHash([0; 32]),
+            RelyingParty::from("example.com"),
+            vec![],
+            GetAssertionOptions::default(),
+            GetAssertionExtensions {
+                hmac_secret: Some(HmacGetSecretOrPrf::HmacGetSecret(HmacSecretExtension::new(
+                    vec![0x01; 32],
+                    None,
+                ))),
+                ..Default::default()
+            },
+        );
+        let pin_uv_auth_result = get_pin_uv_auth_param(
+            &mut get_assertion,
+            &mut dev,
+            PinUvAuthTokenPermission::GetAssertion,
+            false,
+            UserVerificationRequirement::Discouraged,
+            &|| true,
+            &None,
+        )
+        .expect("authentication selection must succeed");
+        assert_matches!(pin_uv_auth_result, PinUvAuthResult::NoAuthRequired);
+
+        assert!(dev.get_shared_secret().is_none());
+
+        ensure_hmac_secret_shared_secret(&get_assertion, &mut dev, &|| true)
+            .expect("shared-secret establishment must succeed");
+        assert!(dev.get_shared_secret().is_some());
+
+        let get_assertion = get_assertion
+            .process_hmac_secret_and_prf_extension(
+                dev.get_shared_secret()
+                    .map(|secret| (secret, &pin_uv_auth_result)),
+            )
+            .expect("hmac-secret processing must succeed");
+        let request = get_assertion
+            .wire_format()
+            .expect("GetAssertion must serialize");
+        let serde_cbor::Value::Map(request) =
+            serde_cbor::from_slice(&request).expect("GetAssertion payload must be CBOR")
+        else {
+            panic!("GetAssertion payload must be a map");
+        };
+        let Some(serde_cbor::Value::Map(extensions)) = request.get(&serde_cbor::Value::Integer(4))
+        else {
+            panic!("GetAssertion must contain extensions");
+        };
+
+        assert!(extensions.contains_key(&serde_cbor::Value::Text("hmac-secret".to_string())));
+    }
 }
