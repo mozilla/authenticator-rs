@@ -190,7 +190,7 @@ impl HmacSecretExtension {
     pub fn calculate(
         &mut self,
         secret: &SharedSecret,
-        puat: Option<&PinUvAuthToken>,
+        _puat: Option<&PinUvAuthToken>,
     ) -> Result<(), CryptoError> {
         let salt_enc = match (
             <[u8; 32]>::try_from(self.salt1.as_slice()),
@@ -213,9 +213,7 @@ impl HmacSecretExtension {
         });
 
         // CTAP2.1 platforms MUST include this parameter if the value of pinUvAuthProtocol is not 1.
-        self.pin_protocol = puat
-            .map(|puat| puat.pin_protocol.id())
-            .filter(|id| *id != 1);
+        self.pin_protocol = Some(secret.pin_protocol.id()).filter(|id| *id != 1);
 
         Ok(())
     }
@@ -2407,6 +2405,38 @@ pub mod test {
                     .finalize()
                     .to_vec()
                 );
+            }
+
+            #[test]
+            fn calculate_hmac_get_secret_without_puat_serializes_shared_secret_protocol(
+            ) -> Result<(), AuthenticatorError> {
+                for (pin_protocol, expected_protocol) in [(1, None), (2, Some(2))] {
+                    let (shared_secret, _) = make_test_secret_without_puat(pin_protocol)?;
+                    let extension = HmacGetSecretOrPrf::HmacGetSecret(HmacSecretExtension::new(
+                        vec![0x01; 32],
+                        None,
+                    ));
+                    let (extension, selected_cred) =
+                        extension.calculate(&shared_secret, &[], None)?;
+
+                    assert_eq!(selected_cred, None);
+
+                    let extension: serde_cbor::Value = serde_cbor::from_slice(
+                        &serde_cbor::to_vec(&extension).expect("hmac-secret must serialize"),
+                    )
+                    .expect("hmac-secret CBOR must deserialize");
+                    let serde_cbor::Value::Map(extension) = extension else {
+                        panic!("hmac-secret must serialize as a map");
+                    };
+
+                    assert_eq!(
+                        extension.get(&serde_cbor::Value::Integer(4)).cloned(),
+                        expected_protocol
+                            .map(|protocol| serde_cbor::Value::Integer(protocol.into())),
+                    );
+                }
+
+                Ok(())
             }
 
             #[test]
