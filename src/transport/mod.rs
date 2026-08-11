@@ -14,7 +14,7 @@ use crate::ctap2::commands::reset::Reset;
 use crate::ctap2::commands::selection::Selection;
 use crate::ctap2::commands::{CommandError, RequestCtap1, RequestCtap2, StatusCode};
 use crate::ctap2::preflight::CheckKeyHandle;
-use crate::transport::device_selector::BlinkResult;
+pub use crate::transport::device_selector::BlinkResult;
 use crate::transport::errors::HIDError;
 
 use crate::Pin;
