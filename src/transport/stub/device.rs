@@ -77,10 +77,6 @@ impl FidoDevice for Device {
         unimplemented!();
     }
 
-    fn should_try_ctap2(&self) -> bool {
-        unimplemented!();
-    }
-
     fn initialized(&self) -> bool {
         unimplemented!();
     }
@@ -109,7 +105,7 @@ impl FidoDevice for Device {
         unimplemented!()
     }
 
-    fn downgrade_to_ctap1(&mut self) {
+    fn downgrade_to_ctap1(&mut self) -> Result<(), HIDError> {
         unimplemented!()
     }
 }

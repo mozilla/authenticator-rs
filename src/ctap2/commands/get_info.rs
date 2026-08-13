@@ -641,7 +641,7 @@ pub mod tests {
     use crate::crypto::COSEAlgorithm;
     use crate::transport::device_selector::Device;
     use crate::transport::platform::device::IN_HID_RPT_SIZE;
-    use crate::transport::{hid::HIDDevice, FidoDevice, FidoProtocol};
+    use crate::transport::{hid::HIDDevice, CtapVersionSupport, FidoDevice, FidoProtocol};
     use rand::{thread_rng, RngCore};
     use serde_cbor::de::from_slice;
 
@@ -999,7 +999,6 @@ pub mod tests {
     #[test]
     fn test_get_info_ctap2_only() {
         let mut device = Device::new("commands/get_info").unwrap();
-        assert_eq!(device.get_protocol(), FidoProtocol::CTAP2);
         let nonce = [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01];
 
         // channel id
@@ -1045,6 +1044,16 @@ pub mod tests {
         device.init().expect("Failed to init device");
 
         assert_eq!(device.get_cid(), &cid);
+
+        assert!(!device.supports_ctap1());
+        assert!(device.supports_ctap2());
+        assert_eq!(device.get_protocol(), FidoProtocol::CTAP2);
+        device
+            .downgrade_to_ctap1()
+            .expect_err("downgrading to CTAP1 should fail");
+        assert_eq!(device.get_protocol(), FidoProtocol::CTAP2);
+        assert!(!device.supports_ctap1());
+        assert!(device.supports_ctap2());
 
         let dev_info = device.get_device_info();
         assert_eq!(

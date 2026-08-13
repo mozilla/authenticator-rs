@@ -939,7 +939,7 @@ pub mod test {
     };
     use crate::transport::device_selector::Device;
     use crate::transport::hid::HIDDevice;
-    use crate::transport::{FidoDevice, FidoDeviceIO, FidoProtocol};
+    use crate::transport::{CtapVersionSupport, FidoDevice, FidoDeviceIO, FidoProtocol};
     use crate::u2ftypes::U2FDeviceInfo;
     use rand::{thread_rng, RngCore};
 
@@ -1313,8 +1313,25 @@ pub mod test {
         );
     }
 
+    fn fill_device_ctap1_init(device: &mut Device, cid: [u8; 4]) {
+        // init
+        let mut msg = vec![0xFF, 0xFF, 0xFF, 0xFF]; // broadcast
+        msg.extend([HIDCmd::Init.into(), 0x00, 8]); // cmd + bcnt
+        msg.extend([0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]); // nonce
+        device.add_write(&msg, 0);
+
+        let mut msg = vec![0xFF, 0xFF, 0xFF, 0xFF]; // broadcast
+        msg.extend([0x06, 0x00, 17]); // cmd + bcnt
+        msg.extend([0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]); // nonce
+        msg.extend(&cid);
+        msg.push(2); // CTAPHID protocol version identifir
+        msg.extend([1, 0, 0]); // Device version numbber
+        msg.push(0x01); // CAPABILITY_WINK
+        device.add_read(&msg, 0);
+    }
+
     fn fill_device_ctap1(device: &mut Device, cid: [u8; 4], flags: u8, answer_status: [u8; 2]) {
-        // ctap2 request
+        // ctap1 request
         let mut msg = cid.to_vec();
         msg.extend([HIDCmd::Msg.into(), 0x00, 0x8A]); // cmd + bcnt
         msg.extend([0x00, 0x2]); // U2F_AUTHENTICATE
@@ -1381,13 +1398,15 @@ pub mod test {
             Default::default(),
         );
         let mut device = Device::new("commands/get_assertion").unwrap(); // not really used (all functions ignore it)
-                                                                         // channel id
-        device.downgrade_to_ctap1();
-        assert_eq!(device.get_protocol(), FidoProtocol::CTAP1);
+
         let mut cid = [0u8; 4];
         thread_rng().fill_bytes(&mut cid);
-
-        device.set_cid(cid);
+        fill_device_ctap1_init(&mut device, cid);
+        HIDDevice::pre_init(&mut device).expect("pre_init");
+        assert!(device.supports_ctap1());
+        assert!(!device.supports_ctap2());
+        device.downgrade_to_ctap1().expect("failed to downgrade");
+        assert_eq!(device.get_protocol(), FidoProtocol::CTAP1);
 
         // ctap1 request
         fill_device_ctap1(
@@ -1474,13 +1493,15 @@ pub mod test {
         );
 
         let mut device = Device::new("commands/get_assertion").unwrap(); // not really used (all functions ignore it)
-                                                                         // channel id
-        device.downgrade_to_ctap1();
-        assert_eq!(device.get_protocol(), FidoProtocol::CTAP1);
+
         let mut cid = [0u8; 4];
         thread_rng().fill_bytes(&mut cid);
-
-        device.set_cid(cid);
+        fill_device_ctap1_init(&mut device, cid);
+        HIDDevice::pre_init(&mut device).expect("pre_init");
+        assert!(device.supports_ctap1());
+        assert!(!device.supports_ctap2());
+        device.downgrade_to_ctap1().expect("failed to downgrade");
+        assert_eq!(device.get_protocol(), FidoProtocol::CTAP1);
 
         assert_matches!(
             do_credential_list_filtering_ctap1(
@@ -1669,6 +1690,8 @@ pub mod test {
             version_build: 0x08,
             cap_flags: Capability::WINK | Capability::CBOR,
         });
+        assert!(device.supports_ctap1());
+        assert!(device.supports_ctap2());
         device.set_authenticator_info(AuthenticatorInfo {
             versions: vec![AuthenticatorVersion::U2F_V2, AuthenticatorVersion::FIDO_2_0],
             extensions: vec!["uvm".to_string(), "hmac-secret".to_string()],

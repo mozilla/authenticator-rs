@@ -413,6 +413,37 @@ fn determine_puap_if_needed<Dev: FidoDevice, T: PinUvAuthCommand + RequestCtap2>
     Err(AuthenticatorError::CancelledByUser)
 }
 
+/// Check that the registration request can be processed by a CTAP1 device.
+///
+/// See [CTAP 2.1 §10.2][0].
+///
+/// Some additional checks are performed in `MakeCredentials::RequestCtap1`.
+///
+/// [0]: https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-errata-20220621.html#u2f-authenticatorMakeCredential-interoperability
+pub(crate) fn check_ctap1_register_compatibility(args: &RegisterArgs) -> crate::Result<()> {
+    if args.resident_key_req == ResidentKeyRequirement::Required {
+        return Err(AuthenticatorError::UnsupportedOption(
+            UnsupportedOption::ResidentKey,
+        ));
+    }
+    if args.user_verification_req == UserVerificationRequirement::Required {
+        return Err(AuthenticatorError::UnsupportedOption(
+            UnsupportedOption::UserVerification,
+        ));
+    }
+    if !args
+        .pub_cred_params
+        .iter()
+        .any(|x| x.alg == COSEAlgorithm::ES256)
+    {
+        return Err(AuthenticatorError::UnsupportedOption(
+            UnsupportedOption::PubCredParams,
+        ));
+    }
+
+    Ok(())
+}
+
 pub fn register<Dev: FidoDevice>(
     dev: &mut Dev,
     args: RegisterArgs,
@@ -422,50 +453,33 @@ pub fn register<Dev: FidoDevice>(
 ) -> bool {
     let mut options = MakeCredentialsOptions::default();
 
-    if dev.get_protocol() == FidoProtocol::CTAP2 {
-        let info = match dev.get_authenticator_info() {
-            Some(info) => info,
-            None => {
-                callback.call(Err(HIDError::DeviceNotInitialized.into()));
+    match dev.get_protocol() {
+        FidoProtocol::CTAP2 => {
+            let info = match dev.get_authenticator_info() {
+                Some(info) => info,
+                None => {
+                    callback.call(Err(HIDError::DeviceNotInitialized.into()));
+                    return false;
+                }
+            };
+
+            // Set options based on the arguments and the device info.
+            // The user verification option will be set in `determine_puap_if_needed`.
+            options.resident_key = match args.resident_key_req {
+                ResidentKeyRequirement::Required => Some(true),
+                ResidentKeyRequirement::Preferred => {
+                    // Use a resident key if the authenticator supports it
+                    Some(info.options.resident_key)
+                }
+                ResidentKeyRequirement::Discouraged => Some(false),
+            };
+        }
+
+        FidoProtocol::CTAP1 => {
+            if let Err(e) = check_ctap1_register_compatibility(&args) {
+                callback.call(Err(e));
                 return false;
             }
-        };
-
-        // Set options based on the arguments and the device info.
-        // The user verification option will be set in `determine_puap_if_needed`.
-        options.resident_key = match args.resident_key_req {
-            ResidentKeyRequirement::Required => Some(true),
-            ResidentKeyRequirement::Preferred => {
-                // Use a resident key if the authenticator supports it
-                Some(info.options.resident_key)
-            }
-            ResidentKeyRequirement::Discouraged => Some(false),
-        }
-    } else {
-        // Check that the request can be processed by a CTAP1 device.
-        // See CTAP 2.1 Section 10.2. Some additional checks are performed in
-        // MakeCredentials::RequestCtap1
-        if args.resident_key_req == ResidentKeyRequirement::Required {
-            callback.call(Err(AuthenticatorError::UnsupportedOption(
-                UnsupportedOption::ResidentKey,
-            )));
-            return false;
-        }
-        if args.user_verification_req == UserVerificationRequirement::Required {
-            callback.call(Err(AuthenticatorError::UnsupportedOption(
-                UnsupportedOption::UserVerification,
-            )));
-            return false;
-        }
-        if !args
-            .pub_cred_params
-            .iter()
-            .any(|x| x.alg == COSEAlgorithm::ES256)
-        {
-            callback.call(Err(AuthenticatorError::UnsupportedOption(
-                UnsupportedOption::PubCredParams,
-            )));
-            return false;
         }
     }
 
@@ -588,6 +602,28 @@ pub fn register<Dev: FidoDevice>(
     false
 }
 
+/// Check that the signing request can be processed by a CTAP1 device.
+///
+/// See [CTAP 2.1 §10.3][0].
+///
+/// Some additional checks are performed in `GetAssertion::RequestCtap1`.
+///
+/// [0]: https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-errata-20220621.html#u2f-authenticatorGetAssertion-interoperability
+pub(crate) fn check_ctap1_sign_compatibility(args: &SignArgs) -> crate::Result<()> {
+    if args.user_verification_req == UserVerificationRequirement::Required {
+        return Err(AuthenticatorError::UnsupportedOption(
+            UnsupportedOption::UserVerification,
+        ));
+    }
+    if args.allow_list.is_empty() {
+        return Err(AuthenticatorError::UnsupportedOption(
+            UnsupportedOption::EmptyAllowList,
+        ));
+    }
+
+    Ok(())
+}
+
 pub fn sign<Dev: FidoDevice>(
     dev: &mut Dev,
     args: SignArgs,
@@ -596,19 +632,8 @@ pub fn sign<Dev: FidoDevice>(
     alive: &dyn Fn() -> bool,
 ) -> bool {
     if dev.get_protocol() == FidoProtocol::CTAP1 {
-        // Check that the request can be processed by a CTAP1 device.
-        // See CTAP 2.1 Section 10.3. Some additional checks are performed in
-        // GetAssertion::RequestCtap1
-        if args.user_verification_req == UserVerificationRequirement::Required {
-            callback.call(Err(AuthenticatorError::UnsupportedOption(
-                UnsupportedOption::UserVerification,
-            )));
-            return false;
-        }
-        if args.allow_list.is_empty() {
-            callback.call(Err(AuthenticatorError::UnsupportedOption(
-                UnsupportedOption::EmptyAllowList,
-            )));
+        if let Err(e) = check_ctap1_sign_compatibility(&args) {
+            callback.call(Err(e));
             return false;
         }
     }
