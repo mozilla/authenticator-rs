@@ -62,14 +62,12 @@ impl RequestCtap1 for GetVersion {
 pub mod tests {
     use crate::consts::{Capability, HIDCmd, CID_BROADCAST, SW_NO_ERROR};
     use crate::transport::device_selector::Device;
-    use crate::transport::{hid::HIDDevice, FidoDevice, FidoProtocol};
+    use crate::transport::{hid::HIDDevice, CtapVersionSupport, FidoDevice, FidoProtocol};
     use rand::{thread_rng, RngCore};
 
     #[test]
     fn test_get_version_ctap1_only() {
         let mut device = Device::new("commands/get_version").unwrap();
-        device.downgrade_to_ctap1();
-        assert_eq!(device.get_protocol(), FidoProtocol::CTAP1);
         let nonce = [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01];
 
         // channel id
@@ -91,7 +89,7 @@ pub mod tests {
         msg.extend_from_slice(&nonce);
         msg.extend_from_slice(&cid); // new channel id
 
-        // We are not setting CBOR, to signal that the device does not support CTAP1
+        // We are not setting CBOR, to signal that the device does not support CTAP2
         msg.extend([0x02, 0x04, 0x01, 0x08, 0x01]); // versions + flags (wink)
         device.add_read(&msg, 0);
 
@@ -109,6 +107,11 @@ pub mod tests {
         device.add_read(&msg, 0);
 
         device.init().expect("Failed to init device");
+        assert!(device.supports_ctap1());
+        assert!(!device.supports_ctap2());
+
+        device.downgrade_to_ctap1().expect("failed to downgrade");
+        assert_eq!(device.get_protocol(), FidoProtocol::CTAP1);
 
         assert_eq!(device.get_cid(), &cid);
 

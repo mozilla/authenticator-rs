@@ -3,11 +3,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 extern crate libc;
-use crate::consts::{Capability, CID_BROADCAST, MAX_HID_RPT_SIZE};
+use crate::consts::{CID_BROADCAST, MAX_HID_RPT_SIZE};
 use crate::ctap2::commands::get_info::AuthenticatorInfo;
 use crate::transport::hid::HIDDevice;
 use crate::transport::platform::monitor::WrappedOpenDevice;
-use crate::transport::{FidoDevice, FidoProtocol, HIDError, SharedSecret};
+use crate::transport::{CtapVersionSupport, FidoDevice, FidoProtocol, HIDError, SharedSecret};
 use crate::u2ftypes::U2FDeviceInfo;
 use crate::util::{from_unix_result, io_err};
 use std::ffi::{CString, OsString};
@@ -171,12 +171,6 @@ impl FidoDevice for Device {
         HIDDevice::pre_init(self)
     }
 
-    fn should_try_ctap2(&self) -> bool {
-        HIDDevice::get_device_info(self)
-            .cap_flags
-            .contains(Capability::CBOR)
-    }
-
     fn initialized(&self) -> bool {
         // During successful init, the broadcast channel id gets repplaced by an actual one
         self.cid != CID_BROADCAST
@@ -218,7 +212,12 @@ impl FidoDevice for Device {
         self.protocol
     }
 
-    fn downgrade_to_ctap1(&mut self) {
-        self.protocol = FidoProtocol::CTAP1;
+    fn downgrade_to_ctap1(&mut self) -> Result<(), HIDError> {
+        if self.supports_ctap1() {
+            self.protocol = FidoProtocol::CTAP1;
+            Ok(())
+        } else {
+            Err(HIDError::UnexpectedVersion)
+        }
     }
 }

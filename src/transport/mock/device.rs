@@ -1,13 +1,13 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-use crate::consts::{Capability, HIDCmd, CID_BROADCAST};
+use crate::consts::{HIDCmd, CID_BROADCAST};
 use crate::crypto::SharedSecret;
 use crate::ctap2::commands::get_info::AuthenticatorInfo;
 use crate::ctap2::commands::{CtapResponse, RequestCtap1, RequestCtap2};
 use crate::transport::device_selector::DeviceCommand;
 use crate::transport::TestDevice;
-use crate::transport::{hid::HIDDevice, FidoDevice, FidoProtocol, HIDError};
+use crate::transport::{hid::HIDDevice, CtapVersionSupport, FidoDevice, FidoProtocol, HIDError};
 use crate::u2ftypes::{U2FDeviceInfo, U2FHIDInitResp};
 use std::any::Any;
 use std::collections::VecDeque;
@@ -291,12 +291,6 @@ impl FidoDevice for Device {
         HIDDevice::pre_init(self)
     }
 
-    fn should_try_ctap2(&self) -> bool {
-        HIDDevice::get_device_info(self)
-            .cap_flags
-            .contains(Capability::CBOR)
-    }
-
     fn initialized(&self) -> bool {
         self.get_cid() != &CID_BROADCAST
     }
@@ -325,7 +319,12 @@ impl FidoDevice for Device {
         self.protocol
     }
 
-    fn downgrade_to_ctap1(&mut self) {
-        self.protocol = FidoProtocol::CTAP1;
+    fn downgrade_to_ctap1(&mut self) -> Result<(), HIDError> {
+        if self.supports_ctap1() {
+            self.protocol = FidoProtocol::CTAP1;
+            Ok(())
+        } else {
+            Err(HIDError::UnexpectedVersion)
+        }
     }
 }
