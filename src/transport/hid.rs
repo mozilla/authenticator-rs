@@ -1,9 +1,9 @@
 use super::TestDevice;
-use crate::consts::{HIDCmd, CID_BROADCAST};
+use crate::consts::{Capability, HIDCmd, CID_BROADCAST};
 use crate::ctap2::commands::{CommandError, RequestCtap1, RequestCtap2, Retryable, StatusCode};
 use crate::status_update::{send_status, MessageDirection};
 use crate::transport::errors::{ApduErrorStatus, HIDError};
-use crate::transport::{FidoDevice, FidoDeviceIO, FidoProtocol};
+use crate::transport::{CtapVersionSupport, FidoDevice, FidoDeviceIO, FidoProtocol};
 use crate::u2ftypes::{U2FDeviceInfo, U2FHIDCont, U2FHIDInit, U2FHIDInitResp};
 use crate::util::io_err;
 use crate::StatusUpdate;
@@ -156,6 +156,16 @@ pub trait HIDDevice: FidoDevice + Read + Write {
         };
         trace!("u2f_read({:?}) cmd={:?}: {:04X?}", self.id(), cmd, &data);
         Ok((cmd, data))
+    }
+}
+
+impl<T: HIDDevice> CtapVersionSupport for T {
+    fn supports_ctap1(&self) -> bool {
+        !self.get_device_info().cap_flags.contains(Capability::NMSG)
+    }
+
+    fn supports_ctap2(&self) -> bool {
+        self.get_device_info().cap_flags.contains(Capability::CBOR)
     }
 }
 
