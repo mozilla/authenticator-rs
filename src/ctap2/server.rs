@@ -12,6 +12,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::convert::{Into, TryFrom};
 use std::fmt;
+use std::str::FromStr;
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct RpIdHash(pub [u8; 32]);
@@ -300,6 +301,20 @@ pub enum UserVerificationRequirement {
     Discouraged,
     Preferred,
     Required,
+}
+
+impl FromStr for UserVerificationRequirement {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // https://www.w3.org/TR/webauthn-3/#enumdef-userverificationrequirement
+        match s {
+            "required" => Ok(Self::Required),
+            "preferred" => Ok(Self::Preferred),
+            "discouraged" => Ok(Self::Discouraged),
+            s => Err(s.to_string()),
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]

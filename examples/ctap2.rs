@@ -5,11 +5,14 @@
 use authenticator::{
     authenticatorservice::{AuthenticatorService, RegisterArgs, SignArgs},
     crypto::COSEAlgorithm,
-    ctap2::server::{
-        AuthenticationExtensionsClientInputs, CredentialProtectionPolicy,
-        PublicKeyCredentialDescriptor, PublicKeyCredentialParameters,
-        PublicKeyCredentialUserEntity, RelyingParty, ResidentKeyRequirement, Transport,
-        UserVerificationRequirement,
+    ctap2::{
+        attestation::AuthenticatorDataFlags,
+        server::{
+            AuthenticationExtensionsClientInputs, CredentialProtectionPolicy,
+            PublicKeyCredentialDescriptor, PublicKeyCredentialParameters,
+            PublicKeyCredentialUserEntity, RelyingParty, ResidentKeyRequirement, Transport,
+            UserVerificationRequirement,
+        },
     },
     statecallback::StateCallback,
     Pin, StatusPinUv, StatusUpdate,
@@ -48,6 +51,13 @@ fn main() {
     opts.optflag("s", "hmac_secret", "With hmac-secret");
     opts.optflag("h", "help", "print this help menu");
     opts.optflag("f", "fallback", "Use CTAP1 fallback implementation");
+    opts.optopt(
+        "u",
+        "uv",
+        "User verification requirement (required, preferred, discouraged). Default is \"preferred\".",
+        "UV",
+    );
+
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
         Err(f) => panic!("{}", f.to_string()),
@@ -72,6 +82,21 @@ fn main() {
         }
         Err(e) => {
             println!("{e}");
+            print_usage(&program, opts);
+            return;
+        }
+    };
+
+    let user_verification_req = match matches.opt_get_default::<UserVerificationRequirement>(
+        "uv",
+        UserVerificationRequirement::Preferred,
+    ) {
+        Ok(uv) => {
+            println!("User verification requirement: {uv:?}");
+            uv
+        }
+        Err(e) => {
+            println!("Unknown user verification mode: {e}");
             print_usage(&program, opts);
             return;
         }
@@ -181,7 +206,7 @@ fn main() {
             ],
             transports: vec![Transport::USB, Transport::NFC],
         }],
-        user_verification_req: UserVerificationRequirement::Preferred,
+        user_verification_req,
         resident_key_req: ResidentKeyRequirement::Discouraged,
         extensions: AuthenticationExtensionsClientInputs {
             cred_props: Some(true),
@@ -212,6 +237,20 @@ fn main() {
             .expect("Problem receiving, unable to continue");
         match register_result {
             Ok(a) => {
+                println!("Register result: {a:?}");
+
+                let uv = a
+                    .att_obj
+                    .auth_data
+                    .flags
+                    .contains(AuthenticatorDataFlags::USER_VERIFIED);
+                if user_verification_req == UserVerificationRequirement::Required && !uv {
+                    panic!("User verification is required, but the authenticator did not set the UV flag (WebAuthn-3 §7.1, step 16)");
+                }
+                if uv {
+                    println!("User verified!");
+                }
+
                 println!("Ok!");
                 attestation_object = a;
                 break;
@@ -219,8 +258,6 @@ fn main() {
             Err(e) => panic!("Registration failed: {:?}", e),
         };
     }
-
-    println!("Register result: {:?}", &attestation_object);
 
     println!();
     println!("*********************************************************************");
@@ -242,7 +279,7 @@ fn main() {
         origin: format!("https://{rp_id}"),
         relying_party_id: rp_id,
         allow_list,
-        user_verification_req: UserVerificationRequirement::Preferred,
+        user_verification_req,
         user_presence_req: true,
         extensions: AuthenticationExtensionsClientInputs {
             app_id: using_app_id.then(|| app_id.clone()),
@@ -270,6 +307,19 @@ fn main() {
         match sign_result {
             Ok(assertion_object) => {
                 println!("Assertion Object: {assertion_object:?}");
+
+                let uv = assertion_object
+                    .assertion
+                    .auth_data
+                    .flags
+                    .contains(AuthenticatorDataFlags::USER_VERIFIED);
+                if user_verification_req == UserVerificationRequirement::Required && !uv {
+                    panic!("User verification is required, but the authenticator did not set the UV flag (WebAuthn-3 §7.2, step 17)");
+                }
+                if uv {
+                    println!("User verified!");
+                }
+
                 if using_app_id {
                     println!(
                         "Used AppID: {}",
