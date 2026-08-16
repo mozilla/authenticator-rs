@@ -288,14 +288,14 @@ impl From<&KeyHandle> for PublicKeyCredentialDescriptor {
     }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize)]
 pub enum ResidentKeyRequirement {
     Discouraged,
     Preferred,
     Required,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize)]
 pub enum UserVerificationRequirement {
     Discouraged,
     Preferred,
@@ -383,7 +383,7 @@ where
     Ok(bytes.to_vec())
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct AuthenticationExtensionsClientInputs {
     pub app_id: Option<String>,
     pub cred_props: Option<bool>,
@@ -408,7 +408,7 @@ pub struct CredentialProperties {
 
 /// Salt inputs for the `hmac-secret` extension.
 /// https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-20210615.html#dictdef-hmacgetsecretinput
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
 pub struct HMACGetSecretInput {
     pub salt1: [u8; 32],
     pub salt2: Option<[u8; 32]>,
@@ -422,7 +422,7 @@ pub struct HMACGetSecretOutput {
     pub output2: Option<[u8; 32]>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct AuthenticationExtensionsPRFInputs {
     pub eval: Option<AuthenticationExtensionsPRFValues>,
     pub eval_by_credential: Option<HashMap<Vec<u8>, AuthenticationExtensionsPRFValues>>,
@@ -502,7 +502,7 @@ impl AuthenticationExtensionsPRFInputs {
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
 pub struct AuthenticationExtensionsPRFValues {
     pub first: Vec<u8>,
     pub second: Option<Vec<u8>>,

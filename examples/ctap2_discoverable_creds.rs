@@ -74,6 +74,7 @@ fn register_user(
     username: &str,
     timeout_ms: u64,
     matches: &Matches,
+    do_logging: bool,
 ) {
     println!();
     println!("*********************************************************************");
@@ -182,6 +183,13 @@ fn register_user(
                     tx.send(elem).expect("Failed to send large blob element");
                 } else {
                     panic!("Unexpected large blob data request");
+                }
+            }
+            Ok(StatusUpdate::RequestLogging(dir, msg)) => {
+                if do_logging {
+                    println!("{dir:?} -> ");
+                    println!("    {msg}");
+                    println!("--------------------------------------");
                 }
             }
             Err(RecvError) => {
@@ -301,9 +309,10 @@ fn main() {
         "SEC",
     );
     opts.optflag("s", "skip_reg", "Skip registration");
-    opts.optflag("b", "cred_blob", "With credBlob");
-    opts.optflag("l", "large_blob_key", "With largeBlobKey-extension");
+    opts.optflag("b", "cred_blob", "With credBlob-extension");
+    opts.optflag("k", "large_blob_key", "With largeBlobKey-extension");
     opts.optflag("h", "help", "print this help menu");
+    opts.optflag("l", "logging", "Active request/response logging");
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
         Err(f) => panic!("{}", f.to_string()),
@@ -329,9 +338,10 @@ fn main() {
         }
     };
 
+    let do_logging = matches.opt_present("logging");
     if !matches.opt_present("skip_reg") {
         for username in &["A. User", "A. Nother", "Dr. Who"] {
-            register_user(&mut manager, username, timeout_ms, &matches)
+            register_user(&mut manager, username, timeout_ms, &matches, do_logging)
         }
     }
 
@@ -408,6 +418,13 @@ fn main() {
             }
             Ok(StatusUpdate::LargeBlobData(..)) => {
                 panic!("Unexpected large blob data request")
+            }
+            Ok(StatusUpdate::RequestLogging(dir, msg)) => {
+                if do_logging {
+                    println!("{dir:?} -> ");
+                    println!("{msg}");
+                    println!("--------------------------------------");
+                }
             }
             Err(RecvError) => {
                 println!("STATUS: end");
