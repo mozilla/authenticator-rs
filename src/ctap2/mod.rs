@@ -703,15 +703,14 @@ pub fn sign<Dev: FidoDevice>(
         }
 
         // Use the shared secret in the extensions, if requested
-        get_assertion = match get_assertion.process_hmac_secret_and_prf_extension(
-            dev.get_shared_secret().map(|s| (s, &pin_uv_auth_result)),
-        ) {
-            Ok(value) => value,
-            Err(e) => {
-                callback.call(Err(e));
-                return false;
-            }
-        };
+        get_assertion =
+            match get_assertion.process_hmac_secret_and_prf_extension(dev.get_shared_secret()) {
+                Ok(value) => value,
+                Err(e) => {
+                    callback.call(Err(e));
+                    return false;
+                }
+            };
 
         debug!("------------------------------------------------------------------");
         debug!("{get_assertion:?} using {pin_uv_auth_result:?}");

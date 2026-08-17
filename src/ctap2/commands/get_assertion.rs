@@ -1,8 +1,8 @@
 use super::get_info::AuthenticatorInfo;
 use super::large_blobs::LargeBlobArrayElement;
 use super::{
-    Command, CommandError, CtapResponse, PinUvAuthCommand, PinUvAuthResult, RequestCtap1,
-    RequestCtap2, Retryable, StatusCode,
+    Command, CommandError, CtapResponse, PinUvAuthCommand, RequestCtap1, RequestCtap2, Retryable,
+    StatusCode,
 };
 use crate::consts::{
     PARAMETER_SIZE, U2F_AUTHENTICATE, U2F_DONT_ENFORCE_USER_PRESENCE_AND_SIGN,
@@ -113,15 +113,14 @@ impl HmacGetSecretOrPrf {
         self,
         secret: &SharedSecret,
         allow_credentials: &'allow_cred [PublicKeyCredentialDescriptor],
-        puat: Option<&PinUvAuthToken>,
     ) -> Result<(Self, Option<&'allow_cred PublicKeyCredentialDescriptor>), CryptoError> {
         Ok(match self {
             Self::HmacGetSecret(mut extension) => {
-                extension.calculate(secret, puat)?;
+                extension.calculate(secret)?;
                 (Self::HmacGetSecret(extension), None)
             }
 
-            Self::PrfUninitialized(prf) => match prf.calculate(secret, allow_credentials, puat)? {
+            Self::PrfUninitialized(prf) => match prf.calculate(secret, allow_credentials)? {
                 Some((hmac_secret, selected_credential)) => {
                     (Self::Prf(hmac_secret), selected_credential)
                 }
@@ -187,11 +186,7 @@ impl HmacSecretExtension {
     /// Calculate inputs for the `hmac-secret` extension.
     /// See "authenticatorGetAssertion additional behaviors"
     /// in https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-20210615.html#sctn-hmac-secret-extension
-    pub fn calculate(
-        &mut self,
-        secret: &SharedSecret,
-        _puat: Option<&PinUvAuthToken>,
-    ) -> Result<(), CryptoError> {
+    pub fn calculate(&mut self, secret: &SharedSecret) -> Result<(), CryptoError> {
         let salt_enc = match (
             <[u8; 32]>::try_from(self.salt1.as_slice()),
             self.salt2.as_deref().map(<[u8; 32]>::try_from),
@@ -212,8 +207,8 @@ impl HmacSecretExtension {
             salt_auth,
         });
 
-        // CTAP2.1 platforms MUST include this parameter if the value of pinUvAuthProtocol is not 1.
-        self.pin_protocol = Some(secret.pin_protocol.id()).filter(|id| *id != 1);
+        // Always include the negotiated pinUvAuthProtocol; the field is optional for protocol 1.
+        self.pin_protocol = Some(secret.pin_protocol.id());
 
         Ok(())
     }
@@ -335,18 +330,17 @@ impl GetAssertion {
 
     pub fn process_hmac_secret_and_prf_extension(
         mut self,
-        shared_secret: Option<(&SharedSecret, &PinUvAuthResult)>,
+        shared_secret: Option<&SharedSecret>,
     ) -> Result<Self, AuthenticatorError> {
         let (new_hmac_secret, new_allow_list) = self
             .extensions
             .hmac_secret
             .take()
             .and_then(|hmac_get_secret_or_prf| {
-                if let Some((secret, pin_uv_auth_result)) = shared_secret {
+                if let Some(secret) = shared_secret {
                     Some(hmac_get_secret_or_prf.calculate(
                         secret,
                         &self.allow_list,
-                        pin_uv_auth_result.get_pin_uv_auth_token().as_ref(),
                     ))
                 } else {
                     debug!(
@@ -2090,16 +2084,12 @@ pub mod test {
 
             use super::*;
             use crate::{
-                crypto::{CryptoError, PinUvAuthToken},
+                crypto::CryptoError,
                 ctap2::{
                     client_data::ClientDataHash,
-                    commands::{
-                        client_pin::PinUvAuthTokenPermission,
-                        get_assertion::{
-                            CalculatedHmacSecretExtension, GetAssertion, GetAssertionExtensions,
-                            HmacGetSecretOrPrf, HmacSecretExtension,
-                        },
-                        PinUvAuthResult,
+                    commands::get_assertion::{
+                        CalculatedHmacSecretExtension, GetAssertion, GetAssertionExtensions,
+                        HmacGetSecretOrPrf, HmacSecretExtension,
                     },
                     server::{
                         AuthenticationExtensionsPRFInputs, AuthenticationExtensionsPRFValues,
@@ -2109,24 +2099,12 @@ pub mod test {
                 errors::AuthenticatorError,
             };
 
-            fn make_test_secret(
-                pin_protocol: u64,
-            ) -> Result<(SharedSecret, COSEKey, PinUvAuthToken), CommandError> {
-                let (shared_secret, fake_client_key) = make_test_secret_without_puat(pin_protocol)?;
-                let puat = shared_secret.decrypt_pin_token(
-                    PinUvAuthTokenPermission::empty(),
-                    &shared_secret.encrypt(&[0x03; 32])?,
-                )?;
-
-                Ok((shared_secret, fake_client_key, puat))
-            }
-
             fn get_assertion_process_hmac_secret(
                 secret_available: bool,
                 allow_list: Vec<PublicKeyCredentialDescriptor>,
                 hmac_secret: Option<HmacGetSecretOrPrf>,
             ) -> Result<GetAssertion, AuthenticatorError> {
-                let (shared_secret, _, puat) = make_test_secret(1)?;
+                let (shared_secret, _) = make_test_secret_without_puat(1)?;
                 GetAssertion::new(
                     ClientDataHash([0x01; 32]),
                     RelyingParty::from("example.com"),
@@ -2137,10 +2115,7 @@ pub mod test {
                         ..Default::default()
                     },
                 )
-                .process_hmac_secret_and_prf_extension(
-                    secret_available
-                        .then_some((&shared_secret, &PinUvAuthResult::SuccessGetPinToken(puat))),
-                )
+                .process_hmac_secret_and_prf_extension(secret_available.then_some(&shared_secret))
             }
 
             #[test]
@@ -2408,16 +2383,15 @@ pub mod test {
             }
 
             #[test]
-            fn calculate_hmac_get_secret_without_puat_serializes_shared_secret_protocol(
+            fn calculate_hmac_get_secret_serializes_shared_secret_protocol(
             ) -> Result<(), AuthenticatorError> {
-                for (pin_protocol, expected_protocol) in [(1, None), (2, Some(2))] {
+                for pin_protocol in [1, 2] {
                     let (shared_secret, _) = make_test_secret_without_puat(pin_protocol)?;
                     let extension = HmacGetSecretOrPrf::HmacGetSecret(HmacSecretExtension::new(
                         vec![0x01; 32],
                         None,
                     ));
-                    let (extension, selected_cred) =
-                        extension.calculate(&shared_secret, &[], None)?;
+                    let (extension, selected_cred) = extension.calculate(&shared_secret, &[])?;
 
                     assert_eq!(selected_cred, None);
 
@@ -2431,8 +2405,7 @@ pub mod test {
 
                     assert_eq!(
                         extension.get(&serde_cbor::Value::Integer(4)).cloned(),
-                        expected_protocol
-                            .map(|protocol| serde_cbor::Value::Integer(protocol.into())),
+                        Some(serde_cbor::Value::Integer(pin_protocol.into())),
                     );
                 }
 
@@ -2441,13 +2414,12 @@ pub mod test {
 
             #[test]
             fn calculate_hmac_get_secret_pin_protocol_1() -> Result<(), AuthenticatorError> {
-                let (shared_secret, client_key, puat) = make_test_secret(1)?;
+                let (shared_secret, client_key) = make_test_secret_without_puat(1)?;
                 let extension = HmacGetSecretOrPrf::HmacGetSecret(HmacSecretExtension::new(
                     vec![0x01; 32],
                     Some(vec![0x02; 32]),
                 ));
-                let (extension, selected_cred) =
-                    extension.calculate(&shared_secret, &[], Some(&puat))?;
+                let (extension, selected_cred) = extension.calculate(&shared_secret, &[])?;
 
                 assert_eq!(selected_cred, None);
                 assert_eq!(
@@ -2469,7 +2441,7 @@ pub mod test {
                                 227
                             ],
                         }),
-                        pin_protocol: None,
+                        pin_protocol: Some(1),
                     }),
                 );
 
@@ -2478,13 +2450,13 @@ pub mod test {
 
             #[test]
             fn calculate_hmac_get_secret_wrong_length_salt1() -> Result<(), AuthenticatorError> {
-                let (shared_secret, _, puat) = make_test_secret(1)?;
+                let (shared_secret, _) = make_test_secret_without_puat(1)?;
                 for len in [0, 1, 31, 33, 64] {
                     let extension = HmacGetSecretOrPrf::HmacGetSecret(HmacSecretExtension::new(
                         vec![0x01; len],
                         None,
                     ));
-                    let result = extension.calculate(&shared_secret, &[], Some(&puat));
+                    let result = extension.calculate(&shared_secret, &[]);
                     assert_eq!(
                         result,
                         Err(CryptoError::WrongSaltLength),
@@ -2497,13 +2469,13 @@ pub mod test {
 
             #[test]
             fn calculate_hmac_get_secret_wrong_length_salt2() -> Result<(), AuthenticatorError> {
-                let (shared_secret, _, puat) = make_test_secret(1)?;
+                let (shared_secret, _) = make_test_secret_without_puat(1)?;
                 for len in [0, 1, 31, 33, 64] {
                     let extension = HmacGetSecretOrPrf::HmacGetSecret(HmacSecretExtension::new(
                         vec![0x01; 32],
                         Some(vec![0x02; len]),
                     ));
-                    let result = extension.calculate(&shared_secret, &[], Some(&puat));
+                    let result = extension.calculate(&shared_secret, &[]);
                     assert_eq!(
                         result,
                         Err(CryptoError::WrongSaltLength),
@@ -2516,7 +2488,7 @@ pub mod test {
 
             #[test]
             fn calculate_prf_eval_pin_protocol_1() -> Result<(), AuthenticatorError> {
-                let (shared_secret, client_key, puat) = make_test_secret(1)?;
+                let (shared_secret, client_key) = make_test_secret_without_puat(1)?;
                 let extension =
                     HmacGetSecretOrPrf::PrfUninitialized(AuthenticationExtensionsPRFInputs {
                         eval: Some(AuthenticationExtensionsPRFValues {
@@ -2525,8 +2497,7 @@ pub mod test {
                         }),
                         eval_by_credential: None,
                     });
-                let (extension, selected_cred) =
-                    extension.calculate(&shared_secret, &[], Some(&puat))?;
+                let (extension, selected_cred) = extension.calculate(&shared_secret, &[])?;
 
                 assert_eq!(selected_cred, None);
                 assert_eq!(
@@ -2563,7 +2534,7 @@ pub mod test {
                                 174
                             ],
                         }),
-                        pin_protocol: None,
+                        pin_protocol: Some(1),
                     }),
                 );
 
@@ -2573,7 +2544,7 @@ pub mod test {
             #[test]
             fn calculate_prf_eval_by_cred_fallback_to_eval_pin_protocol_1(
             ) -> Result<(), AuthenticatorError> {
-                let (shared_secret, client_key, puat) = make_test_secret(1)?;
+                let (shared_secret, client_key) = make_test_secret_without_puat(1)?;
                 let extension =
                     HmacGetSecretOrPrf::PrfUninitialized(AuthenticationExtensionsPRFInputs {
                         eval: Some(AuthenticationExtensionsPRFValues {
@@ -2598,7 +2569,7 @@ pub mod test {
                     transports: vec![],
                 }];
                 let (extension, selected_cred) =
-                    extension.calculate(&shared_secret, &allow_list, Some(&puat))?;
+                    extension.calculate(&shared_secret, &allow_list)?;
 
                 assert_eq!(selected_cred, None);
                 assert_eq!(
@@ -2635,7 +2606,7 @@ pub mod test {
                                 174
                             ],
                         }),
-                        pin_protocol: None,
+                        pin_protocol: Some(1),
                     }),
                 );
 
@@ -2644,7 +2615,7 @@ pub mod test {
 
             #[test]
             fn calculate_prf_eval_by_cred_pin_protocol_1() -> Result<(), AuthenticatorError> {
-                let (shared_secret, client_key, puat) = make_test_secret(1)?;
+                let (shared_secret, client_key) = make_test_secret_without_puat(1)?;
                 let cred_id = PublicKeyCredentialDescriptor {
                     id: vec![1, 2, 3, 4],
                     transports: vec![],
@@ -2689,7 +2660,7 @@ pub mod test {
                     },
                 ];
                 let (extension, selected_cred) =
-                    extension.calculate(&shared_secret, &allow_list, Some(&puat))?;
+                    extension.calculate(&shared_secret, &allow_list)?;
 
                 assert_eq!(selected_cred, Some(&allow_list[1]));
                 assert_eq!(
@@ -2725,7 +2696,7 @@ pub mod test {
                                 232
                             ],
                         }),
-                        pin_protocol: None,
+                        pin_protocol: Some(1),
                     }),
                 );
 
@@ -2734,7 +2705,7 @@ pub mod test {
 
             #[test]
             fn calculate_prf_only_eval_by_cred_pin_protocol_1() -> Result<(), AuthenticatorError> {
-                let (shared_secret, client_key, puat) = make_test_secret(1)?;
+                let (shared_secret, client_key) = make_test_secret_without_puat(1)?;
                 let cred_id = PublicKeyCredentialDescriptor {
                     id: vec![1, 2, 3, 4],
                     transports: vec![],
@@ -2776,7 +2747,7 @@ pub mod test {
                     },
                 ];
                 let (extension, selected_cred) =
-                    extension.calculate(&shared_secret, &allow_list, Some(&puat))?;
+                    extension.calculate(&shared_secret, &allow_list)?;
 
                 assert_eq!(selected_cred, Some(&allow_list[1]));
                 assert_eq!(
@@ -2812,7 +2783,7 @@ pub mod test {
                                 232
                             ],
                         }),
-                        pin_protocol: None,
+                        pin_protocol: Some(1),
                     }),
                 );
 
@@ -2821,7 +2792,7 @@ pub mod test {
 
             #[test]
             fn calculate_prf_unmatched_pin_protocol_1() -> Result<(), AuthenticatorError> {
-                let (shared_secret, _, puat) = make_test_secret(1)?;
+                let (shared_secret, _) = make_test_secret_without_puat(1)?;
                 let extension =
                     HmacGetSecretOrPrf::PrfUninitialized(AuthenticationExtensionsPRFInputs {
                         eval: None,
@@ -2843,7 +2814,7 @@ pub mod test {
                     transports: vec![],
                 }];
                 let (extension, selected_cred) =
-                    extension.calculate(&shared_secret, &allow_list, Some(&puat))?;
+                    extension.calculate(&shared_secret, &allow_list)?;
 
                 assert_eq!(selected_cred, None);
                 assert_eq!(extension, HmacGetSecretOrPrf::PrfUnmatched);
@@ -2853,7 +2824,7 @@ pub mod test {
 
             #[test]
             fn calculate_prf_unmatched_pin_protocol_2() -> Result<(), AuthenticatorError> {
-                let (shared_secret, _, puat) = make_test_secret(2)?;
+                let (shared_secret, _) = make_test_secret_without_puat(2)?;
                 let extension =
                     HmacGetSecretOrPrf::PrfUninitialized(AuthenticationExtensionsPRFInputs {
                         eval: None,
@@ -2875,7 +2846,7 @@ pub mod test {
                     transports: vec![],
                 }];
                 let (extension, selected_cred) =
-                    extension.calculate(&shared_secret, &allow_list, Some(&puat))?;
+                    extension.calculate(&shared_secret, &allow_list)?;
 
                 assert_eq!(selected_cred, None);
                 assert_eq!(extension, HmacGetSecretOrPrf::PrfUnmatched);
@@ -2934,7 +2905,7 @@ pub mod test {
         fn calculate_prf_conflict_1() {
             let (shared_secret, _) = make_test_secret_without_puat(2).unwrap();
             let extension = HmacGetSecretOrPrf::PrfUnmatched;
-            extension.calculate(&shared_secret, &[], None).unwrap();
+            extension.calculate(&shared_secret, &[]).unwrap();
         }
 
         #[test]
@@ -2953,7 +2924,7 @@ pub mod test {
                 }),
                 pin_protocol: None,
             });
-            extension.calculate(&shared_secret, &[], None).unwrap();
+            extension.calculate(&shared_secret, &[]).unwrap();
         }
 
         fn finalize_result_with_hmac_secret_input_and_output(
