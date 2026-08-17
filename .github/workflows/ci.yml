@@ -59,6 +59,12 @@ jobs:
             NATIVE_BUILD: true
             BUILD_OPTIONS: --features crypto_dummy --no-default-features --target=x86_64-pc-windows-gnu
 
+          # Windows MSVC dummy crypto
+          - OS: windows-latest
+            TARGET: x86_64-pc-windows-msvc
+            NATIVE_BUILD: true
+            BUILD_OPTIONS: --features crypto_dummy --no-default-features --target=x86_64-pc-windows-msvc
+
           # FreeBSD - cross compile
           - OS: ubuntu-latest
             TARGET: x86_64-unknown-freebsd
