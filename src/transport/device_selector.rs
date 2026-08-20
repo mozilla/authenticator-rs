@@ -30,6 +30,8 @@ pub enum DeviceSelectorEvent {
     Timeout,
     DevicesAdded(Vec<DeviceID>),
     DeviceRemoved(DeviceID),
+    /// The device is not a CTAP authenticator, or it is not compatible with the request
+    /// (eg: CTAP2-only request with a CTAP1 authenticator).
     NotAToken(DeviceID),
     ImAToken((DeviceID, Sender<DeviceCommand>)),
     SelectedToken(DeviceID),
