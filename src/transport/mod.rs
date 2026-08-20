@@ -79,9 +79,13 @@ pub enum FidoProtocol {
 
 pub trait CtapVersionSupport {
     /// `true` if the device supports CTAP1/U2F commands, according to the init message.
+    ///
+    /// Returns `false` if the device has not sent an init message.
     fn supports_ctap1(&self) -> bool;
 
     /// `true` if the device supports CTAP2 commands, according to the init message.
+    ///
+    /// Returns `false` if the device has not sent an init message.
     fn supports_ctap2(&self) -> bool;
 }
 

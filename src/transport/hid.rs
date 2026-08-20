@@ -22,7 +22,7 @@ pub trait HIDDevice: FidoDevice + Read + Write {
     fn new(parameters: Self::BuildParameters) -> Result<Self, (HIDError, Self::Id)>;
     fn id(&self) -> Self::Id;
 
-    fn get_device_info(&self) -> U2FDeviceInfo;
+    fn get_device_info(&self) -> Option<U2FDeviceInfo>;
     fn set_device_info(&mut self, dev_info: U2FDeviceInfo);
 
     // Channel ID management
@@ -158,11 +158,13 @@ pub trait HIDDevice: FidoDevice + Read + Write {
 
 impl<T: HIDDevice> CtapVersionSupport for T {
     fn supports_ctap1(&self) -> bool {
-        !self.get_device_info().cap_flags.contains(Capability::NMSG)
+        self.get_device_info()
+            .is_some_and(|i| !i.cap_flags.contains(Capability::NMSG))
     }
 
     fn supports_ctap2(&self) -> bool {
-        self.get_device_info().cap_flags.contains(Capability::CBOR)
+        self.get_device_info()
+            .is_some_and(|i| i.cap_flags.contains(Capability::CBOR))
     }
 }
 

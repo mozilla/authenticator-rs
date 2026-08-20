@@ -1037,7 +1037,7 @@ pub mod tests {
         assert!(!device.supports_ctap1());
         assert!(device.supports_ctap2());
 
-        let dev_info = device.get_device_info();
+        let dev_info = device.get_device_info().expect("device info is set");
         assert_eq!(
             dev_info.cap_flags,
             Capability::WINK | Capability::CBOR | Capability::NMSG

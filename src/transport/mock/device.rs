@@ -233,8 +233,8 @@ impl HIDDevice for Device {
         Ok(format!("{prop_name} not implemented"))
     }
 
-    fn get_device_info(&self) -> U2FDeviceInfo {
-        self.dev_info.clone().unwrap()
+    fn get_device_info(&self) -> Option<U2FDeviceInfo> {
+        self.dev_info.clone()
     }
 
     fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {
@@ -335,7 +335,7 @@ impl FidoDevice for Device {
         self.sender.is_some()
     }
 
-    fn get_shared_secret(&self) -> std::option::Option<&SharedSecret> {
+    fn get_shared_secret(&self) -> Option<&SharedSecret> {
         self.shared_secret.as_ref()
     }
 

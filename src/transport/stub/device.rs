@@ -63,7 +63,7 @@ impl HIDDevice for Device {
         unimplemented!();
     }
 
-    fn get_device_info(&self) -> U2FDeviceInfo {
+    fn get_device_info(&self) -> Option<U2FDeviceInfo> {
         unimplemented!();
     }
 
