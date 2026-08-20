@@ -196,7 +196,8 @@ pub mod tests {
     use crate::{
         consts::Capability,
         ctap2::commands::get_info::{AuthenticatorInfo, AuthenticatorOptions},
-        transport::{CtapVersionSupport, FidoDevice},
+        errors::HIDError,
+        transport::{CtapVersionSupport, FidoDevice, FidoProtocol},
         u2ftypes::U2FDeviceInfo,
     };
     use std::sync::mpsc::TryRecvError;
@@ -220,6 +221,7 @@ pub mod tests {
         dev.create_channel();
         assert!(dev.supports_ctap1());
         assert!(!dev.supports_ctap2());
+        assert_eq!(FidoProtocol::CTAP1, dev.get_protocol());
     }
 
     pub(crate) fn make_device_with_pin(dev: &mut Device) {
@@ -228,6 +230,11 @@ pub mod tests {
             Capability::WINK | Capability::CBOR | Capability::NMSG,
         ));
         dev.set_cid([1, 2, 3, 4]); // Need to set something other than broadcast
+        assert_matches!(
+            dev.downgrade_to_ctap1()
+                .expect_err("downgrading to CTAP1 should fail when NMSG"),
+            HIDError::UnexpectedVersion
+        );
         dev.create_channel();
         let info = AuthenticatorInfo {
             options: AuthenticatorOptions {
@@ -239,6 +246,7 @@ pub mod tests {
         dev.set_authenticator_info(info);
         assert!(!dev.supports_ctap1());
         assert!(dev.supports_ctap2());
+        assert_eq!(FidoProtocol::CTAP2, dev.get_protocol());
     }
 
     fn send_i_am_token(dev: &Device, selector: &DeviceSelector) {
