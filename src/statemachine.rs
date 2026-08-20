@@ -148,21 +148,25 @@ impl StateMachine {
 
                 if ctap2_only && !dev.supports_ctap2() {
                     // CTAP1-only authenticator with a CTAP2-only request.
+                    let _ = selector.send(DeviceSelectorEvent::NotAToken(dev.id()));
                     return;
                 }
 
                 if args.use_ctap1_fallback && !dev.supports_ctap1() {
                     // CTAP2-only authenticator with a CTAP1-only request.
+                    let _ = selector.send(DeviceSelectorEvent::NotAToken(dev.id()));
                     return;
                 }
 
                 if !Self::wait_for_device_selector(&mut dev, &selector, &status, alive) {
+                    let _ = selector.send(DeviceSelectorEvent::NotAToken(dev.id()));
                     return;
                 };
 
                 if args.use_ctap1_fallback && dev.downgrade_to_ctap1().is_err() {
                     // We shouldn't reach this, but not downgrading early lets us use CTAP 2.1
                     // device selection on devices that support it.
+                    let _ = selector.send(DeviceSelectorEvent::NotAToken(dev.id()));
                     return;
                 }
 
@@ -216,11 +220,13 @@ impl StateMachine {
 
                 if ctap2_only && !dev.supports_ctap2() {
                     // CTAP1-only authenticator with a CTAP2-only request.
+                    let _ = selector.send(DeviceSelectorEvent::NotAToken(dev.id()));
                     return;
                 }
 
                 if args.use_ctap1_fallback && !dev.supports_ctap1() {
                     // CTAP2-only authenticator with a CTAP1-only request.
+                    let _ = selector.send(DeviceSelectorEvent::NotAToken(dev.id()));
                     return;
                 }
 
@@ -231,6 +237,7 @@ impl StateMachine {
                 if args.use_ctap1_fallback && dev.downgrade_to_ctap1().is_err() {
                     // We shouldn't reach this, but not downgrading early lets us use CTAP 2.1
                     // device selection on devices that support it.
+                    let _ = selector.send(DeviceSelectorEvent::NotAToken(dev.id()));
                     return;
                 }
 
