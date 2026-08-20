@@ -52,20 +52,23 @@ impl RequestCtap2 for Selection {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::consts::HIDCmd;
+    use crate::consts::{Capability, HIDCmd};
     use crate::transport::device_selector::Device;
     use crate::transport::{hid::HIDDevice, FidoDevice, FidoDeviceIO, FidoProtocol};
-    use rand::{thread_rng, RngCore};
+    use crate::CtapVersionSupport;
     use serde_cbor::{de::from_slice, Value};
 
     fn issue_command_and_get_response(cmd: u8, add: &[u8]) -> Result<(), HIDError> {
-        let mut device = Device::new("commands/selection").unwrap();
+        let mut device = Device::new_pre_inited(
+            "commands/get_info",
+            Capability::CBOR | Capability::NMSG | Capability::WINK,
+        );
+        let cid = device.get_cid().clone();
+        assert!(!device.supports_ctap1());
+        assert!(device.supports_ctap2());
         assert_eq!(device.get_protocol(), FidoProtocol::CTAP2);
-        // ctap2 request
-        let mut cid = [0u8; 4];
-        thread_rng().fill_bytes(&mut cid);
-        device.set_cid(cid);
 
+        // ctap2 request
         let mut msg = cid.to_vec();
         msg.extend(vec![HIDCmd::Cbor.into(), 0x00, 0x1]); // cmd + bcnt
         msg.extend(vec![0x0B]); // authenticatorSelection
