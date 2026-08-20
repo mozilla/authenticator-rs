@@ -971,11 +971,11 @@ pub mod test {
             },
             Default::default(),
         );
-        let mut device = Device::new("commands/get_assertion").unwrap();
-        assert_eq!(device.get_protocol(), FidoProtocol::CTAP2);
-        let mut cid = [0u8; 4];
-        thread_rng().fill_bytes(&mut cid);
-        device.set_cid(cid);
+        let mut device = Device::new_pre_inited(
+            "commands/get_info",
+            Capability::CBOR | Capability::NMSG | Capability::WINK,
+        );
+        let cid = device.get_cid().clone();
 
         let mut msg = cid.to_vec();
         msg.extend(vec![HIDCmd::Cbor.into(), 0x00, 0x90]);
