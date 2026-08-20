@@ -155,10 +155,8 @@ impl HIDDevice for Device {
         monitor::get_property_linux(&self.path, prop_name)
     }
 
-    fn get_device_info(&self) -> U2FDeviceInfo {
-        // unwrap is okay, as dev_info must have already been set, else
-        // a programmer error
-        self.dev_info.clone().unwrap()
+    fn get_device_info(&self) -> Option<U2FDeviceInfo> {
+        self.dev_info.clone()
     }
 
     fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {
