@@ -471,12 +471,11 @@ where
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::consts::HIDCmd;
+    use crate::consts::{Capability, HIDCmd};
     use crate::transport::device_selector::Device;
     use crate::transport::hid::HIDDevice;
     use crate::transport::platform::device::{IN_HID_RPT_SIZE, OUT_HID_RPT_SIZE};
-    use crate::transport::{FidoDevice, FidoProtocol};
-    use rand::{thread_rng, RngCore};
+    use crate::transport::FidoDevice;
 
     fn add_bytes_to_read(cid: &[u8], bytes: &[u8], device: &mut Device) {
         let mut data = Vec::new();
@@ -522,13 +521,11 @@ pub mod tests {
     #[test]
     fn test_read_large_blob_array() {
         let keep_alive = || true;
-        let mut device = Device::new("commands/large_blobs").unwrap();
-        assert_eq!(device.get_protocol(), FidoProtocol::CTAP2);
-
-        // 'initialize' the device
-        let mut cid = [0u8; 4];
-        thread_rng().fill_bytes(&mut cid);
-        device.set_cid(cid);
+        let mut device = Device::new_pre_inited(
+            "commands/large_blob",
+            Capability::CBOR | Capability::NMSG | Capability::WINK,
+        );
+        let cid = device.get_cid().clone();
 
         let cmd = [
             0xa2, // map(2)
@@ -553,13 +550,11 @@ pub mod tests {
     #[test]
     fn test_read_large_blob_array_with_wrong_hash() {
         let keep_alive = || true;
-        let mut device = Device::new("commands/large_blobs").unwrap();
-        assert_eq!(device.get_protocol(), FidoProtocol::CTAP2);
-
-        // 'initialize' the device
-        let mut cid = [0u8; 4];
-        thread_rng().fill_bytes(&mut cid);
-        device.set_cid(cid);
+        let mut device = Device::new_pre_inited(
+            "commands/large_blob",
+            Capability::CBOR | Capability::NMSG | Capability::WINK,
+        );
+        let cid = device.get_cid().clone();
 
         let cmd = [
             0xa2, // map(2)
@@ -595,17 +590,15 @@ pub mod tests {
     #[test]
     fn test_read_large_blob_array_multi_read() {
         let keep_alive = || true;
-        let mut device = Device::new("commands/large_blobs").unwrap();
-        assert_eq!(device.get_protocol(), FidoProtocol::CTAP2);
+        let mut device = Device::new_pre_inited(
+            "commands/large_blob",
+            Capability::CBOR | Capability::NMSG | Capability::WINK,
+        );
+        let cid = device.get_cid().clone();
         device.set_authenticator_info(crate::AuthenticatorInfo {
             max_msg_size: Some(164), // Note: This value minus 64 will be the fragment size
             ..Default::default()
         });
-
-        // 'initialize' the device
-        let mut cid = [0u8; 4];
-        thread_rng().fill_bytes(&mut cid);
-        device.set_cid(cid);
 
         for ii in 0..5 {
             let mut cmd = vec![
@@ -634,13 +627,11 @@ pub mod tests {
     #[test]
     fn test_add_large_blob_element() {
         let keep_alive = || true;
-        let mut device = Device::new("commands/large_blobs").unwrap();
-        assert_eq!(device.get_protocol(), FidoProtocol::CTAP2);
-
-        // First we read the whole existing array
-        let mut cid = [0u8; 4];
-        thread_rng().fill_bytes(&mut cid);
-        device.set_cid(cid);
+        let mut device = Device::new_pre_inited(
+            "commands/large_blob",
+            Capability::CBOR | Capability::NMSG | Capability::WINK,
+        );
+        let cid = device.get_cid().clone();
 
         let cmd = [
             0xa2, // map(2)
@@ -684,18 +675,17 @@ pub mod tests {
     #[test]
     fn test_add_large_blob_element_multi_write() {
         let keep_alive = || true;
-        let mut device = Device::new("commands/large_blobs").unwrap();
-        assert_eq!(device.get_protocol(), FidoProtocol::CTAP2);
+        let mut device = Device::new_pre_inited(
+            "commands/large_blob",
+            Capability::CBOR | Capability::NMSG | Capability::WINK,
+        );
+        let cid = device.get_cid().clone();
         device.set_authenticator_info(crate::AuthenticatorInfo {
             max_msg_size: Some(164), // Note: This value minus 64 will be the fragment size
             ..Default::default()
         });
 
         // First we read the whole existing array
-        let mut cid = [0u8; 4];
-        thread_rng().fill_bytes(&mut cid);
-        device.set_cid(cid);
-
         for ii in 0..5 {
             let mut cmd = vec![
                 0xa2, // map(2)

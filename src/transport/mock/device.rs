@@ -1,7 +1,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-use crate::consts::{HIDCmd, CID_BROADCAST};
+use crate::consts::{Capability, HIDCmd, CID_BROADCAST};
 use crate::crypto::SharedSecret;
 use crate::ctap2::commands::get_info::AuthenticatorInfo;
 use crate::ctap2::commands::{CtapResponse, RequestCtap1, RequestCtap2};
@@ -9,6 +9,7 @@ use crate::transport::device_selector::DeviceCommand;
 use crate::transport::TestDevice;
 use crate::transport::{hid::HIDDevice, CtapVersionSupport, FidoDevice, FidoProtocol, HIDError};
 use crate::u2ftypes::{U2FDeviceInfo, U2FHIDInitResp};
+use rand::{thread_rng, RngCore as _};
 use std::any::Any;
 use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
@@ -95,6 +96,41 @@ impl Device {
             shared_secret: None,
         })
     }
+
+    pub fn new_pre_inited(
+        parameters: <Device as HIDDevice>::BuildParameters,
+        capabilities: Capability,
+    ) -> Device {
+        let mut device = Device::new(parameters).unwrap();
+        let mut cid = [0u8; 4];
+        thread_rng().fill_bytes(&mut cid);
+
+        // init
+        let mut msg = vec![0xFF, 0xFF, 0xFF, 0xFF]; // broadcast
+        msg.extend([HIDCmd::Init.into(), 0x00, 8]); // cmd + bcnt
+        msg.extend([0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]); // nonce
+        device.add_write(&msg, 0);
+
+        let mut msg = vec![0xFF, 0xFF, 0xFF, 0xFF]; // broadcast
+        msg.extend([0x06, 0x00, 17]); // cmd + bcnt
+        msg.extend([0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]); // nonce
+        msg.extend(&cid);
+        msg.push(2); // CTAPHID protocol version identifir
+        msg.extend([1, 0, 0]); // Device version numbber
+        msg.push(capabilities.bits());
+        device.add_read(&msg, 0);
+
+        HIDDevice::pre_init(&mut device).expect("pre_init");
+        assert_eq!(
+            capabilities.contains(Capability::NMSG),
+            !device.supports_ctap1()
+        );
+        assert_eq!(
+            capabilities.contains(Capability::CBOR),
+            device.supports_ctap2()
+        );
+        device
+    }
 }
 
 impl Write for Device {
@@ -131,8 +167,8 @@ impl Read for Device {
 impl Drop for Device {
     fn drop(&mut self) {
         if !std::thread::panicking() {
-            assert!(self.reads.is_empty());
-            assert!(self.writes.is_empty());
+            assert!(self.reads.is_empty(), "unused reads: {:?}", self.reads);
+            assert!(self.writes.is_empty(), "unused writes: {:?}", self.writes);
         }
     }
 }

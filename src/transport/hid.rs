@@ -195,6 +195,10 @@ impl<T: HIDDevice + TestDevice> FidoDeviceIO for T {
         status: Option<&Sender<StatusUpdate>>,
     ) -> Result<Req::Output, HIDError> {
         debug!("sending {:?} to {:?}", msg, self);
+        if !self.supports_ctap2() {
+            return Err(HIDError::UnexpectedVersion);
+        }
+
         #[cfg(test)]
         {
             if self.skip_serialization() {
@@ -240,6 +244,10 @@ impl<T: HIDDevice + TestDevice> FidoDeviceIO for T {
         status: Option<&Sender<StatusUpdate>>,
     ) -> Result<Req::Output, HIDError> {
         debug!("sending {:?} to {:?}", msg, self);
+        if !self.supports_ctap1() {
+            return Err(HIDError::UnexpectedVersion);
+        }
+
         #[cfg(test)]
         {
             if self.skip_serialization() {
