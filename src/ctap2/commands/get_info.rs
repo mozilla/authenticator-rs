@@ -1048,9 +1048,12 @@ pub mod tests {
         assert!(!device.supports_ctap1());
         assert!(device.supports_ctap2());
         assert_eq!(device.get_protocol(), FidoProtocol::CTAP2);
-        device
-            .downgrade_to_ctap1()
-            .expect_err("downgrading to CTAP1 should fail");
+        assert_matches!(
+            device
+                .downgrade_to_ctap1()
+                .expect_err("downgrading to CTAP1 should fail when NMSG"),
+            HIDError::UnexpectedVersion
+        );
         assert_eq!(device.get_protocol(), FidoProtocol::CTAP2);
         assert!(!device.supports_ctap1());
         assert!(device.supports_ctap2());
