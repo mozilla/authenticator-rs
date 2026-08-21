@@ -77,6 +77,18 @@ pub enum FidoProtocol {
     CTAP2,
 }
 
+pub trait CtapVersionSupport {
+    /// `true` if the device supports CTAP1/U2F commands, according to the init message.
+    ///
+    /// Returns `false` if the device has not sent an init message.
+    fn supports_ctap1(&self) -> bool;
+
+    /// `true` if the device supports CTAP2 commands, according to the init message.
+    ///
+    /// Returns `false` if the device has not sent an init message.
+    fn supports_ctap2(&self) -> bool;
+}
+
 pub trait FidoDeviceIO {
     fn send_msg<Out, Req: RequestCtap1<Output = Out> + RequestCtap2<Output = Out>>(
         &mut self,
@@ -127,7 +139,7 @@ pub trait TestDevice {
     ) -> Result<Req::Output, HIDError>;
 }
 
-pub trait FidoDevice: FidoDeviceIO
+pub trait FidoDevice: FidoDeviceIO + CtapVersionSupport
 where
     Self: Sized,
     Self: fmt::Debug,
@@ -137,7 +149,12 @@ where
 
     // Check if the device is actually a token
     fn is_u2f(&mut self) -> bool;
-    fn should_try_ctap2(&self) -> bool;
+
+    #[deprecated = "use CtapVersionSupport::supports_ctap2"]
+    fn should_try_ctap2(&self) -> bool {
+        self.supports_ctap2()
+    }
+
     fn get_authenticator_info(&self) -> Option<&AuthenticatorInfo>;
     fn set_authenticator_info(&mut self, authenticator_info: AuthenticatorInfo);
     fn refresh_authenticator_info(&mut self) -> Option<&AuthenticatorInfo> {
@@ -149,15 +166,19 @@ where
         self.get_authenticator_info()
     }
 
-    // `get_protocol()` indicates whether we're using CTAP1 or CTAP2.
-    // Prior to initializing the device, `get_protocol()` should return CTAP2 unless
-    // there's a reason to believe that the device does not support CTAP2 (e.g. if
-    // it's a HID device and it does not have the CBOR capability).
+    /// Indicates whether we're using CTAP1 (U2F) or CTAP2.
+    ///
+    /// Prior to initializing the device, this returns CTAP2. Initialization checks the CBOR
+    /// capability, and automatically downgrades to CTAP1 if that's not supported.
     fn get_protocol(&self) -> FidoProtocol;
 
-    // We do not provide a generic `set_protocol(..)` function as this would have complicated
-    // interactions with the AuthenticatorInfo state.
-    fn downgrade_to_ctap1(&mut self);
+    /// Downgrades the connection to CTAP1/U2F.
+    ///
+    /// Returns [`HIDError::UnexpectedVersion`] if the authenticator does not support CTAP1.
+    ///
+    /// We do not provide a generic `set_protocol(..)` function as this would have complicated
+    /// interactions with the [`AuthenticatorInfo`] state.
+    fn downgrade_to_ctap1(&mut self) -> Result<(), HIDError>;
 
     fn get_shared_secret(&self) -> Option<&SharedSecret>;
     fn set_shared_secret(&mut self, secret: SharedSecret);
@@ -165,19 +186,20 @@ where
     fn init(&mut self) -> Result<(), HIDError> {
         self.pre_init()?;
 
-        if self.should_try_ctap2() {
+        if self.supports_ctap2() {
             let command = GetInfo::default();
             if let Ok(info) = self.send_cbor(&command) {
                 debug!("{:?}", info);
                 if info.max_supported_version() == AuthenticatorVersion::U2F_V2 {
-                    self.downgrade_to_ctap1();
+                    self.downgrade_to_ctap1()?;
                 }
                 self.set_authenticator_info(info);
                 return Ok(());
             }
         }
 
-        self.downgrade_to_ctap1();
+        // If the device sets NMSG, this will fail.
+        self.downgrade_to_ctap1()?;
         // We want to return an error here if this device doesn't support CTAP1,
         // so we send a U2F_VERSION command.
         let command = GetVersion::default();
@@ -187,9 +209,9 @@ where
 
     fn block_and_blink(&mut self, keep_alive: &dyn Fn() -> bool) -> BlinkResult {
         let supports_select_cmd = self.get_protocol() == FidoProtocol::CTAP2
-            && self.get_authenticator_info().is_some_and(|i| {
-                i.versions.contains(&AuthenticatorVersion::FIDO_2_1)
-            });
+            && self
+                .get_authenticator_info()
+                .is_some_and(|i| i.versions.contains(&AuthenticatorVersion::FIDO_2_1));
         let resp = if supports_select_cmd {
             let msg = Selection {};
             self.send_cbor_cancellable(&msg, keep_alive)

@@ -1,8 +1,8 @@
 use super::TestDevice;
-use crate::consts::{HIDCmd, CID_BROADCAST};
+use crate::consts::{Capability, HIDCmd, CID_BROADCAST};
 use crate::ctap2::commands::{CommandError, RequestCtap1, RequestCtap2, Retryable, StatusCode};
 use crate::transport::errors::{ApduErrorStatus, HIDError};
-use crate::transport::{FidoDevice, FidoDeviceIO, FidoProtocol};
+use crate::transport::{CtapVersionSupport, FidoDevice, FidoDeviceIO, FidoProtocol};
 use crate::u2ftypes::{U2FDeviceInfo, U2FHIDCont, U2FHIDInit, U2FHIDInitResp};
 use crate::util::io_err;
 use rand::{thread_rng, RngCore};
@@ -22,7 +22,7 @@ pub trait HIDDevice: FidoDevice + Read + Write {
     fn new(parameters: Self::BuildParameters) -> Result<Self, (HIDError, Self::Id)>;
     fn id(&self) -> Self::Id;
 
-    fn get_device_info(&self) -> U2FDeviceInfo;
+    fn get_device_info(&self) -> Option<U2FDeviceInfo>;
     fn set_device_info(&mut self, dev_info: U2FDeviceInfo);
 
     // Channel ID management
@@ -156,6 +156,18 @@ pub trait HIDDevice: FidoDevice + Read + Write {
     }
 }
 
+impl<T: HIDDevice> CtapVersionSupport for T {
+    fn supports_ctap1(&self) -> bool {
+        self.get_device_info()
+            .is_some_and(|i| !i.cap_flags.contains(Capability::NMSG))
+    }
+
+    fn supports_ctap2(&self) -> bool {
+        self.get_device_info()
+            .is_some_and(|i| i.cap_flags.contains(Capability::CBOR))
+    }
+}
+
 #[cfg(not(test))]
 impl<T: HIDDevice> TestDevice for T {}
 
@@ -181,6 +193,10 @@ impl<T: HIDDevice + TestDevice> FidoDeviceIO for T {
         keep_alive: &dyn Fn() -> bool,
     ) -> Result<Req::Output, HIDError> {
         debug!("sending {:?} to {:?}", msg, self);
+        if !self.supports_ctap2() {
+            return Err(HIDError::UnexpectedVersion);
+        }
+
         #[cfg(test)]
         {
             if self.skip_serialization() {
@@ -210,6 +226,10 @@ impl<T: HIDDevice + TestDevice> FidoDeviceIO for T {
         keep_alive: &dyn Fn() -> bool,
     ) -> Result<Req::Output, HIDError> {
         debug!("sending {:?} to {:?}", msg, self);
+        if !self.supports_ctap1() {
+            return Err(HIDError::UnexpectedVersion);
+        }
+
         #[cfg(test)]
         {
             if self.skip_serialization() {

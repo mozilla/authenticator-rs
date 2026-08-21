@@ -4,11 +4,11 @@
 
 extern crate log;
 
-use crate::consts::{Capability, CID_BROADCAST, MAX_HID_RPT_SIZE};
+use crate::consts::{CID_BROADCAST, MAX_HID_RPT_SIZE};
 use crate::ctap2::commands::get_info::AuthenticatorInfo;
 use crate::transport::hid::HIDDevice;
 use crate::transport::platform::iokit::*;
-use crate::transport::{FidoDevice, FidoProtocol, HIDError, SharedSecret};
+use crate::transport::{CtapVersionSupport, FidoDevice, FidoProtocol, HIDError, SharedSecret};
 use crate::u2ftypes::U2FDeviceInfo;
 use core_foundation::base::*;
 use core_foundation::string::*;
@@ -172,10 +172,8 @@ impl HIDDevice for Device {
         unsafe { self.get_property_macos(prop_name) }
     }
 
-    fn get_device_info(&self) -> U2FDeviceInfo {
-        // unwrap is okay, as dev_info must have already been set, else
-        // a programmer error
-        self.dev_info.clone().unwrap()
+    fn get_device_info(&self) -> Option<U2FDeviceInfo> {
+        self.dev_info.clone()
     }
 
     fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {
@@ -186,12 +184,6 @@ impl HIDDevice for Device {
 impl FidoDevice for Device {
     fn pre_init(&mut self) -> Result<(), HIDError> {
         HIDDevice::pre_init(self)
-    }
-
-    fn should_try_ctap2(&self) -> bool {
-        HIDDevice::get_device_info(self)
-            .cap_flags
-            .contains(Capability::CBOR)
     }
 
     fn initialized(&self) -> bool {
@@ -220,7 +212,12 @@ impl FidoDevice for Device {
         self.protocol
     }
 
-    fn downgrade_to_ctap1(&mut self) {
-        self.protocol = FidoProtocol::CTAP1;
+    fn downgrade_to_ctap1(&mut self) -> Result<(), HIDError> {
+        if self.supports_ctap1() {
+            self.protocol = FidoProtocol::CTAP1;
+            Ok(())
+        } else {
+            Err(HIDError::UnexpectedVersion)
+        }
     }
 }

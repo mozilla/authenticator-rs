@@ -60,59 +60,21 @@ impl RequestCtap1 for GetVersion {
 
 #[cfg(test)]
 pub mod tests {
-    use crate::consts::{Capability, HIDCmd, CID_BROADCAST, SW_NO_ERROR};
+    use crate::consts::Capability;
     use crate::transport::device_selector::Device;
     use crate::transport::{hid::HIDDevice, FidoDevice, FidoProtocol};
-    use rand::{thread_rng, RngCore};
+    use crate::CtapVersionSupport;
 
     #[test]
     fn test_get_version_ctap1_only() {
-        let mut device = Device::new("commands/get_version").unwrap();
-        device.downgrade_to_ctap1();
+        let mut device = Device::new_pre_inited("commands/get_version", Capability::WINK);
+
+        device.downgrade_to_ctap1().expect("failed to downgrade");
         assert_eq!(device.get_protocol(), FidoProtocol::CTAP1);
-        let nonce = [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01];
+        assert!(device.supports_ctap1());
+        assert!(!device.supports_ctap2());
 
-        // channel id
-        let mut cid = [0u8; 4];
-        thread_rng().fill_bytes(&mut cid);
-
-        // init packet
-        let mut msg = CID_BROADCAST.to_vec();
-        msg.extend([HIDCmd::Init.into(), 0x00, 0x08]); // cmd + bcnt
-        msg.extend_from_slice(&nonce);
-        device.add_write(&msg, 0);
-
-        // init_resp packet
-        let mut msg = CID_BROADCAST.to_vec();
-        msg.extend(vec![
-            0x06, /* HIDCmd::Init without !TYPE_INIT */
-            0x00, 0x11,
-        ]); // cmd + bcnt
-        msg.extend_from_slice(&nonce);
-        msg.extend_from_slice(&cid); // new channel id
-
-        // We are not setting CBOR, to signal that the device does not support CTAP1
-        msg.extend([0x02, 0x04, 0x01, 0x08, 0x01]); // versions + flags (wink)
-        device.add_read(&msg, 0);
-
-        // ctap1 U2F_VERSION request
-        let mut msg = cid.to_vec();
-        msg.extend([HIDCmd::Msg.into(), 0x0, 0x7]); // cmd + bcnt
-        msg.extend([0x0, 0x3, 0x0, 0x0, 0x0, 0x0, 0x0]);
-        device.add_write(&msg, 0);
-
-        // fido response
-        let mut msg = cid.to_vec();
-        msg.extend([HIDCmd::Msg.into(), 0x0, 0x08]); // cmd + bcnt
-        msg.extend([0x55, 0x32, 0x46, 0x5f, 0x56, 0x32]); // 'U2F_V2'
-        msg.extend(SW_NO_ERROR);
-        device.add_read(&msg, 0);
-
-        device.init().expect("Failed to init device");
-
-        assert_eq!(device.get_cid(), &cid);
-
-        let dev_info = device.get_device_info();
+        let dev_info = device.get_device_info().expect("device info is set");
         assert_eq!(dev_info.cap_flags, Capability::WINK);
 
         let result = device.get_authenticator_info();

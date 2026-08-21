@@ -30,6 +30,8 @@ pub enum DeviceSelectorEvent {
     Timeout,
     DevicesAdded(Vec<DeviceID>),
     DeviceRemoved(DeviceID),
+    /// The device is not a CTAP authenticator, or it is not compatible with the request
+    /// (eg: CTAP2-only request with a CTAP1 authenticator).
     NotAToken(DeviceID),
     ImAToken((DeviceID, Sender<DeviceCommand>)),
     SelectedToken(DeviceID),
@@ -182,11 +184,12 @@ pub mod tests {
     use crate::{
         consts::Capability,
         ctap2::commands::get_info::{AuthenticatorInfo, AuthenticatorOptions},
-        transport::FidoDevice,
+        errors::HIDError,
+        transport::{CtapVersionSupport, FidoDevice, FidoProtocol},
         u2ftypes::U2FDeviceInfo,
     };
 
-    pub(crate) fn gen_info(id: String) -> U2FDeviceInfo {
+    pub(crate) fn gen_info(id: String, cap_flags: Capability) -> U2FDeviceInfo {
         U2FDeviceInfo {
             vendor_name: String::from("ExampleVendor").into_bytes(),
             device_name: id.into_bytes(),
@@ -194,20 +197,31 @@ pub mod tests {
             version_major: 3,
             version_minor: 2,
             version_build: 1,
-            cap_flags: Capability::WINK | Capability::CBOR | Capability::NMSG,
+            cap_flags,
         }
     }
 
     pub(crate) fn make_device_simple_u2f(dev: &mut Device) {
-        dev.set_device_info(gen_info(dev.id()));
+        dev.set_device_info(gen_info(dev.id(), Capability::WINK));
         dev.set_cid([1, 2, 3, 4]); // Need to set something other than broadcast
-        dev.downgrade_to_ctap1();
+        dev.downgrade_to_ctap1().expect("failed to downgrade");
         dev.create_channel();
+        assert!(dev.supports_ctap1());
+        assert!(!dev.supports_ctap2());
+        assert_eq!(FidoProtocol::CTAP1, dev.get_protocol());
     }
 
     pub(crate) fn make_device_with_pin(dev: &mut Device) {
-        dev.set_device_info(gen_info(dev.id()));
+        dev.set_device_info(gen_info(
+            dev.id(),
+            Capability::WINK | Capability::CBOR | Capability::NMSG,
+        ));
         dev.set_cid([1, 2, 3, 4]); // Need to set something other than broadcast
+        assert_matches!(
+            dev.downgrade_to_ctap1()
+                .expect_err("downgrading to CTAP1 should fail when NMSG"),
+            HIDError::UnexpectedVersion
+        );
         dev.create_channel();
         let info = AuthenticatorInfo {
             options: AuthenticatorOptions {
@@ -217,6 +231,9 @@ pub mod tests {
             ..Default::default()
         };
         dev.set_authenticator_info(info);
+        assert!(!dev.supports_ctap1());
+        assert!(dev.supports_ctap2());
+        assert_eq!(FidoProtocol::CTAP2, dev.get_protocol());
     }
 
     fn send_i_am_token(dev: &Device, selector: &DeviceSelector) {

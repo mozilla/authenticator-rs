@@ -63,7 +63,7 @@ impl HIDDevice for Device {
         unimplemented!();
     }
 
-    fn get_device_info(&self) -> U2FDeviceInfo {
+    fn get_device_info(&self) -> Option<U2FDeviceInfo> {
         unimplemented!();
     }
 
@@ -74,10 +74,6 @@ impl HIDDevice for Device {
 
 impl FidoDevice for Device {
     fn pre_init(&mut self) -> Result<(), HIDError> {
-        unimplemented!();
-    }
-
-    fn should_try_ctap2(&self) -> bool {
         unimplemented!();
     }
 
@@ -109,7 +105,7 @@ impl FidoDevice for Device {
         unimplemented!()
     }
 
-    fn downgrade_to_ctap1(&mut self) {
+    fn downgrade_to_ctap1(&mut self) -> Result<(), HIDError> {
         unimplemented!()
     }
 }

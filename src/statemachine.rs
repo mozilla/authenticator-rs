@@ -12,7 +12,7 @@ use crate::transport::device_selector::{
     BlinkResult, Device, DeviceBuildParameters, DeviceCommand, DeviceSelectorEvent,
 };
 use crate::transport::platform::transaction::Transaction;
-use crate::transport::{hid::HIDDevice, FidoDevice, FidoProtocol};
+use crate::transport::{hid::HIDDevice, CtapVersionSupport, FidoDevice, FidoProtocol};
 use crate::{InteractiveRequest, ManageResult};
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::time::Duration;
@@ -118,6 +118,21 @@ impl StateMachine {
         status: Sender<crate::StatusUpdate>,
         callback: StateCallback<crate::Result<crate::RegisterResult>>,
     ) {
+        // Could the request be handled by a CTAP1 authenticator?
+        let ctap2_only = {
+            if let Err(e) = ctap2::check_ctap1_register_compatibility(&args) {
+                if args.use_ctap1_fallback {
+                    // There's no way a CTAP1 authenticator could approve this request, so cancel early.
+                    callback.call(Err(e));
+                    return;
+                }
+
+                true
+            } else {
+                false
+            }
+        };
+
         // Abort any prior register/sign calls.
         self.cancel();
         let cbc = callback.clone();
@@ -130,12 +145,29 @@ impl StateMachine {
                     Some(dev) => dev,
                     None => return,
                 };
+
+                if ctap2_only && !dev.supports_ctap2() {
+                    // CTAP1-only authenticator with a CTAP2-only request.
+                    let _ = selector.send(DeviceSelectorEvent::NotAToken(dev.id()));
+                    return;
+                }
+
+                if args.use_ctap1_fallback && !dev.supports_ctap1() {
+                    // CTAP2-only authenticator with a CTAP1-only request.
+                    let _ = selector.send(DeviceSelectorEvent::NotAToken(dev.id()));
+                    return;
+                }
+
                 if !Self::wait_for_device_selector(&mut dev, &selector, &status, alive) {
+                    let _ = selector.send(DeviceSelectorEvent::NotAToken(dev.id()));
                     return;
                 };
 
-                if args.use_ctap1_fallback {
-                    dev.downgrade_to_ctap1();
+                if args.use_ctap1_fallback && dev.downgrade_to_ctap1().is_err() {
+                    // We shouldn't reach this, but not downgrading early lets us use CTAP 2.1
+                    // device selection on devices that support it.
+                    let _ = selector.send(DeviceSelectorEvent::NotAToken(dev.id()));
+                    return;
                 }
 
                 info!("Device {:?} continues with the register process", dev.id());
@@ -158,6 +190,20 @@ impl StateMachine {
         status: Sender<crate::StatusUpdate>,
         callback: StateCallback<crate::Result<crate::SignResult>>,
     ) {
+        // Could the request be handled by a CTAP1 authenticator?
+        let ctap2_only = {
+            if let Err(e) = ctap2::check_ctap1_sign_compatibility(&args) {
+                if args.use_ctap1_fallback {
+                    // There's no way a CTAP1 authenticator could approve this request, so cancel early.
+                    callback.call(Err(e));
+                    return;
+                }
+                true
+            } else {
+                false
+            }
+        };
+
         // Abort any prior register/sign calls.
         self.cancel();
         let cbc = callback.clone();
@@ -171,12 +217,28 @@ impl StateMachine {
                     Some(dev) => dev,
                     None => return,
                 };
+
+                if ctap2_only && !dev.supports_ctap2() {
+                    // CTAP1-only authenticator with a CTAP2-only request.
+                    let _ = selector.send(DeviceSelectorEvent::NotAToken(dev.id()));
+                    return;
+                }
+
+                if args.use_ctap1_fallback && !dev.supports_ctap1() {
+                    // CTAP2-only authenticator with a CTAP1-only request.
+                    let _ = selector.send(DeviceSelectorEvent::NotAToken(dev.id()));
+                    return;
+                }
+
                 if !Self::wait_for_device_selector(&mut dev, &selector, &status, alive) {
                     return;
                 };
 
-                if args.use_ctap1_fallback {
-                    dev.downgrade_to_ctap1();
+                if args.use_ctap1_fallback && dev.downgrade_to_ctap1().is_err() {
+                    // We shouldn't reach this, but not downgrading early lets us use CTAP 2.1
+                    // device selection on devices that support it.
+                    let _ = selector.send(DeviceSelectorEvent::NotAToken(dev.id()));
+                    return;
                 }
 
                 info!("Device {:?} continues with the signing process", dev.id());

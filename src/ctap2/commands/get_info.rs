@@ -90,23 +90,47 @@ pub struct AuthenticatorOptions {
     #[serde(rename = "up", default = "true_val")]
     pub user_presence: bool,
 
-    /// Indicates that the device is capable of verifying the user within
-    /// itself. For example, devices with UI, biometrics fall into this
-    /// category.
-    ///  If present and set to true, it indicates that the device is capable of
-    ///   user verification within itself and has been configured.
-    ///  If present and set to false, it indicates that the device is capable of
-    ///   user verification within itself and has not been yet configured. For
-    ///   example, a biometric device that has not yet been configured will
-    ///   return this parameter set to false.
-    ///  If absent, it indicates that the device is not capable of user
-    ///   verification within itself.
-    /// A device that can only do Client PIN will not return the "uv" parameter.
-    /// If a device is capable of verifying the user within itself as well as
-    /// able to do Client PIN, it will return both "uv" and the Client PIN
-    /// option.
-    // TODO(MS): My Token (key-ID FIDO2) does return Some(false) here, even though
-    //           it has no built-in verification method. Not to be trusted...
+    /// In CTAP 2.1+, indicates that the authenticator supports
+    /// [a built-in user verification method][0].
+    ///
+    /// For example, devices with UI, biometrics fall into this category.
+    ///
+    /// * If `Some(true)`, it indicates that the device is capable of built-in user verification and
+    ///   its user verification feature is presently configured.
+    ///
+    /// * If `Some(false)`, it indicates that the authenticator is capable of built-in user
+    ///   verification and its user verification feature is not presently configured.
+    ///
+    ///   For example, an authenticator featuring a built-in biometric user verification feature
+    ///   that is not presently configured will return this option set to `Some(false)`.
+    ///
+    /// * If `None`, it indicates that the authenticator does not have a built-in user verification
+    ///   capability.
+    ///
+    /// A device that can only do Client PIN will return `None`.
+    ///
+    /// If a device is capable of both built-in user verification and Client PIN, the authenticator
+    /// will return both the "uv" and [the "clientPin"][Self::client_pin] option ids.
+    ///
+    /// ### Caveats
+    ///
+    /// [CTAP 2.0][1] gives the `uv` option a completely different meaning to CTAP 2.1+:
+    ///
+    /// > Indicates that the device is capable of verifying the user as part of the
+    /// > `authenticatorGetAssertion` request. Default: `false`
+    ///
+    /// Some CTAP 2.1-PRE authenticators that _only_ support client PIN erroneously return
+    /// `Some(false)` (eg: Key-ID FIDO2).
+    ///
+    /// ### References
+    ///
+    /// * [CTAP 2.0][1] (different to CTAP 2.1 and later)
+    /// * [CTAP 2.1](https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-errata-20220621.html#getinfo-uv)
+    /// * [CTAP 2.2](https://fidoalliance.org/specs/fido-v2.2-ps-20250714/fido-client-to-authenticator-protocol-v2.2-ps-20250714.html#getinfo-uv)
+    /// * [CTAP 2.3](https://fidoalliance.org/specs/fido-v2.3-ps-20260226/fido-client-to-authenticator-protocol-v2.3-ps-20260226.html#getinfo-uv)
+    ///
+    /// [0]: https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-errata-20220621.html#built-in-user-verification-method
+    /// [1]: https://fidoalliance.org/specs/fido-v2.0-ps-20170927/fido-client-to-authenticator-protocol-v2.0-ps-20170927.html#authenticatorgetinfo-0x04
     #[serde(rename = "uv")]
     pub user_verification: Option<bool>,
 
@@ -369,8 +393,24 @@ impl AuthenticatorInfo {
         AuthenticatorVersion::U2F_V2
     }
 
+    /// `true` if the device has been configured with [some form of user verification][0]
+    /// (ie: a [client PIN][1] is set and/or [built-in user verification][2] is configured).
+    ///
+    /// [0]: https://fidoalliance.org/specs/fido-v2.3-ps-20260226/fido-client-to-authenticator-protocol-v2.3-ps-20260226.html#some-form-of-user-verification
+    /// [1]: AuthenticatorOptions::client_pin
+    /// [2]: AuthenticatorOptions::user_verification
     pub fn device_is_protected(&self) -> bool {
         self.options.client_pin == Some(true) || self.options.user_verification == Some(true)
+    }
+
+    /// `true` if the device supports [some form of user verification][0].
+    ///
+    /// This is a mandatory feature on CTAP 2.1+ authenticators that support [resident keys][1]. It
+    ///
+    /// [0]: https://fidoalliance.org/specs/fido-v2.3-ps-20260226/fido-client-to-authenticator-protocol-v2.3-ps-20260226.html#some-form-of-user-verification
+    /// [1]: AuthenticatorOptions::resident_key
+    pub fn supports_uv(&self) -> bool {
+        self.options.client_pin.is_some() || self.options.user_verification.is_some()
     }
 }
 
@@ -597,12 +637,11 @@ impl<'de> Deserialize<'de> for AuthenticatorInfo {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::consts::{Capability, HIDCmd, CID_BROADCAST};
+    use crate::consts::{Capability, HIDCmd};
     use crate::crypto::COSEAlgorithm;
     use crate::transport::device_selector::Device;
     use crate::transport::platform::device::IN_HID_RPT_SIZE;
-    use crate::transport::{hid::HIDDevice, FidoDevice, FidoProtocol};
-    use rand::{thread_rng, RngCore};
+    use crate::transport::{hid::HIDDevice, CtapVersionSupport, FidoDevice, FidoProtocol};
     use serde_cbor::de::from_slice;
 
     // Raw data take from https://github.com/Yubico/python-fido2/blob/master/test/test_ctap2.py
@@ -958,32 +997,11 @@ pub mod tests {
 
     #[test]
     fn test_get_info_ctap2_only() {
-        let mut device = Device::new("commands/get_info").unwrap();
-        assert_eq!(device.get_protocol(), FidoProtocol::CTAP2);
-        let nonce = [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01];
-
-        // channel id
-        let mut cid = [0u8; 4];
-        thread_rng().fill_bytes(&mut cid);
-
-        // init packet
-        let mut msg = CID_BROADCAST.to_vec();
-        msg.extend(vec![HIDCmd::Init.into(), 0x00, 0x08]); // cmd + bcnt
-        msg.extend_from_slice(&nonce);
-        device.add_write(&msg, 0);
-
-        // init_resp packet
-        let mut msg = CID_BROADCAST.to_vec();
-        msg.extend(vec![
-            0x06, /* HIDCmd::Init without TYPE_INIT */
-            0x00, 0x11,
-        ]); // cmd + bcnt
-        msg.extend_from_slice(&nonce);
-        msg.extend_from_slice(&cid); // new channel id
-
-        // We are setting NMSG, to signal that the device does not support CTAP1
-        msg.extend(vec![0x02, 0x04, 0x01, 0x08, 0x01 | 0x04 | 0x08]); // versions + flags (wink+cbor+nmsg)
-        device.add_read(&msg, 0);
+        let mut device = Device::new_pre_inited(
+            "commands/get_info",
+            Capability::CBOR | Capability::NMSG | Capability::WINK,
+        );
+        let cid = device.get_cid().clone();
 
         // ctap2 request
         let mut msg = cid.to_vec();
@@ -1006,7 +1024,20 @@ pub mod tests {
 
         assert_eq!(device.get_cid(), &cid);
 
-        let dev_info = device.get_device_info();
+        assert!(!device.supports_ctap1());
+        assert!(device.supports_ctap2());
+        assert_eq!(device.get_protocol(), FidoProtocol::CTAP2);
+        assert_matches!(
+            device
+                .downgrade_to_ctap1()
+                .expect_err("downgrading to CTAP1 should fail when NMSG"),
+            HIDError::UnexpectedVersion
+        );
+        assert_eq!(device.get_protocol(), FidoProtocol::CTAP2);
+        assert!(!device.supports_ctap1());
+        assert!(device.supports_ctap2());
+
+        let dev_info = device.get_device_info().expect("device info is set");
         assert_eq!(
             dev_info.cap_flags,
             Capability::WINK | Capability::CBOR | Capability::NMSG

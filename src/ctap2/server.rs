@@ -296,10 +296,18 @@ pub enum ResidentKeyRequirement {
     Required,
 }
 
+/// Reference: <https://www.w3.org/TR/webauthn-3/#enum-userVerificationRequirement>
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum UserVerificationRequirement {
+    /// The Relying Party does not want user verification employed during the operation (e.g., in
+    /// the interest of minimizing disruption to the user interaction flow).
     Discouraged,
+    /// The Relying Party prefers user verification for the operation if possible, but will not
+    /// fail the operation if the response does not have the UV flag set.
     Preferred,
+    /// The Relying Party requires user verification for the operation and will fail the overall
+    /// ceremony if the response does not have the UV flag set. The client MUST return an error
+    /// if user verification cannot be performed.
     Required,
 }
 
