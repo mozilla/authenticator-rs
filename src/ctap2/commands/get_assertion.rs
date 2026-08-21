@@ -489,13 +489,19 @@ impl PinUvAuthCommand for GetAssertion {
         info: &AuthenticatorInfo,
         uv_req: UserVerificationRequirement,
     ) -> bool {
-        let supports_uv = info.options.user_verification == Some(true);
-        let pin_configured = info.options.client_pin == Some(true);
-        let device_protected = supports_uv || pin_configured;
-        let uv_discouraged = uv_req == UserVerificationRequirement::Discouraged;
-        let always_uv = info.options.always_uv == Some(true);
+        if uv_req == UserVerificationRequirement::Required
+            || info.options.always_uv.unwrap_or(false)
+        {
+            // The RP requires UV, or the authenticator always requires UV (CTAP 2.1 §7.2.2).
+            return false;
+        }
 
-        !always_uv && (!device_protected || uv_discouraged)
+        let uv_discouraged = uv_req == UserVerificationRequirement::Discouraged;
+
+        // The RP "prefers enforcing UV" (CTAP 2.1 §6.2.1 step 1.1) or
+        // "prefers UV ... if possible" (WebAuthn-3 §5.8.6). UV is "possible" on
+        // authenticators that support it, but it might not be configured.
+        uv_discouraged || !info.supports_uv()
     }
 
     fn get_pin_uv_auth_param(&self) -> Option<&PinUvAuthParam> {
