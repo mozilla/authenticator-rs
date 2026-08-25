@@ -4,6 +4,9 @@ use crate::ctap2::commands::client_pin::{
     GetPinUvAuthTokenUsingPinWithPermissions, GetPinUvAuthTokenUsingUvWithPermissions,
     PinUvAuthTokenPermission,
 };
+use crate::ctap2::commands::credential_management::{
+    CredentialManagement, CredentialManagementResponse,
+};
 use crate::ctap2::commands::get_assertion::{GetAssertion, GetAssertionResult};
 use crate::ctap2::commands::get_info::{AuthenticatorInfo, AuthenticatorVersion, GetInfo};
 use crate::ctap2::commands::get_version::{GetVersion, U2FInfo};
@@ -366,4 +369,8 @@ pub trait VirtualFidoDevice: FidoDevice {
     fn make_credentials(&self, req: &MakeCredentials) -> Result<MakeCredentialsResult, HIDError>;
     fn reset(&self, req: &Reset) -> Result<(), HIDError>;
     fn selection(&self, req: &Selection) -> Result<(), HIDError>;
+    fn manage_credentials(
+        &mut self,
+        req: &CredentialManagement,
+    ) -> Result<CredentialManagementResponse, HIDError>;
 }
