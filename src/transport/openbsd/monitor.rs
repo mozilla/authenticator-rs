@@ -65,6 +65,7 @@ where
     pub fn run(&mut self, alive: &dyn Fn() -> bool) -> Result<(), Box<dyn Error>> {
         // Loop until we're stopped by the controlling thread, or fail.
         while alive() {
+            let mut added = Vec::new();
             // Iterate the first 10 fido(4) devices.
             for path in (0..10)
                 .map(|unit| PathBuf::from(&format!("/dev/fido/{}", unit)))
@@ -78,10 +79,7 @@ where
                 match from_unix_result(fd) {
                     Ok(fd) => {
                         // The device is available if it can be opened.
-                        let _ = self
-                            .selector_sender
-                            .send(DeviceSelectorEvent::DevicesAdded(vec![os_path.clone()]));
-                        self.add_device(WrappedOpenDevice { fd, os_path });
+                        added.push(WrappedOpenDevice { fd, os_path });
                     }
                     Err(ref err) if err.raw_os_error() == Some(libc::EBUSY) => {
                         // The device is available but currently in use.
@@ -91,6 +89,12 @@ where
                         self.remove_device(os_path);
                     }
                 }
+            }
+            let _ = self.selector_sender.send(DeviceSelectorEvent::DevicesAdded(
+                added.iter().map(|e| e.os_path.clone()).collect(),
+            ));
+            for device in added {
+                self.add_device(device);
             }
 
             thread::sleep(Duration::from_millis(POLL_TIMEOUT));

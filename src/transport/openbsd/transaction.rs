@@ -35,7 +35,7 @@ impl Transaction {
             + 'static,
         T: 'static,
     {
-        let device_selector = DeviceSelector::run();
+        let device_selector = DeviceSelector::run(status.clone());
         let selector_sender = device_selector.clone_sender();
         let thread = RunLoop::new_with_timeout(
             move |alive| {
