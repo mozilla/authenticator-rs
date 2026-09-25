@@ -8,7 +8,7 @@ use nss_rs::p11::{
 };
 
 // nss-rs exposes these as raw bindgen u32 constants; shadow as usize for ergonomic use.
-const AES_BLOCK_SIZE: usize = nss_rs::p11::AES_BLOCK_SIZE as usize;
+const AES_BLOCK_SIZE: usize = 16;
 const SHA256_LENGTH: usize = nss_rs::p11::SHA256_LENGTH as usize;
 use nss_rs::nss_prelude::PRBool;
 use nss_rs::{IntoResult, SECItem, SECItemBorrowed, ScopedSECItem};
@@ -109,7 +109,7 @@ pub fn gen_p256() -> Result<(Vec<u8>, Vec<u8>)> {
         pkcs8_priv_item.into_vec()
     };
 
-    let sec1_pub = client_public.key_data()?;
+    let sec1_pub = client_public.key_data()?.to_vec();
 
     Ok((pkcs8_priv, sec1_pub))
 }
@@ -165,7 +165,7 @@ pub fn ecdhe_p256_raw(peer: &super::COSEEC2Key) -> Result<(Vec<u8>, Vec<u8>)> {
 
     let shared_point = ecdh_nss_raw(client_private, peer_public)?;
 
-    Ok((shared_point, client_public.key_data()?))
+    Ok((shared_point, client_public.key_data()?.to_vec()))
 }
 
 /// AES-256-CBC encryption for data that is a multiple of the AES block size (16 bytes) in length.
