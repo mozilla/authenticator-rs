@@ -45,7 +45,7 @@ impl Serialize for CredManagementParams {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub(crate) enum CredManagementCommand {
+pub enum CredManagementCommand {
     GetCredsMetadata,
     EnumerateRPsBegin,
     EnumerateRPsGetNextRP,
@@ -81,9 +81,9 @@ impl CredManagementCommand {
 }
 #[derive(Debug)]
 pub struct CredentialManagement {
-    pub(crate) subcommand: CredManagementCommand, // subCommand currently being requested
-    pin_uv_auth_param: Option<PinUvAuthParam>, // First 16 bytes of HMAC-SHA-256 of contents using pinUvAuthToken.
-    use_legacy_preview: bool,
+    pub subcommand: CredManagementCommand, // subCommand currently being requested
+    pub pin_uv_auth_param: Option<PinUvAuthParam>, // First 16 bytes of HMAC-SHA-256 of contents using pinUvAuthToken.
+    pub use_legacy_preview: bool,
 }
 
 impl CredentialManagement {
@@ -386,9 +386,9 @@ impl RequestCtap2 for CredentialManagement {
 
     fn send_to_virtual_device<Dev: crate::VirtualFidoDevice>(
         &self,
-        _dev: &mut Dev,
+        dev: &mut Dev,
     ) -> Result<Self::Output, HIDError> {
-        unimplemented!()
+        dev.manage_credentials(self)
     }
 }
 
