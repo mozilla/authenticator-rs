@@ -19,6 +19,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 pub(crate) const IN_HID_RPT_SIZE: usize = 64;
 pub(crate) const OUT_HID_RPT_SIZE: usize = 64;
 
+/// Mock authenticator device for unit tests.
 #[derive(Debug)]
 pub struct Device {
     pub id: String,
@@ -97,6 +98,7 @@ impl Device {
         })
     }
 
+    /// Create a new, pre-initialized mock authenticator.
     pub fn new_pre_inited(
         parameters: <Device as HIDDevice>::BuildParameters,
         capabilities: Capability,
