@@ -961,7 +961,7 @@ pub mod tests {
             "commands/get_info",
             Capability::CBOR | Capability::NMSG | Capability::WINK,
         );
-        let cid = device.get_cid().clone();
+        let cid = *device.get_cid();
 
         // ctap2 request
         let mut msg = cid.to_vec();

@@ -970,7 +970,7 @@ pub mod test {
             "commands/get_info",
             Capability::CBOR | Capability::NMSG | Capability::WINK,
         );
-        let cid = device.get_cid().clone();
+        let cid = *device.get_cid();
 
         let mut msg = cid.to_vec();
         msg.extend(vec![HIDCmd::Cbor.into(), 0x00, 0x90]);

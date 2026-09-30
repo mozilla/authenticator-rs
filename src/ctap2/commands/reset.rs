@@ -62,7 +62,7 @@ pub mod tests {
             "commands/reset",
             Capability::CBOR | Capability::NMSG | Capability::WINK,
         );
-        let cid = device.get_cid().clone();
+        let cid = *device.get_cid();
         assert_eq!(device.get_protocol(), FidoProtocol::CTAP2);
 
         let mut msg = cid.to_vec();
