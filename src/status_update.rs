@@ -85,6 +85,19 @@ pub enum StatusPinUv {
     UvBlocked,
 }
 
+/// The direction and protocol of a message sent to or received from an authenticator.
+#[derive(Debug, DeriveSer)]
+pub enum MessageDirection {
+    /// A CTAP1 message sent to the authenticator.
+    Ctap1Request,
+    /// A CTAP1 message received from the authenticator.
+    Ctap1Response,
+    /// A CTAP2 message sent to the authenticator.
+    Ctap2Request,
+    /// A CTAP2 message received from the authenticator.
+    Ctap2Response,
+}
+
 #[derive(Debug)]
 pub enum InteractiveUpdate {
     StartManagement((Sender<InteractiveRequest>, Option<AuthenticatorInfo>)),
@@ -113,6 +126,8 @@ pub enum StatusUpdate {
     LargeBlobData(Sender<LargeBlobArrayElement>, Vec<u8>),
     /// Inform user that no devices are plugged in
     NoDevicesFound,
+    /// Logging of requests being sent to the device
+    RequestLogging(MessageDirection, String),
 }
 
 pub(crate) fn send_status(status: &Sender<StatusUpdate>, msg: StatusUpdate) {

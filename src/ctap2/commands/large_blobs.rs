@@ -377,7 +377,7 @@ where
             length: None,
             pin_uv_auth_param: None,
         };
-        let mut segment = dev.send_cbor_cancellable(&cmd, keep_alive)?;
+        let mut segment = dev.send_cbor_cancellable(&cmd, keep_alive, None)?;
         let segment_len = segment.len();
         bytes.append(&mut segment);
         // Spec:
@@ -440,7 +440,7 @@ where
             pin_uv_auth_param: None,
         };
         cmd.set_pin_uv_auth_param(pin_uv_auth_token.clone())?;
-        dev.send_cbor_cancellable(&cmd, keep_alive)?;
+        dev.send_cbor_cancellable(&cmd, keep_alive, None)?;
         offset += chunk_len as u64;
     }
     Ok(())

@@ -11,9 +11,10 @@ use crate::ctap2::server::{
 use crate::errors::*;
 use crate::manager::Manager;
 use crate::statecallback::StateCallback;
+use serde::Serialize;
 use std::sync::{mpsc::Sender, Arc, Mutex};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct RegisterArgs {
     pub client_data_hash: [u8; 32],
     pub relying_party: RelyingParty,
@@ -28,7 +29,7 @@ pub struct RegisterArgs {
     pub use_ctap1_fallback: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct SignArgs {
     pub client_data_hash: [u8; 32],
     pub origin: String,
