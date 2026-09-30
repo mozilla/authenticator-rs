@@ -85,10 +85,17 @@ pub enum StatusPinUv {
     UvBlocked,
 }
 
+/// The direction and protocol of a message sent to or received from an authenticator.
 #[derive(Debug, DeriveSer)]
 pub enum MessageDirection {
-    Request,
-    Response,
+    /// A CTAP1 message sent to the authenticator.
+    Ctap1Request,
+    /// A CTAP1 message received from the authenticator.
+    Ctap1Response,
+    /// A CTAP2 message sent to the authenticator.
+    Ctap2Request,
+    /// A CTAP2 message received from the authenticator.
+    Ctap2Response,
 }
 
 #[derive(Debug)]

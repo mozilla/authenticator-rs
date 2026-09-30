@@ -195,7 +195,7 @@ impl<T: HIDDevice + TestDevice> FidoDeviceIO for T {
         if let Some(status) = status {
             send_status(
                 status,
-                StatusUpdate::RequestLogging(MessageDirection::Request, format!("{msg:?}")),
+                StatusUpdate::RequestLogging(MessageDirection::Ctap2Request, format!("{msg:?}")),
             );
         }
 
@@ -217,7 +217,7 @@ impl<T: HIDDevice + TestDevice> FidoDeviceIO for T {
         if let Some(status) = status {
             send_status(
                 status,
-                StatusUpdate::RequestLogging(MessageDirection::Response, format!("{response:?}")),
+                StatusUpdate::RequestLogging(MessageDirection::Ctap2Response, format!("{response:?}")),
             );
         }
         response
@@ -240,7 +240,7 @@ impl<T: HIDDevice + TestDevice> FidoDeviceIO for T {
         if let Some(status) = status {
             send_status(
                 status,
-                StatusUpdate::RequestLogging(MessageDirection::Request, format!("{msg:?}")),
+                StatusUpdate::RequestLogging(MessageDirection::Ctap1Request, format!("{msg:?}")),
             );
         }
 
@@ -276,7 +276,7 @@ impl<T: HIDDevice + TestDevice> FidoDeviceIO for T {
                 send_status(
                     status,
                     StatusUpdate::RequestLogging(
-                        MessageDirection::Response,
+                        MessageDirection::Ctap1Response,
                         format!("{response:?}"),
                     ),
                 );
