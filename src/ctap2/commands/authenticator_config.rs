@@ -212,6 +212,7 @@ mod test {
             ]),
             force_change_pin: Some(true),
         };
+        assert_canonical_cbor_encoding(&set_min_pin_length);
         let serialized =
             serde_cbor::ser::to_vec(&set_min_pin_length).expect("Failed to serialize to CBOR");
         assert_eq!(
@@ -238,6 +239,7 @@ mod test {
                 subcommand: AuthConfigCommand::EnableEnterpriseAttestation,
                 pin_uv_auth_param: pin_uv_auth_param.clone(),
             };
+            assert_canonical_cbor_encoding(&authenticator_config);
             let serialized = serde_cbor::ser::to_vec(&authenticator_config)
                 .expect("Failed to serialize to CBOR");
             assert_eq!(
@@ -254,6 +256,7 @@ mod test {
                 subcommand: AuthConfigCommand::ToggleAlwaysUv,
                 pin_uv_auth_param: pin_uv_auth_param.clone(),
             };
+            assert_canonical_cbor_encoding(&authenticator_config);
             let serialized = serde_cbor::ser::to_vec(&authenticator_config)
                 .expect("Failed to serialize to CBOR");
             assert_eq!(
@@ -277,6 +280,7 @@ mod test {
                 }),
                 pin_uv_auth_param,
             };
+            assert_canonical_cbor_encoding(&authenticator_config);
             let serialized = serde_cbor::ser::to_vec(&authenticator_config)
                 .expect("Failed to serialize to CBOR");
             assert_eq!(

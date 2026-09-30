@@ -462,6 +462,7 @@ mod test {
                 display_name: Some("Test User".to_string()),
             }),
         };
+        assert_canonical_cbor_encoding(&cred_management_params);
         let serialized =
             serde_cbor::ser::to_vec(&cred_management_params).expect("Failed to serialize to CBOR");
         assert_eq!(
