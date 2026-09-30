@@ -525,7 +525,7 @@ pub mod tests {
             "commands/large_blob",
             Capability::CBOR | Capability::NMSG | Capability::WINK,
         );
-        let cid = device.get_cid().clone();
+        let cid = *device.get_cid();
 
         let cmd = [
             0xa2, // map(2)
@@ -554,7 +554,7 @@ pub mod tests {
             "commands/large_blob",
             Capability::CBOR | Capability::NMSG | Capability::WINK,
         );
-        let cid = device.get_cid().clone();
+        let cid = *device.get_cid();
 
         let cmd = [
             0xa2, // map(2)
@@ -594,7 +594,7 @@ pub mod tests {
             "commands/large_blob",
             Capability::CBOR | Capability::NMSG | Capability::WINK,
         );
-        let cid = device.get_cid().clone();
+        let cid = *device.get_cid();
         device.set_authenticator_info(crate::AuthenticatorInfo {
             max_msg_size: Some(164), // Note: This value minus 64 will be the fragment size
             ..Default::default()
@@ -631,7 +631,7 @@ pub mod tests {
             "commands/large_blob",
             Capability::CBOR | Capability::NMSG | Capability::WINK,
         );
-        let cid = device.get_cid().clone();
+        let cid = *device.get_cid();
 
         let cmd = [
             0xa2, // map(2)
@@ -679,7 +679,7 @@ pub mod tests {
             "commands/large_blob",
             Capability::CBOR | Capability::NMSG | Capability::WINK,
         );
-        let cid = device.get_cid().clone();
+        let cid = *device.get_cid();
         device.set_authenticator_info(crate::AuthenticatorInfo {
             max_msg_size: Some(164), // Note: This value minus 64 will be the fragment size
             ..Default::default()

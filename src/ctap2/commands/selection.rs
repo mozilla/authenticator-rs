@@ -63,7 +63,7 @@ pub mod tests {
             "commands/get_info",
             Capability::CBOR | Capability::NMSG | Capability::WINK,
         );
-        let cid = device.get_cid().clone();
+        let cid = *device.get_cid();
         assert!(!device.supports_ctap1());
         assert!(device.supports_ctap2());
         assert_eq!(device.get_protocol(), FidoProtocol::CTAP2);
