@@ -654,6 +654,7 @@ mod test {
                 163, 1, 68, 1, 2, 3, 4, 2, 101, 116, 104, 117, 109, 98, 3, 25, 5, 57
             ]
         );
+        assert_canonical_cbor_encoding(&bio_enrollment_params);
     }
 
     #[test]
@@ -681,6 +682,7 @@ mod test {
                 2, 5, 68, 1, 2, 3, 4
             ]
         );
+        assert_canonical_cbor_encoding(&bio_enrollment_params);
     }
 
     #[test]
