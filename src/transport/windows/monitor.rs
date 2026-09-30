@@ -60,12 +60,13 @@ where
             let added: Vec<String> = current.difference(&previous).cloned().collect();
 
             // We have to notify additions in batches to avoid
-            // arbitrarily selecting the first added device.
-            if !added.is_empty()
-                && self
-                    .selector_sender
-                    .send(DeviceSelectorEvent::DevicesAdded(added.clone()))
-                    .is_err()
+            // arbitrarily selecting the first added device and
+            // to know when there are no devices present (then
+            // we send an empty vec here).
+            if self
+                .selector_sender
+                .send(DeviceSelectorEvent::DevicesAdded(added.clone()))
+                .is_err()
             {
                 // Send only fails if the receiver hung up. We should exit the loop.
                 break;
