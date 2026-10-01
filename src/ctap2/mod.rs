@@ -43,7 +43,7 @@ use crate::statecallback::StateCallback;
 use crate::status_update::{send_status, BioEnrollmentCmd, CredManagementCmd, InteractiveUpdate};
 use crate::transport::device_selector::{Device, DeviceSelectorEvent};
 use crate::transport::{errors::HIDError, hid::HIDDevice, FidoDevice, FidoDeviceIO, FidoProtocol};
-use crate::{ManageResult, ResetResult, StatusPinUv, StatusUpdate};
+use crate::{CtapVersionSupport, ManageResult, ResetResult, StatusPinUv, StatusUpdate};
 use std::sync::mpsc::{channel, RecvError, Sender};
 use std::thread;
 use std::time::Duration;
@@ -806,6 +806,11 @@ pub(crate) fn reset_helper<T: From<ResetResult>>(
     callback: StateCallback<crate::Result<T>>,
     keep_alive: &dyn Fn() -> bool,
 ) {
+    if !dev.supports_ctap2() {
+        callback.call(Err(HIDError::UnsupportedCommand.into()));
+        return;
+    }
+
     let reset = Reset {};
     info!("Device {:?} continues with the reset process", dev.id());
 
@@ -841,6 +846,11 @@ pub fn set_or_change_pin_helper<T: From<()>, Dev: FidoDevice>(
     callback: StateCallback<crate::Result<T>>,
     alive: &dyn Fn() -> bool,
 ) {
+    if !dev.supports_ctap2() {
+        callback.call(Err(HIDError::UnsupportedCommand.into()));
+        return;
+    }
+
     let mut shared_secret = match dev.establish_shared_secret(alive) {
         Ok(s) => s,
         Err(e) => {
@@ -938,6 +948,11 @@ pub(crate) fn bio_enrollment(
     callback: StateCallback<crate::Result<crate::ManageResult>>,
     alive: &dyn Fn() -> bool,
 ) -> bool {
+    if !dev.supports_ctap2() {
+        callback.call(Err(HIDError::UnsupportedCommand.into()));
+        return false;
+    }
+
     let authinfo = match dev.get_authenticator_info() {
         Some(i) => i,
         None => {
@@ -1206,6 +1221,11 @@ pub fn credential_management<Dev: FidoDevice>(
     callback: StateCallback<crate::Result<crate::ManageResult>>,
     alive: &dyn Fn() -> bool,
 ) -> bool {
+    if !dev.supports_ctap2() {
+        callback.call(Err(HIDError::UnsupportedCommand.into()));
+        return false;
+    }
+
     let mut skip_uv = false;
     let authinfo = match dev.get_authenticator_info() {
         Some(i) => i.clone(),
@@ -1520,6 +1540,11 @@ pub(crate) fn configure_authenticator(
     callback: StateCallback<crate::Result<crate::ManageResult>>,
     alive: &dyn Fn() -> bool,
 ) -> bool {
+    if !dev.supports_ctap2() {
+        callback.call(Err(HIDError::UnsupportedCommand.into()));
+        return false;
+    }
+
     let mut authcfg = AuthenticatorConfig::new(cfg_subcommand);
     let mut skip_uv = false;
     let authinfo = match dev.get_authenticator_info() {
