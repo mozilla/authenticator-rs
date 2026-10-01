@@ -12,7 +12,7 @@ use crate::transport::device_selector::{
     BlinkResult, Device, DeviceBuildParameters, DeviceCommand, DeviceSelectorEvent,
 };
 use crate::transport::platform::transaction::Transaction;
-use crate::transport::{hid::HIDDevice, CtapVersionSupport, FidoDevice, FidoProtocol};
+use crate::transport::{hid::HIDDevice, CtapVersionSupport, FidoDevice};
 use crate::{InteractiveRequest, ManageResult};
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::time::Duration;
@@ -282,7 +282,7 @@ impl StateMachine {
                     None => return,
                 };
 
-                if dev.get_protocol() != FidoProtocol::CTAP2 {
+                if !dev.supports_ctap2() {
                     info!("Device does not support CTAP2");
                     let _ = selector.send(DeviceSelectorEvent::NotAToken(dev.id()));
                     return;
@@ -320,7 +320,7 @@ impl StateMachine {
                     None => return,
                 };
 
-                if dev.get_protocol() != FidoProtocol::CTAP2 {
+                if !dev.supports_ctap2() {
                     info!("Device does not support CTAP2");
                     let _ = selector.send(DeviceSelectorEvent::NotAToken(dev.id()));
                     return;
@@ -371,8 +371,11 @@ impl StateMachine {
                     None => return,
                 };
 
-                if dev.get_protocol() != FidoProtocol::CTAP2 {
-                    info!("Device does not support CTAP2");
+                if !dev.supports_ctap2() {
+                    info!(
+                        "Device {:?} cannot be managed because it does not support CTAP2",
+                        dev.id()
+                    );
                     let _ = selector.send(DeviceSelectorEvent::NotAToken(dev.id()));
                     return;
                 }
