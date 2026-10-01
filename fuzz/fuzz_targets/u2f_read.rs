@@ -70,10 +70,8 @@ impl<'a> U2FDevice for TestDevice<'a> {
         Err(io::Error::new(io::ErrorKind::Other, "Not implemented"))
     }
 
-    fn get_device_info(&self) -> U2FDeviceInfo {
-        // unwrap is okay, as dev_info must have already been set, else
-        // a programmer error
-        self.dev_info.clone().unwrap()
+    fn get_device_info(&self) -> Option<U2FDeviceInfo> {
+        self.dev_info.clone()
     }
 
     fn set_device_info(&mut self, dev_info: U2FDeviceInfo) {

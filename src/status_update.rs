@@ -124,7 +124,7 @@ pub enum StatusUpdate {
     /// After MakeCredential, supply the user with the large blob key and let
     /// them calculate the payload, to send back to us.
     LargeBlobData(Sender<LargeBlobArrayElement>, Vec<u8>),
-    /// Inform user that no devices are plugged in
+    /// There are no connected devices which are compatible with the request
     NoDevicesFound,
     /// Logging of requests being sent to the device
     RequestLogging(MessageDirection, String),

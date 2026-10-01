@@ -597,12 +597,11 @@ impl<'de> Deserialize<'de> for AuthenticatorInfo {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::consts::{Capability, HIDCmd, CID_BROADCAST};
+    use crate::consts::{Capability, HIDCmd};
     use crate::crypto::COSEAlgorithm;
     use crate::transport::device_selector::Device;
     use crate::transport::platform::device::IN_HID_RPT_SIZE;
-    use crate::transport::{hid::HIDDevice, FidoDevice, FidoProtocol};
-    use rand::{thread_rng, RngCore};
+    use crate::transport::{hid::HIDDevice, CtapVersionSupport, FidoDevice, FidoProtocol};
     use serde_cbor::de::from_slice;
 
     // Raw data take from https://github.com/Yubico/python-fido2/blob/master/test/test_ctap2.py
@@ -958,32 +957,11 @@ pub mod tests {
 
     #[test]
     fn test_get_info_ctap2_only() {
-        let mut device = Device::new("commands/get_info").unwrap();
-        assert_eq!(device.get_protocol(), FidoProtocol::CTAP2);
-        let nonce = [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01];
-
-        // channel id
-        let mut cid = [0u8; 4];
-        thread_rng().fill_bytes(&mut cid);
-
-        // init packet
-        let mut msg = CID_BROADCAST.to_vec();
-        msg.extend(vec![HIDCmd::Init.into(), 0x00, 0x08]); // cmd + bcnt
-        msg.extend_from_slice(&nonce);
-        device.add_write(&msg, 0);
-
-        // init_resp packet
-        let mut msg = CID_BROADCAST.to_vec();
-        msg.extend(vec![
-            0x06, /* HIDCmd::Init without TYPE_INIT */
-            0x00, 0x11,
-        ]); // cmd + bcnt
-        msg.extend_from_slice(&nonce);
-        msg.extend_from_slice(&cid); // new channel id
-
-        // We are setting NMSG, to signal that the device does not support CTAP1
-        msg.extend(vec![0x02, 0x04, 0x01, 0x08, 0x01 | 0x04 | 0x08]); // versions + flags (wink+cbor+nmsg)
-        device.add_read(&msg, 0);
+        let mut device = Device::new_pre_inited(
+            "commands/get_info",
+            Capability::CBOR | Capability::NMSG | Capability::WINK,
+        );
+        let cid = *device.get_cid();
 
         // ctap2 request
         let mut msg = cid.to_vec();
@@ -1006,7 +984,20 @@ pub mod tests {
 
         assert_eq!(device.get_cid(), &cid);
 
-        let dev_info = device.get_device_info();
+        assert!(!device.supports_ctap1());
+        assert!(device.supports_ctap2());
+        assert_eq!(device.get_protocol(), FidoProtocol::CTAP2);
+        assert_matches!(
+            device
+                .downgrade_to_ctap1()
+                .expect_err("downgrading to CTAP1 should fail when NMSG"),
+            HIDError::UnexpectedVersion
+        );
+        assert_eq!(device.get_protocol(), FidoProtocol::CTAP2);
+        assert!(!device.supports_ctap1());
+        assert!(device.supports_ctap2());
+
+        let dev_info = device.get_device_info().expect("device info is set");
         assert_eq!(
             dev_info.cap_flags,
             Capability::WINK | Capability::CBOR | Capability::NMSG
