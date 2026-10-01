@@ -498,27 +498,36 @@ impl PinUvAuthCommand for MakeCredentials {
         info: &AuthenticatorInfo,
         uv_req: UserVerificationRequirement,
     ) -> bool {
-        // TODO(MS): Handle here the case where we NEED a UV, the device supports PINs, but hasn't set a PIN.
-        //           For this, the user has to be prompted to set a PIN first (see https://github.com/mozilla/authenticator-rs/issues/223)
+        // TODO(MS): Handle setting up a PIN where needed
+        // (see https://github.com/mozilla/authenticator-rs/issues/223)
+        if uv_req == UserVerificationRequirement::Required
+            || info.options.always_uv.unwrap_or(false)
+        {
+            // The RP requires UV, or the authenticator always requires UV (CTAP 2.1 §7.2.2).
+            return false;
+        }
 
-        let supports_uv = info.options.user_verification == Some(true);
-        let pin_configured = info.options.client_pin == Some(true);
+        // `true` if we'd plan to not use UV (ie: uv option is false and pinUvAuthParam unset)
+        let uv_discouraged = uv_req == UserVerificationRequirement::Discouraged;
+        let make_cred_uv_not_required = info.options.make_cred_uv_not_rqd == Some(true);
+        let rk = self.options.resident_key == Some(true);
 
-        // CTAP 2.0 authenticators require user verification if the device is protected
-        let device_protected = supports_uv || pin_configured;
+        if info.device_is_protected() && (!make_cred_uv_not_required || rk) {
+            // CTAP 2.3 §6.1.2 Step 7 only requires UV for RKs if the device is protected and
+            // supports make_cred_uv_not_rqd.
+            // https://fidoalliance.org/specs/fido-v2.3-ps-20260226/fido-client-to-authenticator-protocol-v2.3-ps-20260226.html#ref-for-getinfo-makecreduvnotrqd%E2%91%A1
+            //
+            // CTAP 2.3 §6.1.2 Step 8 and CTAP 2.0 §5.1 Step 5 require UV if the device is protected
+            // and does not support make_cred_uv_not_rqd.
+            // https://fidoalliance.org/specs/fido-v2.3-ps-20260226/fido-client-to-authenticator-protocol-v2.3-ps-20260226.html#ref-for-getinfo-makecreduvnotrqd%E2%91%A2
+            // https://fidoalliance.org/specs/fido-v2.0-ps-20170927/fido-client-to-authenticator-protocol-v2.0-ps-20170927.html#authenticatorMakeCredential:~:text=If%20pinAuth%20parameter%20is%20not%20present%20and%20clientPin%20been%20set%20on%20the%20authenticator%2C
+            return false;
+        }
 
-        // CTAP 2.1 authenticators may allow the creation of non-discoverable credentials without
-        // user verification. This is only relevant if the relying party has not requested user
-        // verification.
-        let make_cred_uv_not_required = info.options.make_cred_uv_not_rqd == Some(true)
-            && self.options.resident_key != Some(true)
-            && uv_req == UserVerificationRequirement::Discouraged;
-
-        // Alternatively, CTAP 2.1 authenticators may require user verification regardless of the
-        // RP's requirement.
-        let always_uv = info.options.always_uv == Some(true);
-
-        !always_uv && (!device_protected || make_cred_uv_not_required)
+        // The RP "prefers enforcing UV" (CTAP 2.1 §6.1.1 step 1.1) or
+        // "prefers UV ... if possible" (WebAuthn-3 §5.8.6). UV is "possible" on
+        // authenticators that support it, but it might not be configured.
+        uv_discouraged || !info.supports_uv()
     }
 
     fn get_pin_uv_auth_param(&self) -> Option<&PinUvAuthParam> {
