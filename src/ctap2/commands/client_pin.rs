@@ -666,12 +666,10 @@ impl From<CryptoError> for PinError {
 
 #[cfg(test)]
 mod test {
-    use std::convert::TryFrom;
-
-    use super::ClientPinResponse;
+    use super::*;
     use crate::{
-        crypto::{COSEAlgorithm, COSEEC2Key, COSEKey, COSEKeyType, Curve, PinUvAuthProtocol},
-        ctap2::commands::client_pin::{ClientPIN, PINSubcommand, PinUvAuthTokenPermission},
+        crypto::{COSEAlgorithm, COSEEC2Key, COSEKey, COSEKeyType, Curve},
+        ctap2::commands::{assert_canonical_cbor_encoding, client_pin::PinUvAuthTokenPermission},
         AuthenticatorInfo,
     };
     use serde_cbor::de::from_slice;
@@ -833,6 +831,7 @@ mod test {
             permissions: Some(PinUvAuthTokenPermission::CredentialManagement.bits()),
             rp_id: Some("example.org".to_string()),
         };
+        assert_canonical_cbor_encoding(&client_pin);
         let serialized = serde_cbor::ser::to_vec(&client_pin).expect("Failed to serialize to CBOR");
         assert_eq!(
             serialized,

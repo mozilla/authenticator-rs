@@ -196,9 +196,11 @@ impl PinUvAuthCommand for AuthenticatorConfig {
 
 #[cfg(test)]
 mod test {
-    use crate::{crypto::PinUvAuthParam, ctap2::commands::client_pin::PinUvAuthTokenPermission};
-
     use super::{AuthConfigCommand, AuthenticatorConfig, SetMinPINLength};
+    use crate::{
+        crypto::PinUvAuthParam,
+        ctap2::commands::{assert_canonical_cbor_encoding, client_pin::PinUvAuthTokenPermission},
+    };
 
     #[test]
     fn test_serialize_set_min_pin_length() {
@@ -210,6 +212,7 @@ mod test {
             ]),
             force_change_pin: Some(true),
         };
+        assert_canonical_cbor_encoding(&set_min_pin_length);
         let serialized =
             serde_cbor::ser::to_vec(&set_min_pin_length).expect("Failed to serialize to CBOR");
         assert_eq!(
@@ -236,6 +239,7 @@ mod test {
                 subcommand: AuthConfigCommand::EnableEnterpriseAttestation,
                 pin_uv_auth_param: pin_uv_auth_param.clone(),
             };
+            assert_canonical_cbor_encoding(&authenticator_config);
             let serialized = serde_cbor::ser::to_vec(&authenticator_config)
                 .expect("Failed to serialize to CBOR");
             assert_eq!(
@@ -252,6 +256,7 @@ mod test {
                 subcommand: AuthConfigCommand::ToggleAlwaysUv,
                 pin_uv_auth_param: pin_uv_auth_param.clone(),
             };
+            assert_canonical_cbor_encoding(&authenticator_config);
             let serialized = serde_cbor::ser::to_vec(&authenticator_config)
                 .expect("Failed to serialize to CBOR");
             assert_eq!(
@@ -275,6 +280,7 @@ mod test {
                 }),
                 pin_uv_auth_param,
             };
+            assert_canonical_cbor_encoding(&authenticator_config);
             let serialized = serde_cbor::ser::to_vec(&authenticator_config)
                 .expect("Failed to serialize to CBOR");
             assert_eq!(
@@ -286,6 +292,35 @@ mod test {
                     111, 114, 103, 3, 245, 3, 2, 4, 68, 1, 2, 3, 4
                 ]
             );
+        }
+    }
+
+    #[test]
+    fn test_cbor_canonical() {
+        for subcommand in [
+            AuthConfigCommand::EnableEnterpriseAttestation,
+            AuthConfigCommand::ToggleAlwaysUv,
+            AuthConfigCommand::SetMinPINLength(SetMinPINLength {
+                // Minimum PIN length in code points
+                new_min_pin_length: Some(42),
+                // RP IDs which are allowed to get this information via the minPinLength extension.
+                // This parameter MUST NOT be used unless the minPinLength extension is supported.
+                min_pin_length_rpids: Some(vec!["foobar".to_string()]),
+                // The authenticator returns CTAP2_ERR_PIN_POLICY_VIOLATION until changePIN is successful.
+                force_change_pin: Some(true),
+            }),
+        ] {
+            let request = AuthenticatorConfig {
+                subcommand,
+                pin_uv_auth_param: Some(PinUvAuthParam {
+                    pin_auth: vec![0xDE, 0xAD, 0xBE, 0xEF],
+                    pin_protocol: crate::crypto::PinUvAuthProtocol(Box::new(
+                        crate::crypto::PinUvAuth2 {},
+                    )),
+                    permissions: crate::ctap2::PinUvAuthTokenPermission::MakeCredential,
+                }),
+            };
+            assert_canonical_cbor_encoding(&request);
         }
     }
 }

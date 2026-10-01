@@ -692,33 +692,35 @@ pub(crate) fn dummy_make_credentials_cmd() -> MakeCredentials {
 
 #[cfg(test)]
 pub mod test {
-    use std::convert::TryFrom;
-
-    use super::{MakeCredentials, MakeCredentialsOptions, MakeCredentialsResult};
-    use crate::crypto::{
-        COSEAlgorithm, COSEEC2Key, COSEKey, COSEKeyType, Curve, PinUvAuthParam, PinUvAuthProtocol,
+    use super::*;
+    use crate::{
+        crypto::{
+            COSEAlgorithm, COSEEC2Key, COSEKey, COSEKeyType, Curve, PinUvAuthParam,
+            PinUvAuthProtocol,
+        },
+        ctap2::{
+            attestation::{
+                test::create_attestation_obj, AAGuid, AttestationCertificate, AttestationObject,
+                AttestationStatement, AttestationStatementFidoU2F, AttestedCredentialData,
+                AuthenticatorData, AuthenticatorDataFlags, Signature,
+            },
+            client_data::{Challenge, CollectedClientData, TokenBinding, WebauthnType},
+            commands::{
+                assert_canonical_cbor_encoding,
+                make_credentials::{HmacCreateSecretOrPrf, MakeCredentialsExtensions},
+                RequestCtap1, RequestCtap2,
+            },
+            server::{
+                AuthenticatorAttachment, PublicKeyCredentialDescriptor,
+                PublicKeyCredentialParameters, PublicKeyCredentialUserEntity, RelyingParty,
+                RpIdHash, Transport,
+            },
+        },
+        transport::{device_selector::Device, hid::HIDDevice, FidoDevice, FidoProtocol},
+        AuthenticatorInfo, MakeCredentialsResult,
     };
-    use crate::ctap2::attestation::test::create_attestation_obj;
-    use crate::ctap2::attestation::{
-        AAGuid, AttestationCertificate, AttestationObject, AttestationStatement,
-        AttestationStatementFidoU2F, AttestedCredentialData, AuthenticatorData,
-        AuthenticatorDataFlags, Signature,
-    };
-    use crate::ctap2::client_data::{Challenge, CollectedClientData, TokenBinding, WebauthnType};
-    use crate::ctap2::commands::make_credentials::{
-        HmacCreateSecretOrPrf, MakeCredentialsExtensions,
-    };
-    use crate::ctap2::commands::{RequestCtap1, RequestCtap2};
-    use crate::ctap2::server::{
-        AuthenticatorAttachment, PublicKeyCredentialParameters, PublicKeyCredentialUserEntity,
-        RelyingParty, Transport,
-    };
-    use crate::ctap2::server::{PublicKeyCredentialDescriptor, RpIdHash};
-    use crate::transport::device_selector::Device;
-    use crate::transport::hid::HIDDevice;
-    use crate::transport::{FidoDevice, FidoProtocol};
-    use crate::AuthenticatorInfo;
     use base64::Engine;
+    use std::convert::TryFrom;
 
     #[test]
     fn test_make_credentials_ctap2() {
@@ -758,6 +760,7 @@ pub mod test {
             },
             Default::default(),
         );
+        assert_canonical_cbor_encoding(&req);
 
         let mut device = Device::new("commands/make_credentials").unwrap(); // not really used (all functions ignore it)
         assert_eq!(device.get_protocol(), FidoProtocol::CTAP2);
@@ -906,6 +909,7 @@ pub mod test {
             },
             Default::default(),
         );
+        assert_canonical_cbor_encoding(&req);
 
         let (req_serialized, _) = req
             .ctap1_format()

@@ -923,7 +923,7 @@ pub mod test {
     use crate::ctap2::commands::get_info::{
         AuthenticatorInfo, AuthenticatorOptions, AuthenticatorVersion,
     };
-    use crate::ctap2::commands::{RequestCtap1, RequestCtap2};
+    use crate::ctap2::commands::{assert_canonical_cbor_encoding, RequestCtap1, RequestCtap2};
     use crate::ctap2::preflight::{
         do_credential_list_filtering_ctap1, do_credential_list_filtering_ctap2,
     };
@@ -966,6 +966,7 @@ pub mod test {
             },
             Default::default(),
         );
+        assert_canonical_cbor_encoding(&assertion);
         let mut device = Device::new("commands/get_assertion").unwrap();
         assert_eq!(device.get_protocol(), FidoProtocol::CTAP2);
         let mut cid = [0u8; 4];
@@ -1375,6 +1376,7 @@ pub mod test {
             },
             Default::default(),
         );
+        assert_canonical_cbor_encoding(&assertion);
         let mut device = Device::new("commands/get_assertion").unwrap(); // not really used (all functions ignore it)
                                                                          // channel id
         device.downgrade_to_ctap1();
@@ -1469,6 +1471,7 @@ pub mod test {
             },
             Default::default(),
         );
+        assert_canonical_cbor_encoding(&assertion);
 
         let mut device = Device::new("commands/get_assertion").unwrap(); // not really used (all functions ignore it)
                                                                          // channel id
@@ -1658,6 +1661,7 @@ pub mod test {
             },
             Default::default(),
         );
+        assert_canonical_cbor_encoding(&assertion);
         let mut device = Device::new("commands/get_assertion").unwrap();
         assert_eq!(device.get_protocol(), FidoProtocol::CTAP2);
         let mut cid = [0u8; 4];
