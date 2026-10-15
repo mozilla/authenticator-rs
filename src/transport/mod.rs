@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 use crate::crypto::{PinUvAuthProtocol, PinUvAuthToken, SharedSecret};
 use crate::ctap2::commands::client_pin::{
     ClientPIN, ClientPinResponse, GetKeyAgreement, GetPinToken,
@@ -203,9 +207,9 @@ where
 
     fn block_and_blink(&mut self, keep_alive: &dyn Fn() -> bool) -> BlinkResult {
         let supports_select_cmd = self.get_protocol() == FidoProtocol::CTAP2
-            && self.get_authenticator_info().is_some_and(|i| {
-                i.versions.contains(&AuthenticatorVersion::FIDO_2_1)
-            });
+            && self
+                .get_authenticator_info()
+                .is_some_and(|i| i.versions.contains(&AuthenticatorVersion::FIDO_2_1));
         let resp = if supports_select_cmd {
             let msg = Selection {};
             self.send_cbor_cancellable(&msg, keep_alive, None)

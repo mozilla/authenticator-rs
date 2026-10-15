@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 use super::TestDevice;
 use crate::consts::{HIDCmd, CID_BROADCAST};
 use crate::ctap2::commands::{CommandError, RequestCtap1, RequestCtap2, Retryable, StatusCode};
@@ -217,7 +221,10 @@ impl<T: HIDDevice + TestDevice> FidoDeviceIO for T {
         if let Some(status) = status {
             send_status(
                 status,
-                StatusUpdate::RequestLogging(MessageDirection::Ctap2Response, format!("{response:?}")),
+                StatusUpdate::RequestLogging(
+                    MessageDirection::Ctap2Response,
+                    format!("{response:?}"),
+                ),
             );
         }
         response

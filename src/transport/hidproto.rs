@@ -43,12 +43,18 @@ impl ReportDescriptor {
 
 #[derive(Debug)]
 pub enum Data {
-    UsagePage { data: u32 },
-    Usage { data: u32 },
+    UsagePage {
+        data: u32,
+    },
+    Usage {
+        data: u32,
+    },
     Input,
     Output,
     #[allow(dead_code)] // we only read this on linux
-    ReportCount { data: u32 },
+    ReportCount {
+        data: u32,
+    },
 }
 
 pub struct ReportDescriptorIterator {

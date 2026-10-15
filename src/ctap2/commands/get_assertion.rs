@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 use super::get_info::AuthenticatorInfo;
 use super::large_blobs::LargeBlobArrayElement;
 use super::{
@@ -1483,7 +1487,7 @@ pub mod test {
         device.set_cid(cid);
 
         let (tx, _rx) = channel();
-        assert_matches!(
+        assert!(matches!(
             do_credential_list_filtering_ctap1(
                 &mut device,
                 &assertion.allow_list,
@@ -1492,23 +1496,23 @@ pub mod test {
                 &tx,
             ),
             None
-        );
+        ));
         assertion.allow_list = vec![];
         // It should also fail when trying to format
-        assert_matches!(
+        assert!(matches!(
             assertion.ctap1_format(),
             Err(HIDError::Command(CommandError::StatusCode(
                 StatusCode::NoCredentials,
                 ..
             )))
-        );
+        ));
 
         // Test also multiple too long keys and an empty allow list
         for allow_list in [vec![], vec![too_long_key_handle.clone(); 5]] {
             assertion.allow_list = allow_list;
 
             let (tx, _rx) = channel();
-            assert_matches!(
+            assert!(matches!(
                 do_credential_list_filtering_ctap1(
                     &mut device,
                     &assertion.allow_list,
@@ -1517,7 +1521,7 @@ pub mod test {
                     &tx,
                 ),
                 None
-            );
+            ));
         }
 
         let ok_key_handle = PublicKeyCredentialDescriptor {
@@ -1837,7 +1841,7 @@ pub mod test {
         device.add_read(&msg, 0);
 
         let (tx, _rx) = channel();
-        assert_matches!(
+        assert!(matches!(
             do_credential_list_filtering_ctap2(
                 &mut device,
                 &assertion.allow_list,
@@ -1846,7 +1850,7 @@ pub mod test {
                 &tx,
             ),
             Ok(..)
-        );
+        ));
     }
 
     #[test]
@@ -2163,7 +2167,7 @@ pub mod test {
             #[test]
             fn get_assertion_hmac_secret_and_prf_absent_uses_no_input() {
                 let get_assertion = get_assertion_process_hmac_secret(true, vec![], None).unwrap();
-                assert_matches!(get_assertion.extensions.hmac_secret, None);
+                assert!(matches!(get_assertion.extensions.hmac_secret, None));
             }
 
             #[test]
@@ -2179,10 +2183,10 @@ pub mod test {
                     )),
                 )
                 .unwrap();
-                assert_matches!(
+                assert!(matches!(
                     get_assertion.extensions.hmac_secret,
                     Some(HmacGetSecretOrPrf::PrfUnmatched)
-                );
+                ));
             }
 
             #[test]
@@ -2201,10 +2205,10 @@ pub mod test {
                     )),
                 )
                 .unwrap();
-                assert_matches!(
+                assert!(matches!(
                     get_assertion.extensions.hmac_secret,
                     Some(HmacGetSecretOrPrf::PrfUnmatched)
-                );
+                ));
             }
 
             #[test]
@@ -2218,13 +2222,13 @@ pub mod test {
                     ))),
                 )
                 .unwrap();
-                assert_matches!(
+                assert!(matches!(
                     get_assertion.extensions.hmac_secret,
                     Some(HmacGetSecretOrPrf::HmacGetSecret(HmacSecretExtension {
                         calculated_hmac: Some(_),
                         ..
                     }))
-                );
+                ));
             }
 
             #[test]
@@ -2237,10 +2241,10 @@ pub mod test {
                         None,
                     ))),
                 );
-                assert_matches!(
+                assert!(matches!(
                     get_assertion,
                     Err(AuthenticatorError::InvalidRelyingPartyInput)
-                );
+                ));
             }
 
             #[test]
@@ -2259,7 +2263,7 @@ pub mod test {
                     )),
                 )
                 .unwrap();
-                assert_matches!(
+                assert!(matches!(
                     get_assertion.extensions.hmac_secret,
                     Some(HmacGetSecretOrPrf::Prf(HmacSecretExtension {
                         salt1,
@@ -2269,7 +2273,7 @@ pub mod test {
                     .chain_update([1, 2, 3, 4].iter())
                     .finalize()
                     .to_vec()
-                );
+                ));
             }
 
             #[test]
@@ -2297,10 +2301,10 @@ pub mod test {
                     )),
                 )
                 .unwrap();
-                assert_matches!(
+                assert!(matches!(
                     get_assertion.extensions.hmac_secret,
                     Some(HmacGetSecretOrPrf::PrfUnmatched)
-                );
+                ));
             }
 
             #[test]
@@ -2328,7 +2332,7 @@ pub mod test {
                     )),
                 )
                 .unwrap();
-                assert_matches!(
+                assert!(matches!(
                     get_assertion.extensions.hmac_secret,
                     Some(HmacGetSecretOrPrf::Prf(HmacSecretExtension {
                         salt1,
@@ -2338,7 +2342,7 @@ pub mod test {
                     .chain_update([9, 10, 11, 12].iter())
                     .finalize()
                     .to_vec()
-                );
+                ));
             }
 
             #[test]
@@ -2369,7 +2373,7 @@ pub mod test {
                     )),
                 )
                 .unwrap();
-                assert_matches!(
+                assert!(matches!(
                     get_assertion.extensions.hmac_secret,
                     Some(HmacGetSecretOrPrf::Prf(HmacSecretExtension {
                         salt1,
@@ -2379,7 +2383,7 @@ pub mod test {
                     .chain_update([13, 14, 15, 16].iter())
                     .finalize()
                     .to_vec()
-                );
+                ));
             }
 
             #[test]
@@ -2411,7 +2415,7 @@ pub mod test {
                     )),
                 )
                 .unwrap();
-                assert_matches!(
+                assert!(matches!(
                     get_assertion.extensions.hmac_secret,
                     Some(HmacGetSecretOrPrf::Prf(HmacSecretExtension {
                         salt1,
@@ -2421,7 +2425,7 @@ pub mod test {
                     .chain_update([9, 10, 11, 12].iter())
                     .finalize()
                     .to_vec()
-                );
+                ));
             }
 
             #[test]
@@ -2878,14 +2882,14 @@ pub mod test {
                     Some(HmacSecretResponse::Secret(vec![0x01; ONE_OUTPUT_LEN_PP2])),
                 )
                 .expect("Failed to run test");
-                assert_matches!(
+                assert!(matches!(
                     result.extensions,
                     AuthenticationExtensionsClientOutputs {
                         hmac_get_secret: Some(_),
                         prf: None,
                         ..
                     }
-                );
+                ));
             }
 
             #[test]
@@ -2898,7 +2902,7 @@ pub mod test {
                     Some(HmacSecretResponse::Secret(vec![0x01; ONE_OUTPUT_LEN_PP2])),
                 )
                 .expect("Failed to run test");
-                assert_matches!(
+                assert!(matches!(
                     result.extensions,
                     AuthenticationExtensionsClientOutputs {
                         hmac_get_secret: None,
@@ -2908,7 +2912,7 @@ pub mod test {
                         }),
                         ..
                     }
-                );
+                ));
             }
         }
 
@@ -2995,7 +2999,7 @@ pub mod test {
         fn finalize_result_no_input_with_no_output_becomes_no_client_output() {
             let result = finalize_result_with_hmac_secret_input_and_output(None, None)
                 .expect("Failed to run test");
-            assert_matches!(result.extensions.hmac_get_secret, None);
+            assert!(matches!(result.extensions.hmac_get_secret, None));
         }
 
         #[test]
@@ -3005,14 +3009,14 @@ pub mod test {
                 Some(HmacSecretResponse::Secret(vec![0x01; ONE_OUTPUT_LEN_PP2])),
             )
             .expect("Failed to run test");
-            assert_matches!(
+            assert!(matches!(
                 result.extensions,
                 AuthenticationExtensionsClientOutputs {
                     hmac_get_secret: None,
                     prf: None,
                     ..
                 }
-            );
+            ));
         }
 
         #[test]
@@ -3025,14 +3029,14 @@ pub mod test {
                 None,
             )
             .expect("Failed to run test");
-            assert_matches!(
+            assert!(matches!(
                 result.extensions,
                 AuthenticationExtensionsClientOutputs {
                     hmac_get_secret: None,
                     prf: None,
                     ..
                 }
-            );
+            ));
         }
 
         #[test]
@@ -3045,14 +3049,14 @@ pub mod test {
                 Some(HmacSecretResponse::Confirmed(true)),
             )
             .expect("Failed to run test");
-            assert_matches!(
+            assert!(matches!(
                 result.extensions,
                 AuthenticationExtensionsClientOutputs {
                     hmac_get_secret: None,
                     prf: None,
                     ..
                 }
-            );
+            ));
         }
 
         #[test]
@@ -3065,7 +3069,7 @@ pub mod test {
                 None,
             )
             .expect("Failed to run test");
-            assert_matches!(
+            assert!(matches!(
                 result.extensions,
                 AuthenticationExtensionsClientOutputs {
                     hmac_get_secret: None,
@@ -3075,7 +3079,7 @@ pub mod test {
                     }),
                     ..
                 }
-            );
+            ));
         }
 
         #[test]
@@ -3088,7 +3092,7 @@ pub mod test {
                 Some(HmacSecretResponse::Confirmed(true)),
             )
             .expect("Failed to run test");
-            assert_matches!(
+            assert!(matches!(
                 result.extensions,
                 AuthenticationExtensionsClientOutputs {
                     hmac_get_secret: None,
@@ -3098,7 +3102,7 @@ pub mod test {
                     }),
                     ..
                 }
-            );
+            ));
         }
     }
 }

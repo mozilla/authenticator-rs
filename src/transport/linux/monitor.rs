@@ -187,7 +187,5 @@ pub fn get_property_linux(path: &PathBuf, prop_name: &str) -> io::Result<String>
         }
     }
 
-    Err(io::Error::other(
-        "Unable to find device",
-    ))
+    Err(io::Error::other("Unable to find device"))
 }

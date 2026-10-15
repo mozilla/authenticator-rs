@@ -103,10 +103,6 @@ impl From<ResetResult> for ManageResult {
 
 pub type Result<T> = std::result::Result<T, errors::AuthenticatorError>;
 
-#[cfg(test)]
-#[macro_use]
-extern crate assert_matches;
-
 #[cfg(fuzzing)]
 pub use consts::*;
 #[cfg(fuzzing)]

@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 use super::{Command, CommandError, PinUvAuthCommand, RequestCtap2, StatusCode};
 use crate::{
     crypto::{PinUvAuthParam, PinUvAuthToken},
@@ -14,9 +18,9 @@ pub struct SetMinPINLength {
     /// Minimum PIN length in code points
     pub new_min_pin_length: Option<u64>,
     /// RP IDs which are allowed to get this information via the minPinLength extension.
-    /// This parameter MUST NOT be used unless the minPinLength extension is supported.  
+    /// This parameter MUST NOT be used unless the minPinLength extension is supported.
     pub min_pin_length_rpids: Option<Vec<String>>,
-    /// The authenticator returns CTAP2_ERR_PIN_POLICY_VIOLATION until changePIN is successful.    
+    /// The authenticator returns CTAP2_ERR_PIN_POLICY_VIOLATION until changePIN is successful.
     pub force_change_pin: Option<bool>,
 }
 
