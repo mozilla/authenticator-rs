@@ -203,9 +203,9 @@ where
 
     fn block_and_blink(&mut self, keep_alive: &dyn Fn() -> bool) -> BlinkResult {
         let supports_select_cmd = self.get_protocol() == FidoProtocol::CTAP2
-            && self.get_authenticator_info().is_some_and(|i| {
-                i.versions.contains(&AuthenticatorVersion::FIDO_2_1)
-            });
+            && self
+                .get_authenticator_info()
+                .is_some_and(|i| i.versions.contains(&AuthenticatorVersion::FIDO_2_1));
         let resp = if supports_select_cmd {
             let msg = Selection {};
             self.send_cbor_cancellable(&msg, keep_alive, None)

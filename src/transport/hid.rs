@@ -217,7 +217,10 @@ impl<T: HIDDevice + TestDevice> FidoDeviceIO for T {
         if let Some(status) = status {
             send_status(
                 status,
-                StatusUpdate::RequestLogging(MessageDirection::Ctap2Response, format!("{response:?}")),
+                StatusUpdate::RequestLogging(
+                    MessageDirection::Ctap2Response,
+                    format!("{response:?}"),
+                ),
             );
         }
         response

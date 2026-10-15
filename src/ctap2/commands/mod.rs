@@ -483,7 +483,7 @@ impl StdErrorT for CommandError {}
 
 #[cfg(test)]
 /// Asserts that a value encodes to [canonical CBOR encoding according to CTAP2.1 spec][0].
-/// 
+///
 /// [0]: https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-errata-20220621.html#ctap2-canonical-cbor-encoding-form
 fn assert_canonical_cbor_encoding<T: Serialize + fmt::Debug>(value: &T) {
     let bytes = serde_cbor::to_vec(value)
