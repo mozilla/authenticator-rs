@@ -431,7 +431,7 @@ mod tests {
         let (status_tx, _) = channel::<StatusUpdate>();
 
         let mut s = AuthenticatorService::new().unwrap();
-        assert_matches!(
+        assert!(matches!(
             s.register(
                 1_000,
                 RegisterArgs {
@@ -459,9 +459,9 @@ mod tests {
             )
             .unwrap_err(),
             crate::errors::AuthenticatorError::NoConfiguredTransports
-        );
+        ));
 
-        assert_matches!(
+        assert!(matches!(
             s.sign(
                 1_000,
                 SignArgs {
@@ -480,12 +480,12 @@ mod tests {
             )
             .unwrap_err(),
             crate::errors::AuthenticatorError::NoConfiguredTransports
-        );
+        ));
 
-        assert_matches!(
+        assert!(matches!(
             s.cancel().unwrap_err(),
             crate::errors::AuthenticatorError::NoConfiguredTransports
-        );
+        ));
     }
 
     #[test]

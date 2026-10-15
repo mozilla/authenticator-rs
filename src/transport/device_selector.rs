@@ -299,7 +299,7 @@ pub mod tests {
                 send_no_token(d, &selector);
             }
         });
-        assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
+        assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
 
         send_i_am_token(&devices[2], &selector);
 
@@ -322,16 +322,16 @@ pub mod tests {
             .clone_sender()
             .send(DeviceSelectorEvent::DevicesAdded(vec![device.id()]))
             .unwrap();
-        assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
+        assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
 
         selector
             .clone_sender()
             .send(DeviceSelectorEvent::NotAToken(device.id()))
             .unwrap();
-        assert_matches!(
+        assert!(matches!(
             rx.recv_timeout(Duration::from_millis(500)),
             Ok(StatusUpdate::NoDevicesFound)
-        );
+        ));
         selector.stop();
     }
 
@@ -384,7 +384,7 @@ pub mod tests {
             devices[5].receiver.as_ref().unwrap().recv().unwrap(),
             DeviceCommand::Blink
         );
-        assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
+        assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
     }
 
     #[test]
@@ -448,7 +448,7 @@ pub mod tests {
             devices[6].receiver.as_ref().unwrap().recv().unwrap(),
             DeviceCommand::Blink
         );
-        assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
+        assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
     }
 
     #[test]
@@ -489,16 +489,16 @@ pub mod tests {
                 DeviceCommand::Blink
             );
         }
-        assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
+        assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
 
         // Remove all tokens
         for idx in [2, 4, 5] {
             remove_device(&devices[idx], &selector);
         }
-        assert_matches!(
+        assert!(matches!(
             rx.recv_timeout(Duration::from_millis(500)),
             Ok(StatusUpdate::NoDevicesFound)
-        );
+        ));
 
         // Adding one again
         send_i_am_token(&devices[4], &selector);
@@ -527,10 +527,10 @@ pub mod tests {
 
         // Adding no devices first (none are plugged in when we start)
         add_devices(std::iter::empty(), &selector);
-        assert_matches!(
+        assert!(matches!(
             rx.recv_timeout(Duration::from_millis(500)),
             Ok(StatusUpdate::NoDevicesFound)
-        );
+        ));
 
         // Adding the devices
         add_devices(devices.iter(), &selector);
@@ -539,7 +539,7 @@ pub mod tests {
                 send_no_token(d, &selector);
             }
         });
-        assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
+        assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
 
         send_i_am_token(&devices[2], &selector);
         send_i_am_token(&devices[3], &selector);
@@ -556,9 +556,9 @@ pub mod tests {
         // Removing all blinking devices
         remove_device(&devices[2], &selector);
         remove_device(&devices[3], &selector);
-        assert_matches!(
+        assert!(matches!(
             rx.recv_timeout(Duration::from_millis(500)),
             Ok(StatusUpdate::NoDevicesFound)
-        );
+        ));
     }
 }
