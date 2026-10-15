@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 use super::server::AuthenticatorExtensionsCredBlob;
 use super::utils::{from_slice_stream, read_be_u16, read_be_u32, read_byte};
 use crate::crypto::{COSEAlgorithm, CryptoError, SharedSecret};
