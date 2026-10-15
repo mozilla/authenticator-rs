@@ -90,23 +90,47 @@ pub struct AuthenticatorOptions {
     #[serde(rename = "up", default = "true_val")]
     pub user_presence: bool,
 
-    /// Indicates that the device is capable of verifying the user within
-    /// itself. For example, devices with UI, biometrics fall into this
-    /// category.
-    ///  If present and set to true, it indicates that the device is capable of
-    ///   user verification within itself and has been configured.
-    ///  If present and set to false, it indicates that the device is capable of
-    ///   user verification within itself and has not been yet configured. For
-    ///   example, a biometric device that has not yet been configured will
-    ///   return this parameter set to false.
-    ///  If absent, it indicates that the device is not capable of user
-    ///   verification within itself.
-    /// A device that can only do Client PIN will not return the "uv" parameter.
-    /// If a device is capable of verifying the user within itself as well as
-    /// able to do Client PIN, it will return both "uv" and the Client PIN
-    /// option.
-    // TODO(MS): My Token (key-ID FIDO2) does return Some(false) here, even though
-    //           it has no built-in verification method. Not to be trusted...
+    /// In CTAP 2.1+, indicates that the authenticator supports
+    /// [a built-in user verification method][0].
+    ///
+    /// For example, devices with UI, biometrics fall into this category.
+    ///
+    /// * If `Some(true)`, it indicates that the device is capable of built-in user verification and
+    ///   its user verification feature is presently configured.
+    ///
+    /// * If `Some(false)`, it indicates that the authenticator is capable of built-in user
+    ///   verification and its user verification feature is not presently configured.
+    ///
+    ///   For example, an authenticator featuring a built-in biometric user verification feature
+    ///   that is not presently configured will return this option set to `Some(false)`.
+    ///
+    /// * If `None`, it indicates that the authenticator does not have a built-in user verification
+    ///   capability.
+    ///
+    /// A device that can only do Client PIN will return `None`.
+    ///
+    /// If a device is capable of both built-in user verification and Client PIN, the authenticator
+    /// will return both the "uv" and [the "clientPin"][Self::client_pin] option ids.
+    ///
+    /// ### Caveats
+    ///
+    /// [CTAP 2.0][1] gives the `uv` option a completely different meaning to CTAP 2.1+:
+    ///
+    /// > Indicates that the device is capable of verifying the user as part of the
+    /// > `authenticatorGetAssertion` request. Default: `false`
+    ///
+    /// Some CTAP 2.1-PRE authenticators that _only_ support client PIN erroneously return
+    /// `Some(false)` (eg: Key-ID FIDO2).
+    ///
+    /// ### References
+    ///
+    /// * [CTAP 2.0][1] (different to CTAP 2.1 and later)
+    /// * [CTAP 2.1](https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-errata-20220621.html#getinfo-uv)
+    /// * [CTAP 2.2](https://fidoalliance.org/specs/fido-v2.2-ps-20250714/fido-client-to-authenticator-protocol-v2.2-ps-20250714.html#getinfo-uv)
+    /// * [CTAP 2.3](https://fidoalliance.org/specs/fido-v2.3-ps-20260226/fido-client-to-authenticator-protocol-v2.3-ps-20260226.html#getinfo-uv)
+    ///
+    /// [0]: https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-errata-20220621.html#built-in-user-verification-method
+    /// [1]: https://fidoalliance.org/specs/fido-v2.0-ps-20170927/fido-client-to-authenticator-protocol-v2.0-ps-20170927.html#authenticatorgetinfo-0x04
     #[serde(rename = "uv")]
     pub user_verification: Option<bool>,
 
@@ -369,8 +393,24 @@ impl AuthenticatorInfo {
         AuthenticatorVersion::U2F_V2
     }
 
+    /// `true` if the device has been configured with [some form of user verification][0]
+    /// (ie: a [client PIN][1] is set and/or [built-in user verification][2] is configured).
+    ///
+    /// [0]: https://fidoalliance.org/specs/fido-v2.3-ps-20260226/fido-client-to-authenticator-protocol-v2.3-ps-20260226.html#some-form-of-user-verification
+    /// [1]: AuthenticatorOptions::client_pin
+    /// [2]: AuthenticatorOptions::user_verification
     pub fn device_is_protected(&self) -> bool {
         self.options.client_pin == Some(true) || self.options.user_verification == Some(true)
+    }
+
+    /// `true` if the device supports [some form of user verification][0].
+    ///
+    /// This is a mandatory feature on CTAP 2.1+ authenticators that support [resident keys][1]. It
+    ///
+    /// [0]: https://fidoalliance.org/specs/fido-v2.3-ps-20260226/fido-client-to-authenticator-protocol-v2.3-ps-20260226.html#some-form-of-user-verification
+    /// [1]: AuthenticatorOptions::resident_key
+    pub fn supports_uv(&self) -> bool {
+        self.options.client_pin.is_some() || self.options.user_verification.is_some()
     }
 }
 
