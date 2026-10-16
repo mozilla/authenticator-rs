@@ -179,6 +179,8 @@ fn main() {
         extensions: Default::default(),
         pin: None,
         use_ctap1_fallback: false,
+        #[cfg(feature = "local-biometric")]
+        internal_uv_only: false,
     };
 
     let mut registered_key_handle = None;
@@ -246,6 +248,8 @@ fn main() {
         extensions: Default::default(),
         pin: None,
         use_ctap1_fallback: false,
+        #[cfg(feature = "local-biometric")]
+        internal_uv_only: false,
         user_verification_req: UserVerificationRequirement::Preferred,
         user_presence_req: true,
     };

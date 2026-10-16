@@ -46,7 +46,7 @@ impl HmacSecretResponse {
         shared_secret: &SharedSecret,
         hmac_outputs: &[u8],
     ) -> Result<HMACGetSecretOutput, CryptoError> {
-        let output_secrets = shared_secret.decrypt(hmac_outputs)?;
+        let output_secrets = crate::secret::protect(shared_secret.decrypt(hmac_outputs)?);
         match if output_secrets.len() < 32 {
             Err(CryptoError::WrongSaltLength)
         } else {

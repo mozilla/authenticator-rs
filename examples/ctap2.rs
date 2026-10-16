@@ -231,6 +231,8 @@ fn main() {
         },
         pin: None,
         use_ctap1_fallback: fallback,
+        #[cfg(feature = "local-biometric")]
+        internal_uv_only: false,
     };
 
     let attestation_object;
@@ -299,6 +301,8 @@ fn main() {
         },
         pin: None,
         use_ctap1_fallback: fallback,
+        #[cfg(feature = "local-biometric")]
+        internal_uv_only: false,
     };
 
     loop {

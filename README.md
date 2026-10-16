@@ -46,6 +46,61 @@ There are some tests of the cross-platform runloop logic and the protocol decode
 cargo test
 ```
 
+## Native biometric authentication (opt-in)
+
+The non-default `local-biometric` feature supports native applications that use
+`hmac-secret` to unlock local encrypted material and require built-in biometric
+verification rather than an authenticator PIN. It does not implement operating
+system login, store fingerprint templates on the host, or manage application retry
+state. Existing builds do not enable this feature.
+
+Enabling the feature alone does not select biometric-only authentication. For a
+`SignArgs` already configured with the application's RP ID, credential allow list,
+and `hmac-secret` inputs, explicitly select the policy:
+
+```rust,ignore
+args.internal_uv_only = true;
+args.user_verification_req = UserVerificationRequirement::Required;
+args.pin = None;
+args.use_ctap1_fallback = false;
+args.extensions.local_uv_attempt_limit = Some(3);
+```
+
+The same policy is available on `RegisterArgs`. Eligible devices must advertise
+configured built-in UV, `hmac-secret`, and biometric enrollment support. PIN
+substitution and weaker UV requirements are rejected. CTAP 2.0 and 2.1 reported
+UV failures are bounded by the supplied remaining budget (one to three, default
+three); zero rejects the operation. Firmware may lock earlier or hide multiple
+physical scans behind one response. Applications must persist their own retry
+budget and validate the returned credential, signature, RP ID, challenge and
+UV/UP flags before using the secret.
+
+On Linux, `local_biometric_devices()` performs capability discovery without
+requesting user presence or UV. The feature also exposes
+`local_biometric_transport` for selected-device enrollment using the existing
+biometric and PIN-management helpers. `extensions.local_device_path` selects a
+current hidraw path; it is not proof of device identity, and callers must verify
+credential ownership before modifying an existing enrollment. Selected local
+operations use bounded HID reads; ordinary operations retain the upstream timeout.
+A management-only `extensions.local_pin_only` assertion can prove credential
+ownership with an explicitly supplied PIN, but cannot request HMAC/PRF output or
+be combined with `internal_uv_only`. These local controls are not serialized.
+
+With the feature enabled, HMAC/PRF outputs, PINs, shared secrets and PIN/UV tokens
+are wiped on drop; secret Debug implementations redact their contents. Internal
+temporary buffers are also wiped, including OpenSSL error paths. Protocol-required
+`Clone` implementations remain available and each clone wipes its own allocation.
+Public PIN helper methods retain their `Vec<u8>` return types; internal callers
+wrap their results in zeroizing buffers. External callers remain responsible for
+those raw helper results. Extract fields from drop-protected PRF outputs by
+borrowing or taking rather than moving them directly. Without the feature, the
+original traits, Debug output, serialization and authentication policy are retained.
+
+This is best-effort secret lifetime reduction, not memory locking or protection
+against privileged live-memory inspection. Applications remain responsible for
+securing their own buffers and any copies made outside this crate. Hardware and
+firmware behavior require physical-device validation.
+
 ## Fuzzing
 
 There are fuzzers for the USB protocol reader, basically fuzzing inputs from the HID layer.

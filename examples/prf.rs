@@ -203,6 +203,8 @@ fn main() {
         },
         pin: None,
         use_ctap1_fallback: false,
+        #[cfg(feature = "local-biometric")]
+        internal_uv_only: false,
     };
 
     let attestation_object;
@@ -257,6 +259,8 @@ fn main() {
         },
         pin: None,
         use_ctap1_fallback: false,
+        #[cfg(feature = "local-biometric")]
+        internal_uv_only: false,
     };
 
     let (sign_tx, sign_rx) = channel();
@@ -305,8 +309,8 @@ fn main() {
                     .expect("Expected PRF output to contain results");
 
                 assert_eq!(
-                    Some(prf_results.first),
-                    prf_results.second,
+                    Some(&prf_results.first),
+                    prf_results.second.as_ref(),
                     "Expected PRF results to be equal for equal input"
                 );
 

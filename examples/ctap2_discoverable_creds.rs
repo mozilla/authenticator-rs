@@ -240,6 +240,8 @@ fn register_user(
         },
         pin: None,
         use_ctap1_fallback: false,
+        #[cfg(feature = "local-biometric")]
+        internal_uv_only: false,
     };
 
     let attestation_object;
@@ -456,6 +458,8 @@ fn main() {
         },
         pin: None,
         use_ctap1_fallback: false,
+        #[cfg(feature = "local-biometric")]
+        internal_uv_only: false,
     };
 
     loop {
