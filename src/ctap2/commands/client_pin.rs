@@ -249,6 +249,8 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinToken<'sc, 'pin> {
 
     fn as_client_pin(&self) -> Result<ClientPIN, CommandError> {
         let input = crate::secret::protect(self.pin.for_pin_token());
+        // Keep native secret material out of logs; preserve legacy tracing otherwise.
+        #[cfg(not(feature = "local-biometric"))]
         trace!("pin_hash = {:#04X?}", &input);
         let pin_hash_enc = self.shared_secret.encrypt(&input)?;
         trace!("pin_hash_enc = {:#04X?}", &pin_hash_enc);
