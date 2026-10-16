@@ -28,6 +28,15 @@ pub trait HIDDevice: FidoDevice + Read + Write {
     // Open device, verify that it is indeed a CTAP device and potentially read initial values
     fn new(parameters: Self::BuildParameters) -> Result<Self, (HIDError, Self::Id)>;
     fn id(&self) -> Self::Id;
+    /// Match a current local transport path; unsupported transports reject it.
+    #[cfg(feature = "local-biometric")]
+    fn matches_local_path(&self, _path: &str) -> bool {
+        false
+    }
+
+    /// Opt-in deadline for local biometric transport reads.
+    #[cfg(feature = "local-biometric")]
+    fn set_local_read_timeout(&mut self, _timeout_ms: Option<i32>) {}
 
     fn get_device_info(&self) -> U2FDeviceInfo;
     fn set_device_info(&mut self, dev_info: U2FDeviceInfo);

@@ -29,6 +29,7 @@ extern crate bitflags;
 
 mod consts;
 mod manager;
+mod secret;
 mod statemachine;
 mod status_update;
 mod transport;
@@ -107,3 +108,38 @@ pub type Result<T> = std::result::Result<T, errors::AuthenticatorError>;
 pub use consts::*;
 #[cfg(fuzzing)]
 pub use u2ftypes::*;
+
+/// Non-interactive Linux capability discovery. This never requests user presence or UV.
+#[cfg(all(feature = "local-biometric", target_os = "linux", not(test)))]
+pub fn local_biometric_devices() -> Vec<String> {
+    use crate::transport::{hid::HIDDevice, platform::device::Device, FidoDevice};
+    let Ok(entries) = std::fs::read_dir("/sys/class/hidraw") else {
+        return Vec::new();
+    };
+    let mut paths = Vec::new();
+    for entry in entries.flatten() {
+        let path = std::path::Path::new("/dev").join(entry.file_name());
+        let Ok(mut dev) = Device::new(path.clone()) else {
+            continue;
+        };
+        dev.set_local_read_timeout(Some(1_000));
+        if dev.init().is_err() {
+            continue;
+        }
+        if dev.get_authenticator_info().is_some_and(|info| {
+            info.supports_hmac_secret()
+                && (info.options.bio_enroll.is_some()
+                    || info.options.user_verification_mgmt_preview.is_some())
+        }) {
+            paths.push(path.to_string_lossy().into_owned());
+        }
+    }
+    paths.sort();
+    paths
+}
+
+/// Constrained Linux transport access for selected-device biometric enrollment.
+#[cfg(all(feature = "local-biometric", target_os = "linux", not(test)))]
+pub mod local_biometric_transport {
+    pub use crate::transport::{hid::HIDDevice, platform::device::Device, FidoDevice};
+}

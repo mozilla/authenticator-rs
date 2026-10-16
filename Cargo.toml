@@ -14,6 +14,8 @@ travis-ci = { repository = "mozilla/authenticator-rs", branch = "master" }
 maintenance = { status = "actively-developed" }
 
 [features]
+# Native biometric-only authentication and secret-memory hardening.
+local-biometric = ["dep:zeroize"]
 default = ["crypto_nss"]
 binding-recompile = ["bindgen"]
 # Crypto backends
@@ -49,6 +51,7 @@ features = [
 bindgen = { version = "^0.58.1", optional = true }
 
 [dependencies]
+zeroize = { version = "1.8", optional = true }
 rand = "0.8"
 log = "0.4"
 libc = "0.2"

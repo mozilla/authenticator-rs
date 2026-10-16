@@ -27,6 +27,10 @@ pub struct RegisterArgs {
     pub extensions: AuthenticationExtensionsClientInputs,
     pub pin: Option<Pin>,
     pub use_ctap1_fallback: bool,
+    /// Require fresh built-in verification; never substitute token PIN verification.
+    #[cfg(feature = "local-biometric")]
+    #[serde(skip)]
+    pub internal_uv_only: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -40,6 +44,10 @@ pub struct SignArgs {
     pub extensions: AuthenticationExtensionsClientInputs,
     pub pin: Option<Pin>,
     pub use_ctap1_fallback: bool,
+    /// Require fresh built-in verification; never substitute token PIN verification.
+    #[cfg(feature = "local-biometric")]
+    #[serde(skip)]
+    pub internal_uv_only: bool,
 }
 
 pub trait AuthenticatorTransport {
@@ -314,6 +322,32 @@ impl AuthenticatorService {
 // Tests
 ////////////////////////////////////////////////////////////////////////
 
+impl RegisterArgs {
+    pub(crate) fn internal_uv_only(&self) -> bool {
+        #[cfg(feature = "local-biometric")]
+        {
+            self.internal_uv_only
+        }
+        #[cfg(not(feature = "local-biometric"))]
+        {
+            false
+        }
+    }
+}
+
+impl SignArgs {
+    pub(crate) fn internal_uv_only(&self) -> bool {
+        #[cfg(feature = "local-biometric")]
+        {
+            self.internal_uv_only
+        }
+        #[cfg(not(feature = "local-biometric"))]
+        {
+            false
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{AuthenticatorService, AuthenticatorTransport, Pin, RegisterArgs, SignArgs};
@@ -453,6 +487,8 @@ mod tests {
                     extensions: Default::default(),
                     pin: None,
                     use_ctap1_fallback: false,
+                    #[cfg(feature = "local-biometric")]
+                    internal_uv_only: false,
                 },
                 status_tx.clone(),
                 StateCallback::new(Box::new(move |_rv| {})),
@@ -474,6 +510,8 @@ mod tests {
                     extensions: Default::default(),
                     pin: None,
                     use_ctap1_fallback: false,
+                    #[cfg(feature = "local-biometric")]
+                    internal_uv_only: false,
                 },
                 status_tx,
                 StateCallback::new(Box::new(move |_rv| {})),
@@ -529,6 +567,8 @@ mod tests {
                     extensions: Default::default(),
                     pin: None,
                     use_ctap1_fallback: false,
+                    #[cfg(feature = "local-biometric")]
+                    internal_uv_only: false,
                 },
                 status_tx,
                 callback.clone(),
@@ -573,6 +613,8 @@ mod tests {
                     extensions: Default::default(),
                     pin: None,
                     use_ctap1_fallback: false,
+                    #[cfg(feature = "local-biometric")]
+                    internal_uv_only: false,
                 },
                 status_tx,
                 callback.clone(),
@@ -624,6 +666,8 @@ mod tests {
                     extensions: Default::default(),
                     pin: None,
                     use_ctap1_fallback: false,
+                    #[cfg(feature = "local-biometric")]
+                    internal_uv_only: false,
                 },
                 status_tx,
                 callback.clone(),

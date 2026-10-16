@@ -248,7 +248,7 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinToken<'sc, 'pin> {
     type Output = ClientPinResponse;
 
     fn as_client_pin(&self) -> Result<ClientPIN, CommandError> {
-        let input = self.pin.for_pin_token();
+        let input = crate::secret::protect(self.pin.for_pin_token());
         trace!("pin_hash = {:#04X?}", &input);
         let pin_hash_enc = self.shared_secret.encrypt(&input)?;
         trace!("pin_hash_enc = {:#04X?}", &pin_hash_enc);
@@ -300,7 +300,7 @@ impl<'sc, 'pin> ClientPINSubCommand for GetPinUvAuthTokenUsingPinWithPermissions
     type Output = ClientPinResponse;
 
     fn as_client_pin(&self) -> Result<ClientPIN, CommandError> {
-        let input = self.pin.for_pin_token();
+        let input = crate::secret::protect(self.pin.for_pin_token());
         let pin_hash_enc = self.shared_secret.encrypt(&input)?;
 
         Ok(ClientPIN {
@@ -436,7 +436,7 @@ impl<'sc, 'pin> ClientPINSubCommand for SetNewPin<'sc, 'pin> {
         // newPinEnc: the result of calling encrypt(shared secret, paddedPin) where paddedPin is
         // newPin padded on the right with 0x00 bytes to make it 64 bytes long. (Since the maximum
         // length of newPin is 63 bytes, there is always at least one byte of padding.)
-        let new_pin_padded = self.new_pin.padded();
+        let new_pin_padded = crate::secret::protect(self.new_pin.padded());
         let new_pin_enc = self.shared_secret.encrypt(&new_pin_padded)?;
 
         // pinUvAuthParam: the result of calling authenticate(shared secret, newPinEnc).
@@ -499,10 +499,10 @@ impl<'sc, 'pin> ClientPINSubCommand for ChangeExistingPin<'sc, 'pin> {
         // newPinEnc: the result of calling encrypt(shared secret, paddedPin) where paddedPin is
         // newPin padded on the right with 0x00 bytes to make it 64 bytes long. (Since the maximum
         // length of newPin is 63 bytes, there is always at least one byte of padding.)
-        let new_pin_padded = self.new_pin.padded();
+        let new_pin_padded = crate::secret::protect(self.new_pin.padded());
         let new_pin_enc = self.shared_secret.encrypt(&new_pin_padded)?;
 
-        let current_pin_hash = self.current_pin.for_pin_token();
+        let current_pin_hash = crate::secret::protect(self.current_pin.for_pin_token());
         let pin_hash_enc = self.shared_secret.encrypt(current_pin_hash.as_ref())?;
 
         let pin_auth = self
@@ -586,6 +586,13 @@ where
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Pin(String);
 
+#[cfg(feature = "local-biometric")]
+impl Drop for Pin {
+    fn drop(&mut self) {
+        crate::secret::wipe(&mut self.0);
+    }
+}
+
 impl fmt::Debug for Pin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Pin(redacted)")
@@ -598,11 +605,17 @@ impl Pin {
     }
 
     pub fn for_pin_token(&self) -> Vec<u8> {
-        Sha256::digest(self.as_bytes())[..16].into()
+        let mut digest = Sha256::digest(self.as_bytes());
+        let output = digest[..16].to_vec();
+        crate::secret::wipe(&mut digest[..]);
+        output
     }
 
     pub fn padded(&self) -> Vec<u8> {
-        let mut out = self.0.as_bytes().to_vec();
+        // Allocate the final capacity before copying PIN bytes, so resize never
+        // leaves an unwiped PIN in a freed allocation.
+        let mut out = Vec::with_capacity(64.max(self.0.len()));
+        out.extend_from_slice(self.0.as_bytes());
         out.resize(64, 0x00);
         out
     }

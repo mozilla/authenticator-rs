@@ -42,6 +42,8 @@ pub struct Device {
     secret: Option<SharedSecret>,
     authenticator_info: Option<AuthenticatorInfo>,
     protocol: FidoProtocol,
+    #[cfg(feature = "local-biometric")]
+    local_read_timeout_ms: Option<i32>,
 }
 
 impl PartialEq for Device {
@@ -70,7 +72,10 @@ impl Read for Device {
             events: libc::POLLIN,
             revents: 0,
         };
-        let nfds = unsafe { libc::poll(&mut pfd, 1, READ_TIMEOUT) };
+        let timeout = READ_TIMEOUT;
+        #[cfg(feature = "local-biometric")]
+        let timeout = self.local_read_timeout_ms.unwrap_or(timeout);
+        let nfds = unsafe { libc::poll(&mut pfd, 1, timeout) };
         if nfds == -1 || pfd.revents & libc::POLLERR != 0 {
             return Err(io::Error::last_os_error());
         }
@@ -104,6 +109,16 @@ impl HIDDevice for Device {
     type BuildParameters = PathBuf;
     type Id = PathBuf;
 
+    #[cfg(feature = "local-biometric")]
+    fn matches_local_path(&self, path: &str) -> bool {
+        self.path == std::path::Path::new(path)
+    }
+
+    #[cfg(feature = "local-biometric")]
+    fn set_local_read_timeout(&mut self, timeout_ms: Option<i32>) {
+        self.local_read_timeout_ms = timeout_ms;
+    }
+
     fn new(path: PathBuf) -> Result<Self, (HIDError, Self::Id)> {
         debug!("Opening device {:?}", path);
         let fd = OpenOptions::new()
@@ -122,6 +137,8 @@ impl HIDDevice for Device {
             secret: None,
             authenticator_info: None,
             protocol: FidoProtocol::CTAP2,
+            #[cfg(feature = "local-biometric")]
+            local_read_timeout_ms: None,
         };
         if res.is_u2f() {
             info!("new device {:?}", res.path);

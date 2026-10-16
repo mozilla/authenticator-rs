@@ -47,6 +47,33 @@ jobs:
               sudo apt-get install -y libudev-dev
             BUILD_OPTIONS: --features crypto_rust --no-default-features
 
+          # Opt-in native biometric policy and secret hardening (openssl)
+          - OS: ubuntu-latest
+            TARGET: x86_64-unknown-linux-gnu
+            NATIVE_BUILD: true
+            ADD_INSTALL: |
+                sudo apt-get update
+                sudo apt-get install -y libudev-dev openssl
+            BUILD_OPTIONS: --features crypto_openssl,local-biometric --no-default-features
+
+          # Opt-in native biometric policy and secret hardening (rust)
+          - OS: ubuntu-latest
+            TARGET: x86_64-unknown-linux-gnu
+            NATIVE_BUILD: true
+            ADD_INSTALL: |
+                sudo apt-get update
+                sudo apt-get install -y libudev-dev openssl
+            BUILD_OPTIONS: --features crypto_rust,local-biometric --no-default-features
+
+          # Opt-in native biometric policy and secret hardening (dummy)
+          - OS: ubuntu-latest
+            TARGET: x86_64-unknown-linux-gnu
+            NATIVE_BUILD: true
+            ADD_INSTALL: |
+                sudo apt-get update
+                sudo apt-get install -y libudev-dev openssl
+            BUILD_OPTIONS: --features crypto_dummy,local-biometric --no-default-features
+
           # Mac dummy crypto
           - OS: macos-latest
             TARGET: x86_64-apple-darwin

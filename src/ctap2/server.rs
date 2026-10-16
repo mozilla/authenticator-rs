@@ -17,6 +17,8 @@ use std::collections::HashMap;
 use std::convert::{Into, TryFrom};
 use std::fmt;
 use std::str::FromStr;
+#[cfg(feature = "local-biometric")]
+use zeroize::Zeroize;
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct RpIdHash(pub [u8; 32]);
@@ -404,6 +406,18 @@ where
 
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct AuthenticationExtensionsClientInputs {
+    /// Local transport selector, never sent to the authenticator.
+    #[cfg(feature = "local-biometric")]
+    #[serde(skip)]
+    pub local_device_path: Option<String>,
+    /// Management-only PIN assertion, never biometric secret release.
+    #[cfg(feature = "local-biometric")]
+    #[serde(skip)]
+    pub local_pin_only: bool,
+    /// Remaining reported biometric failures; None retains the normal three-failure limit.
+    #[cfg(feature = "local-biometric")]
+    #[serde(skip)]
+    pub local_uv_attempt_limit: Option<u8>,
     pub app_id: Option<String>,
     pub cred_props: Option<bool>,
     pub credential_protection_policy: Option<CredentialProtectionPolicy>,
@@ -435,10 +449,25 @@ pub struct HMACGetSecretInput {
 
 /// Decrypted HMAC outputs from the `hmac-secret` extension.
 /// https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-20210615.html#dictdef-hmacgetsecretoutput
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Default, Eq, PartialEq)]
+#[cfg_attr(not(feature = "local-biometric"), derive(Debug))]
 pub struct HMACGetSecretOutput {
     pub output1: [u8; 32],
     pub output2: Option<[u8; 32]>,
+}
+
+#[cfg(feature = "local-biometric")]
+impl fmt::Debug for HMACGetSecretOutput {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("HMACGetSecretOutput(REDACTED)")
+    }
+}
+#[cfg(feature = "local-biometric")]
+impl Drop for HMACGetSecretOutput {
+    fn drop(&mut self) {
+        self.output1.zeroize();
+        self.output2.zeroize();
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
@@ -521,7 +550,8 @@ impl AuthenticationExtensionsPRFInputs {
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
+#[derive(Clone, Default, Eq, PartialEq, Serialize)]
+#[cfg_attr(not(feature = "local-biometric"), derive(Debug))]
 pub struct AuthenticationExtensionsPRFValues {
     pub first: Vec<u8>,
     pub second: Option<Vec<u8>>,
@@ -559,6 +589,53 @@ pub enum AuthenticatorAttachment {
     CrossPlatform,
     Platform,
     Unknown,
+}
+
+#[cfg(feature = "local-biometric")]
+impl fmt::Debug for AuthenticationExtensionsPRFValues {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("AuthenticationExtensionsPRFValues(REDACTED)")
+    }
+}
+#[cfg(feature = "local-biometric")]
+impl Drop for AuthenticationExtensionsPRFValues {
+    fn drop(&mut self) {
+        self.first.zeroize();
+        self.second.zeroize();
+    }
+}
+
+impl AuthenticationExtensionsClientInputs {
+    pub(crate) fn local_device_path(&self) -> Option<&str> {
+        #[cfg(feature = "local-biometric")]
+        {
+            self.local_device_path.as_deref()
+        }
+        #[cfg(not(feature = "local-biometric"))]
+        {
+            None
+        }
+    }
+    pub(crate) fn local_pin_only(&self) -> bool {
+        #[cfg(feature = "local-biometric")]
+        {
+            self.local_pin_only
+        }
+        #[cfg(not(feature = "local-biometric"))]
+        {
+            false
+        }
+    }
+    pub(crate) fn local_uv_attempt_limit(&self) -> u8 {
+        #[cfg(feature = "local-biometric")]
+        {
+            self.local_uv_attempt_limit.unwrap_or(3).min(3)
+        }
+        #[cfg(not(feature = "local-biometric"))]
+        {
+            3
+        }
+    }
 }
 
 #[cfg(test)]

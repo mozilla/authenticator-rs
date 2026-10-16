@@ -44,8 +44,10 @@ fn ecdh_openssl_raw(client_private: EcKey<Private>, peer_public: EcKey<Public>) 
     let peer_pkey = PKey::from_ec_key(peer_public)?;
     let mut deriver = Deriver::new(&client_pkey)?;
     deriver.set_peer(&peer_pkey)?;
-    let shared_point = deriver.derive_to_vec()?;
-    Ok(shared_point)
+    let mut shared_point = crate::secret::protect(vec![0; deriver.len()?]);
+    let written = deriver.derive(&mut shared_point)?;
+    shared_point.truncate(written);
+    Ok(crate::secret::unprotect(shared_point))
 }
 
 /// Ephemeral ECDH over P256. Generates an ephemeral P256 key pair. Returns
@@ -110,14 +112,14 @@ pub fn decrypt_aes_256_cbc_no_pad(key: &[u8], iv: Option<&[u8]>, data: &[u8]) ->
     }
 
     // OpenSSL would panic if we didn't allocate an extra block here.
-    let mut out = vec![0; in_len + AES_BLOCK_SIZE];
+    let mut out = crate::secret::protect(vec![0; in_len + AES_BLOCK_SIZE]);
     let mut out_len = 0;
     out_len += encrypter.update(data, out.as_mut_slice())?;
     out_len += encrypter.finalize(out.as_mut_slice())?;
     debug_assert_eq!(in_len, out_len);
 
     out.truncate(out_len);
-    Ok(out)
+    Ok(crate::secret::unprotect(out))
 }
 
 /// Textbook HMAC-SHA256
@@ -129,8 +131,10 @@ pub fn hmac_sha256(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
 }
 
 pub fn sha256(data: &[u8]) -> Result<Vec<u8>> {
-    let digest = hash(MessageDigest::sha256(), data)?;
-    Ok(digest.as_ref().to_vec())
+    let mut digest = hash(MessageDigest::sha256(), data)?;
+    let output = digest.as_ref().to_vec();
+    crate::secret::wipe(&mut digest[..]);
+    Ok(output)
 }
 
 pub fn random_bytes(count: usize) -> Result<Vec<u8>> {

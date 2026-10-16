@@ -80,6 +80,29 @@ macro_rules! unwrap_result {
 }
 
 macro_rules! handle_errors {
+    (biometric $error:expr, $status:expr, $callback:expr, $result:expr, $skip:expr, $only:expr, $budget:expr, $limit:expr) => {
+        if $only
+            && matches!($result, PinUvAuthResult::UsingInternalUv)
+            && matches!(
+                $error,
+                HIDError::Command(CommandError::StatusCode(
+                    StatusCode::OperationDenied | StatusCode::PinAuthInvalid,
+                    _
+                ))
+            )
+        {
+            $budget += 1;
+            if $budget >= $limit {
+                send_status(
+                    &$status,
+                    StatusUpdate::PinUvError(StatusPinUv::InvalidUv(None)),
+                );
+                $callback.call(Err(AuthenticatorError::CancelledByUser));
+                break;
+            }
+        }
+        handle_errors!($error, $status, $callback, $result, $skip);
+    };
     ($error: expr, $status: expr, $callback: expr, $pin_uv_auth_result: expr, $skip_uv: expr) => {
         let mut _dummy_skip_puap = false;
         let mut _dummy_cached_puat = false;
@@ -349,7 +372,25 @@ fn determine_puap_if_needed<Dev: FidoDevice, T: PinUvAuthCommand + RequestCtap2>
     status: &Sender<StatusUpdate>,
     alive: &dyn Fn() -> bool,
     pin: &mut Option<Pin>,
+    internal_uv_only: bool,
+    uv_attempt_limit: u8,
 ) -> Result<PinUvAuthResult, AuthenticatorError> {
+    if internal_uv_only
+        && (uv_attempt_limit == 0
+            || dev.get_protocol() != FidoProtocol::CTAP2
+            || uv_req != UserVerificationRequirement::Required
+            || skip_uv
+            || pin.is_some()
+            || dev.get_authenticator_info().is_none_or(|i| {
+                i.options.user_verification != Some(true)
+                    || !i.supports_hmac_secret()
+                    || (i.options.bio_enroll.is_none()
+                        && i.options.user_verification_mgmt_preview.is_none())
+            }))
+    {
+        return Err(AuthenticatorError::CancelledByUser);
+    }
+    let mut biometric_failures = 0u8;
     while alive() {
         debug!("-----------------------------------------------------------------");
         debug!("Getting pinUvAuthParam");
@@ -359,17 +400,35 @@ fn determine_puap_if_needed<Dev: FidoDevice, T: PinUvAuthCommand + RequestCtap2>
             }
 
             Err(AuthenticatorError::PinError(PinError::PinRequired)) => {
+                if internal_uv_only {
+                    return Err(AuthenticatorError::CancelledByUser);
+                }
                 let new_pin = ask_user_for_pin(false, None, status)?;
                 *pin = Some(new_pin);
                 skip_uv = true;
                 continue;
             }
             Err(AuthenticatorError::PinError(PinError::InvalidPin(retries))) => {
+                if internal_uv_only {
+                    return Err(AuthenticatorError::CancelledByUser);
+                }
                 let new_pin = ask_user_for_pin(true, retries, status)?;
                 *pin = Some(new_pin);
                 continue;
             }
             Err(AuthenticatorError::PinError(PinError::InvalidUv(retries))) => {
+                if internal_uv_only {
+                    biometric_failures += 1;
+                }
+                if internal_uv_only
+                    && (biometric_failures >= uv_attempt_limit || retries == Some(0))
+                {
+                    send_status(
+                        status,
+                        StatusUpdate::PinUvError(StatusPinUv::InvalidUv(retries)),
+                    );
+                    return Err(AuthenticatorError::CancelledByUser);
+                }
                 if retries == Some(0) {
                     skip_uv = true;
                 }
@@ -397,11 +456,17 @@ fn determine_puap_if_needed<Dev: FidoDevice, T: PinUvAuthCommand + RequestCtap2>
                 return Err(e);
             }
             Err(AuthenticatorError::PinError(PinError::UvBlocked)) => {
+                if internal_uv_only {
+                    return Err(AuthenticatorError::CancelledByUser);
+                }
                 skip_uv = true;
                 send_status(status, StatusUpdate::PinUvError(StatusPinUv::UvBlocked))
             }
             // Used for CTAP2.0 UV (fingerprints)
             Err(AuthenticatorError::PinError(PinError::PinAuthInvalid)) => {
+                if internal_uv_only {
+                    return Err(AuthenticatorError::CancelledByUser);
+                }
                 skip_uv = true;
                 send_status(
                     status,
@@ -424,6 +489,12 @@ pub fn register<Dev: FidoDevice>(
     callback: StateCallback<crate::Result<crate::RegisterResult>>,
     alive: &dyn Fn() -> bool,
 ) -> bool {
+    let internal_uv_only = args.internal_uv_only();
+    let uv_attempt_limit = args.extensions.local_uv_attempt_limit();
+    if uv_attempt_limit == 0 {
+        callback.call(Err(AuthenticatorError::CancelledByUser));
+        return false;
+    }
     let mut options = MakeCredentialsOptions::default();
 
     if dev.get_protocol() == FidoProtocol::CTAP2 {
@@ -505,6 +576,7 @@ pub fn register<Dev: FidoDevice>(
 
     let mut skip_uv = false;
     let mut pin = args.pin;
+    let mut biometric_failures = 0u8;
     while alive() {
         // Requesting both because pre-flighting (credential list filtering)
         // can potentially send GetAssertion-commands
@@ -524,6 +596,8 @@ pub fn register<Dev: FidoDevice>(
                 &status,
                 alive,
                 &mut pin,
+                internal_uv_only,
+                uv_attempt_limit,
             ),
             callback
         );
@@ -587,7 +661,7 @@ pub fn register<Dev: FidoDevice>(
                 return true;
             }
             Err(e) => {
-                handle_errors!(e, status, callback, pin_uv_auth_result, skip_uv);
+                handle_errors!(biometric e, status, callback, pin_uv_auth_result, skip_uv, internal_uv_only, biometric_failures, uv_attempt_limit);
             }
         }
     }
@@ -619,6 +693,22 @@ pub fn sign<Dev: FidoDevice>(
         }
     }
 
+    let internal_uv_only = args.internal_uv_only();
+    let uv_attempt_limit = args.extensions.local_uv_attempt_limit();
+    if uv_attempt_limit == 0 {
+        callback.call(Err(AuthenticatorError::CancelledByUser));
+        return false;
+    }
+    let local_pin_only = args.extensions.local_pin_only();
+    if local_pin_only
+        && (internal_uv_only
+            || args.pin.is_none()
+            || args.extensions.hmac_get_secret.is_some()
+            || args.extensions.prf.is_some())
+    {
+        callback.call(Err(AuthenticatorError::CancelledByUser));
+        return false;
+    }
     let mut allow_list = args.allow_list;
     let mut rp_id = RelyingParty::from(args.relying_party_id);
     let client_data_hash = ClientDataHash(args.client_data_hash);
@@ -653,8 +743,9 @@ pub fn sign<Dev: FidoDevice>(
         args.extensions.into(),
     );
 
-    let mut skip_uv = false;
+    let mut skip_uv = local_pin_only;
     let mut pin = args.pin;
+    let mut biometric_failures = 0u8;
     while alive() {
         let pin_uv_auth_result = unwrap_result!(
             determine_puap_if_needed(
@@ -666,6 +757,8 @@ pub fn sign<Dev: FidoDevice>(
                 &status,
                 alive,
                 &mut pin,
+                internal_uv_only,
+                uv_attempt_limit,
             ),
             callback
         );
@@ -733,7 +826,7 @@ pub fn sign<Dev: FidoDevice>(
         let mut results = match dev.send_msg_cancellable(&get_assertion, alive, Some(&status)) {
             Ok(results) => results,
             Err(e) => {
-                handle_errors!(e, status, callback, pin_uv_auth_result, skip_uv);
+                handle_errors!(biometric e, status, callback, pin_uv_auth_result, skip_uv, internal_uv_only, biometric_failures, uv_attempt_limit);
             }
         };
         // NOTE: We send here the whole array, in order to keep dependencies down. We could
@@ -913,7 +1006,7 @@ pub fn set_or_change_pin_helper<T: From<()>, Dev: FidoDevice>(
     callback.call(res.map(|_| T::from(())));
 }
 
-pub(crate) fn bio_enrollment(
+pub fn bio_enrollment(
     dev: &mut Device,
     puat_result: Option<PinUvAuthResult>,
     command: BioEnrollmentCmd,
@@ -1002,6 +1095,8 @@ pub(crate) fn bio_enrollment(
                     &status,
                     alive,
                     &mut pin,
+                    false,
+                    3,
                 ),
                 callback
             );
@@ -1272,6 +1367,8 @@ pub fn credential_management<Dev: FidoDevice>(
                     &status,
                     alive,
                     &mut pin,
+                    false,
+                    3,
                 ),
                 callback
             );
@@ -1556,6 +1653,8 @@ pub(crate) fn configure_authenticator(
                     &status,
                     alive,
                     &mut pin,
+                    false,
+                    3,
                 ),
                 callback
             );
@@ -1592,4 +1691,306 @@ pub(crate) fn configure_authenticator(
         }
     }
     false
+}
+
+#[cfg(all(test, feature = "local-biometric"))]
+mod local_biometric_policy_tests {
+    use super::*;
+    use crate::ctap2::commands::get_info::AuthenticatorInfo;
+    use crate::transport::platform::device::Device;
+    use std::sync::mpsc::channel;
+
+    fn uv_device() -> Device {
+        let mut dev = Device::new_skipping_serialization("biometric-token").unwrap();
+        let mut info = AuthenticatorInfo::default();
+        info.options.user_verification = Some(true);
+        info.options.client_pin = Some(true);
+        info.options.pin_uv_auth_token = Some(true);
+        info.options.bio_enroll = Some(true);
+        info.pin_protocols = Some(vec![1]);
+        info.extensions.push("hmac-secret".into());
+        dev.authenticator_info = Some(info);
+        dev
+    }
+
+    fn required_uv_request() -> GetAssertion {
+        GetAssertion::new(
+            ClientDataHash([0; 32]),
+            RelyingParty::from("login.example.org"),
+            vec![],
+            GetAssertionOptions::default(),
+            Default::default(),
+        )
+    }
+
+    #[test]
+    fn ctap21_uv_retry_budget_is_enforced_without_pin_prompts() {
+        use crate::crypto::PinUvAuthProtocol;
+        use crate::ctap2::commands::client_pin::{
+            ClientPinResponse, GetKeyAgreement, GetUvRetries,
+        };
+        for limit in [1u8, 2, 3] {
+            let mut dev = uv_device();
+            for _ in 0..limit {
+                // Inject at the transport boundary, before any real ECDH is required.
+                // This exercises the same error mapping and retry loop as the UV token request.
+                dev.add_upcoming_ctap2_request(&GetKeyAgreement::new(
+                    PinUvAuthProtocol::from_id(1).unwrap(),
+                ));
+                dev.add_upcoming_ctap_error(HIDError::Command(CommandError::StatusCode(
+                    StatusCode::UvInvalid,
+                    None,
+                )));
+                dev.add_upcoming_ctap2_request(&GetUvRetries::new());
+                dev.add_upcoming_ctap_response(ClientPinResponse {
+                    uv_retries: Some(10),
+                    ..Default::default()
+                });
+            }
+            let (status, receiver) = channel();
+            let result = determine_puap_if_needed(
+                &mut required_uv_request(),
+                &mut dev,
+                false,
+                PinUvAuthTokenPermission::GetAssertion,
+                UserVerificationRequirement::Required,
+                &status,
+                &|| true,
+                &mut None,
+                true,
+                limit,
+            );
+            assert!(matches!(result, Err(AuthenticatorError::CancelledByUser)));
+            let updates: Vec<_> = receiver.try_iter().collect();
+            assert_eq!(updates.len(), usize::from(limit));
+            assert!(updates.iter().all(|update| matches!(
+                update,
+                StatusUpdate::PinUvError(StatusPinUv::InvalidUv(Some(10)))
+            )));
+            assert!(dev.upcoming_requests.is_empty());
+            assert!(dev.upcoming_responses.is_empty());
+        }
+    }
+
+    #[test]
+    fn ctap21_lockout_and_pin_errors_never_request_pin_substitution() {
+        use crate::crypto::PinUvAuthProtocol;
+        use crate::ctap2::commands::client_pin::{
+            ClientPinResponse, GetKeyAgreement, GetPinRetries,
+        };
+        for invalid_pin in [false, true] {
+            let mut dev = uv_device();
+            dev.add_upcoming_ctap2_request(&GetKeyAgreement::new(
+                PinUvAuthProtocol::from_id(1).unwrap(),
+            ));
+            dev.add_upcoming_ctap_error(HIDError::Command(CommandError::StatusCode(
+                if invalid_pin {
+                    StatusCode::PinInvalid
+                } else {
+                    StatusCode::UvBlocked
+                },
+                None,
+            )));
+            if invalid_pin {
+                dev.add_upcoming_ctap2_request(&GetPinRetries::new());
+                dev.add_upcoming_ctap_response(ClientPinResponse {
+                    pin_retries: Some(8),
+                    ..Default::default()
+                });
+            }
+            let (status, receiver) = channel();
+            assert!(matches!(
+                determine_puap_if_needed(
+                    &mut required_uv_request(),
+                    &mut dev,
+                    false,
+                    PinUvAuthTokenPermission::GetAssertion,
+                    UserVerificationRequirement::Required,
+                    &status,
+                    &|| true,
+                    &mut None,
+                    true,
+                    3,
+                ),
+                Err(AuthenticatorError::CancelledByUser)
+            ));
+            assert!(receiver.try_recv().is_err());
+            assert!(dev.upcoming_requests.is_empty());
+            assert!(dev.upcoming_responses.is_empty());
+        }
+    }
+
+    #[test]
+    fn pin_only_management_mode_cannot_override_biometric_only_policy() {
+        for case in 0..4 {
+            let internal_uv_only = case == 1;
+            let mut dev = Device::new_skipping_serialization("selected-personal-token").unwrap();
+            let (status, _receiver) = channel();
+            let (tx, rx) = channel();
+            let args = SignArgs {
+                client_data_hash: [0; 32],
+                origin: "https://login.example.org".into(),
+                relying_party_id: "login.example.org".into(),
+                allow_list: vec![],
+                user_verification_req: UserVerificationRequirement::Required,
+                user_presence_req: true,
+                extensions: server::AuthenticationExtensionsClientInputs {
+                    local_pin_only: true,
+                    hmac_get_secret: (case == 2).then(Default::default),
+                    prf: (case == 3).then(Default::default),
+                    ..Default::default()
+                },
+                pin: (case != 0).then(|| Pin::new("only-management")),
+                use_ctap1_fallback: false,
+                internal_uv_only,
+            };
+            assert!(!sign(
+                &mut dev,
+                args,
+                status,
+                StateCallback::new(Box::new(move |r| {
+                    let _ = tx.send(r);
+                })),
+                &|| true
+            ));
+            assert!(matches!(
+                rx.recv().unwrap(),
+                Err(AuthenticatorError::CancelledByUser)
+            ));
+        }
+    }
+    #[test]
+    fn ctap20_biometric_failures_stop_after_three_without_pin_fallback() {
+        for limit in [1u8, 2, 3] {
+            let (status, receiver) = channel();
+            let (done, result) = channel();
+            let callback =
+                StateCallback::new(Box::new(move |r: Result<(), AuthenticatorError>| {
+                    let _ = done.send(r);
+                }));
+            let mut failures = 0u8;
+            let mut skip_uv = false;
+            loop {
+                let error =
+                    HIDError::Command(CommandError::StatusCode(StatusCode::OperationDenied, None));
+                handle_errors!(biometric error,status,callback,PinUvAuthResult::UsingInternalUv,skip_uv,true,failures,limit);
+            }
+            assert_eq!(failures, limit);
+            assert!(!skip_uv);
+            assert!(matches!(
+                result.recv().unwrap(),
+                Err(AuthenticatorError::CancelledByUser)
+            ));
+            assert_eq!(
+                receiver
+                    .try_iter()
+                    .filter(|s| matches!(s, StatusUpdate::PinUvError(StatusPinUv::InvalidUv(_))))
+                    .count(),
+                usize::from(limit)
+            );
+        }
+    }
+
+    #[test]
+    fn biometric_only_rejects_pin_and_ineligible_devices_before_any_ctap_command() {
+        for case in 0..9 {
+            let mut dev = Device::new_skipping_serialization("selected-personal-token").unwrap();
+            let mut info = AuthenticatorInfo::default();
+            info.options.user_verification = Some(true);
+            info.options.bio_enroll = Some(true);
+            info.extensions.push("hmac-secret".into());
+            match case {
+                0 | 1 => {}
+                2 => info.options.user_verification = Some(false),
+                3 => info.options.bio_enroll = None,
+                4 => info.extensions.clear(),
+                8 => dev.protocol = FidoProtocol::CTAP1,
+                _ => {}
+            }
+            if case != 5 {
+                dev.authenticator_info = Some(info);
+            }
+            let mut request = GetAssertion::new(
+                ClientDataHash([0; 32]),
+                RelyingParty::from("login.example.org"),
+                Vec::new(),
+                GetAssertionOptions::default(),
+                Default::default(),
+            );
+            let (status, receiver) = channel();
+            let mut pin = if case == 0 {
+                Some(Pin::new("do-not-substitute"))
+            } else {
+                None
+            };
+            let result = determine_puap_if_needed(
+                &mut request,
+                &mut dev,
+                case == 1,
+                PinUvAuthTokenPermission::GetAssertion,
+                if case == 7 {
+                    UserVerificationRequirement::Discouraged
+                } else {
+                    UserVerificationRequirement::Required
+                },
+                &status,
+                &|| true,
+                &mut pin,
+                true,
+                if case == 6 { 0 } else { 3 },
+            );
+            assert!(matches!(result, Err(AuthenticatorError::CancelledByUser)));
+            assert!(
+                receiver.try_recv().is_err(),
+                "must never request PIN fallback"
+            );
+            assert!(dev.upcoming_requests.is_empty());
+        }
+    }
+}
+
+#[cfg(test)]
+mod default_authentication_policy_tests {
+    use super::*;
+    use crate::ctap2::commands::get_info::AuthenticatorInfo;
+    use crate::transport::platform::device::Device;
+
+    #[test]
+    fn ordinary_authentication_still_requests_a_pin() {
+        let (status, receiver) = channel();
+        let worker = thread::spawn(move || {
+            let mut dev = Device::new_skipping_serialization("pin-token").unwrap();
+            let mut info = AuthenticatorInfo::default();
+            info.options.client_pin = Some(true);
+            dev.authenticator_info = Some(info);
+            let mut request = GetAssertion::new(
+                ClientDataHash([0; 32]),
+                RelyingParty::from("login.example.org"),
+                vec![],
+                GetAssertionOptions::default(),
+                Default::default(),
+            );
+            determine_puap_if_needed(
+                &mut request,
+                &mut dev,
+                false,
+                PinUvAuthTokenPermission::GetAssertion,
+                UserVerificationRequirement::Required,
+                &status,
+                &|| true,
+                &mut None,
+                false,
+                3,
+            )
+        });
+        let StatusUpdate::PinUvError(StatusPinUv::PinRequired(reply)) = receiver.recv().unwrap()
+        else {
+            panic!("ordinary PIN fallback changed")
+        };
+        drop(reply); // Simulate cancelling the ordinary PIN prompt.
+        assert!(matches!(
+            worker.join().unwrap(),
+            Err(AuthenticatorError::CancelledByUser)
+        ));
+    }
 }

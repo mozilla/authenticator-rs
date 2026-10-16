@@ -121,6 +121,7 @@ pub(crate) trait PinProtocolImpl: ClonablePinProtocolImpl {
         };
 
         let (shared_point, client_public_sec1) = ecdhe_p256_raw(peer_cose_ec2_key)?;
+        let shared_point = crate::secret::protect(shared_point);
 
         let client_cose_ec2_key =
             COSEEC2Key::from_sec1_uncompressed(Curve::SECP256R1, &client_public_sec1)?;
@@ -294,9 +295,12 @@ impl PinProtocolImpl for PinUvAuth2 {
         //
         // And for HKDF-SHA256 both Extract and Expand are instantiated with HMAC-SHA256.
 
-        let prk = hmac_sha256(&[0u8; 32], z)?;
-        let mut shared_secret = hmac_sha256(&prk, "CTAP2 HMAC key\x01".as_bytes())?;
-        shared_secret.append(&mut hmac_sha256(&prk, "CTAP2 AES key\x01".as_bytes())?);
+        let prk = crate::secret::protect(hmac_sha256(&[0u8; 32], z)?);
+        let hmac_key = crate::secret::protect(hmac_sha256(&prk, "CTAP2 HMAC key\x01".as_bytes())?);
+        let aes_key = crate::secret::protect(hmac_sha256(&prk, "CTAP2 AES key\x01".as_bytes())?);
+        let mut shared_secret = Vec::with_capacity(64);
+        shared_secret.extend_from_slice(&hmac_key);
+        shared_secret.extend_from_slice(&aes_key);
         Ok(shared_secret)
     }
 }
@@ -307,7 +311,8 @@ struct PublicInputs {
     peer: COSEKey,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
+#[cfg_attr(not(feature = "local-biometric"), derive(Debug))]
 pub struct SharedSecret {
     pub pin_protocol: PinUvAuthProtocol,
     key: Vec<u8>,
@@ -361,7 +366,8 @@ impl SharedSecret {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
+#[cfg_attr(not(feature = "local-biometric"), derive(Debug))]
 pub struct PinUvAuthToken {
     pub pin_protocol: PinUvAuthProtocol,
     pin_token: Vec<u8>,
@@ -373,13 +379,14 @@ impl PinUvAuthToken {
         let pin_auth = self.pin_protocol.0.authenticate(&self.pin_token, message)?;
         Ok(PinUvAuthParam {
             pin_auth,
-            pin_protocol: self.pin_protocol,
+            pin_protocol: self.pin_protocol.clone(),
             permissions: self.permissions,
         })
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
+#[cfg_attr(not(feature = "local-biometric"), derive(Debug))]
 pub struct PinUvAuthParam {
     pub(crate) pin_auth: Vec<u8>,
     pub pin_protocol: PinUvAuthProtocol,
@@ -1190,6 +1197,44 @@ pub fn parse_u2f_der_certificate(data: &[u8]) -> Result<U2FRegisterAnswer<'_>, C
         certificate: &data[0..end],
         signature: &data[end..],
     })
+}
+
+#[cfg(feature = "local-biometric")]
+impl std::fmt::Debug for SharedSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SharedSecret(REDACTED)")
+    }
+}
+#[cfg(feature = "local-biometric")]
+impl Drop for SharedSecret {
+    fn drop(&mut self) {
+        crate::secret::wipe(&mut self.key);
+    }
+}
+#[cfg(feature = "local-biometric")]
+impl std::fmt::Debug for PinUvAuthToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("PinUvAuthToken(REDACTED)")
+    }
+}
+#[cfg(feature = "local-biometric")]
+impl Drop for PinUvAuthToken {
+    fn drop(&mut self) {
+        crate::secret::wipe(&mut self.pin_token);
+    }
+}
+
+#[cfg(feature = "local-biometric")]
+impl std::fmt::Debug for PinUvAuthParam {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("PinUvAuthParam(REDACTED)")
+    }
+}
+#[cfg(feature = "local-biometric")]
+impl Drop for PinUvAuthParam {
+    fn drop(&mut self) {
+        crate::secret::wipe(&mut self.pin_auth);
+    }
 }
 
 #[cfg(all(test, not(feature = "crypto_dummy")))]

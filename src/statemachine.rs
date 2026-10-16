@@ -30,6 +30,7 @@ impl StateMachine {
     fn init_device(
         info: DeviceBuildParameters,
         selector: &Sender<DeviceSelectorEvent>,
+        _local_biometric: bool,
     ) -> Option<Device> {
         // Create a new device.
         let mut dev = match Device::new(info) {
@@ -41,6 +42,10 @@ impl StateMachine {
             }
         };
 
+        #[cfg(feature = "local-biometric")]
+        if _local_biometric {
+            dev.set_local_read_timeout(Some(1_000));
+        }
         // Try initializing it.
         if let Err(e) = dev.init() {
             warn!("error while initializing device: {}", e);
@@ -126,10 +131,32 @@ impl StateMachine {
             cbc.clone(),
             status,
             move |info, selector, status, alive| {
-                let mut dev = match Self::init_device(info, &selector) {
+                let mut dev = match Self::init_device(
+                    info,
+                    &selector,
+                    args.internal_uv_only() || args.extensions.local_device_path().is_some(),
+                ) {
                     Some(dev) => dev,
                     None => return,
                 };
+                if args.internal_uv_only()
+                    && dev.get_authenticator_info().is_none_or(|i| {
+                        i.options.user_verification != Some(true)
+                            || !i.supports_hmac_secret()
+                            || (i.options.bio_enroll.is_none()
+                                && i.options.user_verification_mgmt_preview.is_none())
+                    })
+                {
+                    let _ = selector.send(DeviceSelectorEvent::NotAToken(dev.id()));
+                    return;
+                }
+                #[cfg(feature = "local-biometric")]
+                if let Some(path) = args.extensions.local_device_path() {
+                    if !dev.matches_local_path(path) {
+                        let _ = selector.send(DeviceSelectorEvent::NotAToken(dev.id()));
+                        return;
+                    }
+                }
                 if !Self::wait_for_device_selector(&mut dev, &selector, &status, alive) {
                     return;
                 };
@@ -167,10 +194,32 @@ impl StateMachine {
             callback.clone(),
             status,
             move |info, selector, status, alive| {
-                let mut dev = match Self::init_device(info, &selector) {
+                let mut dev = match Self::init_device(
+                    info,
+                    &selector,
+                    args.internal_uv_only() || args.extensions.local_device_path().is_some(),
+                ) {
                     Some(dev) => dev,
                     None => return,
                 };
+                if args.internal_uv_only()
+                    && dev.get_authenticator_info().is_none_or(|i| {
+                        i.options.user_verification != Some(true)
+                            || !i.supports_hmac_secret()
+                            || (i.options.bio_enroll.is_none()
+                                && i.options.user_verification_mgmt_preview.is_none())
+                    })
+                {
+                    let _ = selector.send(DeviceSelectorEvent::NotAToken(dev.id()));
+                    return;
+                }
+                #[cfg(feature = "local-biometric")]
+                if let Some(path) = args.extensions.local_device_path() {
+                    if !dev.matches_local_path(path) {
+                        let _ = selector.send(DeviceSelectorEvent::NotAToken(dev.id()));
+                        return;
+                    }
+                }
                 if !Self::wait_for_device_selector(&mut dev, &selector, &status, alive) {
                     return;
                 };
@@ -215,7 +264,7 @@ impl StateMachine {
             callback.clone(),
             status,
             move |info, selector, status, alive| {
-                let mut dev = match Self::init_device(info, &selector) {
+                let mut dev = match Self::init_device(info, &selector, false) {
                     Some(dev) => dev,
                     None => return,
                 };
@@ -253,7 +302,7 @@ impl StateMachine {
             callback.clone(),
             status,
             move |info, selector, status, alive| {
-                let mut dev = match Self::init_device(info, &selector) {
+                let mut dev = match Self::init_device(info, &selector, false) {
                     Some(dev) => dev,
                     None => return,
                 };
@@ -304,7 +353,7 @@ impl StateMachine {
             callback.clone(),
             status,
             move |info, selector, status, alive| {
-                let mut dev = match Self::init_device(info, &selector) {
+                let mut dev = match Self::init_device(info, &selector, false) {
                     Some(dev) => dev,
                     None => return,
                 };
