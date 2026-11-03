@@ -37,7 +37,7 @@ use crate::ctap2::commands::{
 };
 use crate::ctap2::preflight::{
     do_credential_list_filtering_ctap1, do_credential_list_filtering_ctap2,
-    silently_discover_credentials,
+    silently_discover_app_id_credentials,
 };
 use crate::ctap2::server::{
     CredentialProtectionPolicy, RelyingParty, ResidentKeyRequirement, UserVerificationRequirement,
@@ -623,21 +623,15 @@ pub fn sign<Dev: FidoDevice>(
     let mut rp_id = RelyingParty::from(args.relying_party_id);
     let client_data_hash = ClientDataHash(args.client_data_hash);
     if let Some(ref app_id) = args.extensions.app_id {
-        if !allow_list.is_empty() {
-            // Try to silently discover U2F credentials that require the FIDO App ID extension. If
-            // any are found, we should use the alternate RP ID instead of the provided RP ID.
-            let alt_rp_id = RelyingParty::from(app_id);
-            let silent_creds = silently_discover_credentials(
-                dev,
-                &allow_list,
-                &alt_rp_id,
-                &client_data_hash,
-                &status,
-            );
-            if !silent_creds.is_empty() {
-                allow_list = silent_creds;
-                rp_id = alt_rp_id;
-            }
+        if let Some((app_id_rp, app_id_creds)) = silently_discover_app_id_credentials(
+            dev,
+            &allow_list,
+            app_id,
+            &client_data_hash,
+            &status,
+        ) {
+            allow_list = app_id_creds;
+            rp_id = app_id_rp;
         }
     }
 

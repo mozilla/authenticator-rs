@@ -37,8 +37,21 @@ pub enum DeviceSelectorEvent {
     DevicesAdded(Vec<DeviceID>),
     DeviceRemoved(DeviceID),
     NotAToken(DeviceID),
-    ImAToken((DeviceID, Sender<DeviceCommand>)),
+    ImAToken {
+        id: DeviceID,
+        tx: Sender<DeviceCommand>,
+        /// The token confirmed, without user interaction, that it holds one of the
+        /// credentials allowed by the request.
+        holds_credential: bool,
+    },
     SelectedToken(DeviceID),
+}
+
+/// A device that responded with "ImAToken".
+struct Token {
+    /// Channel on which the device waits for a DeviceCommand
+    tx: Sender<DeviceCommand>,
+    holds_credential: bool,
 }
 
 pub struct DeviceSelector {
@@ -57,9 +70,8 @@ impl DeviceSelector {
             // Device was added, but we wait for its response, if it is a token or not
             // We save both a write-only copy of the device (for cancellation) and it's thread
             let mut waiting_for_response = HashSet::new();
-            // Device IDs of devices that responded with "ImAToken" mapping to channels that are
-            // waiting to receive a DeviceCommand
-            let mut tokens = HashMap::new();
+            // Device IDs of devices that responded with "ImAToken"
+            let mut tokens: HashMap<DeviceID, Token> = HashMap::new();
             while alive() {
                 let d = Duration::from_secs(100);
                 let res = match selector_rec.recv_timeout(d) {
@@ -98,9 +110,9 @@ impl DeviceSelector {
                             //       stop blinking and select it right away. At the moment, I think this is a
                             //       too surprising behavior and therefore, we let the remaining device keep on blinking
                             //       since the user could add yet another device, instead of using the remaining one.
-                            tokens.iter().for_each(|(dev_id, tx)| {
+                            tokens.iter().for_each(|(dev_id, token)| {
                                 if dev_id == id {
-                                    let _ = tx.send(DeviceCommand::Removed);
+                                    let _ = token.tx.send(DeviceCommand::Removed);
                                 }
                             });
                             tokens.retain(|dev_id, _| dev_id != id);
@@ -131,26 +143,47 @@ impl DeviceSelector {
                         if waiting_for_response.is_empty() && tokens.is_empty() {
                             send_status(&status, StatusUpdate::NoDevicesFound);
                         }
-                    }
-                    DeviceSelectorEvent::ImAToken((id, tx)) => {
-                        let _ = waiting_for_response.remove(&id);
+                        // The selection was already made: the blinking tokens only listen for
+                        // `Cancel`, so running the code below this match again could send a
+                        // `Continue` that is never received.
                         if blinking {
+                            continue;
+                        }
+                    }
+                    DeviceSelectorEvent::ImAToken {
+                        id,
+                        tx,
+                        holds_credential,
+                    } => {
+                        let _ = waiting_for_response.remove(&id);
+                        tokens.insert(
+                            id.clone(),
+                            Token {
+                                tx,
+                                holds_credential,
+                            },
+                        );
+                        if blinking {
+                            // A credential holder cancels the tokens without one, and a token
+                            // without one is cancelled if there is a holder.
+                            Self::cancel_non_holders(&mut tokens);
                             // We are already blinking, so this new device should blink too.
-                            if tx.send(DeviceCommand::Blink).is_ok() {
-                                tokens.insert(id, tx.clone());
+                            if let Some(token) = tokens.get(&id) {
+                                if token.tx.send(DeviceCommand::Blink).is_err() {
+                                    tokens.remove(&id);
+                                }
                             }
                             continue;
-                        } else {
-                            tokens.insert(id, tx.clone());
                         }
                     }
                 }
 
                 // All known devices told us, whether they are tokens or not and we have at least one token
                 if waiting_for_response.is_empty() && !tokens.is_empty() {
+                    Self::cancel_non_holders(&mut tokens);
                     if tokens.len() == 1 {
-                        let (dev_id, tx) = tokens.drain().next().unwrap(); // We just checked that it can't be empty
-                        if tx.send(DeviceCommand::Continue).is_err() {
+                        let (dev_id, token) = tokens.drain().next().unwrap(); // We just checked that it can't be empty
+                        if token.tx.send(DeviceCommand::Continue).is_err() {
                             // Device thread died in the meantime (which shouldn't happen).
                             // Tokens is empty, so we just start over again
                             continue;
@@ -160,10 +193,10 @@ impl DeviceSelector {
                     } else {
                         blinking = true;
 
-                        tokens.iter().for_each(|(_dev, tx)| {
+                        tokens.values().for_each(|token| {
                             // A send operation can only fail if the receiving end of a channel is disconnected, implying that the data could never be received.
                             // We ignore errors here for now, but should probably remove the device in such a case (even though it theoretically can't happen)
-                            let _ = tx.send(DeviceCommand::Blink);
+                            let _ = token.tx.send(DeviceCommand::Blink);
                         });
                     }
                 }
@@ -179,12 +212,28 @@ impl DeviceSelector {
         self.sender.clone()
     }
 
-    fn cancel_all(tokens: HashMap<DeviceID, Sender<DeviceCommand>>, exclude: Option<&DeviceID>) {
-        for (dev_id, tx) in tokens.iter() {
+    fn cancel_all(tokens: HashMap<DeviceID, Token>, exclude: Option<&DeviceID>) {
+        for (dev_id, token) in tokens.iter() {
             if Some(dev_id) != exclude {
-                let _ = tx.send(DeviceCommand::Cancel);
+                let _ = token.tx.send(DeviceCommand::Cancel);
             }
         }
+    }
+
+    /// Only the tokens holding an allowed credential can answer the request: don't ask the user to
+    /// choose among the others. If no token confirmed holding one (registration, empty allow list,
+    /// or credentials that can't be discovered without user verification), all tokens stay
+    /// candidates.
+    fn cancel_non_holders(tokens: &mut HashMap<DeviceID, Token>) {
+        if !tokens.values().any(|token| token.holds_credential) {
+            return;
+        }
+        tokens.retain(|_, token| {
+            if !token.holds_credential {
+                let _ = token.tx.send(DeviceCommand::Cancel);
+            }
+            token.holds_credential
+        });
     }
 
     pub fn stop(&mut self) {
@@ -238,14 +287,23 @@ pub mod tests {
         dev.set_authenticator_info(info);
     }
 
-    fn send_i_am_token(dev: &Device, selector: &DeviceSelector) {
+    fn send_token(dev: &Device, selector: &DeviceSelector, holds_credential: bool) {
         selector
             .sender
-            .send(DeviceSelectorEvent::ImAToken((
-                dev.id(),
-                dev.sender.clone().unwrap(),
-            )))
+            .send(DeviceSelectorEvent::ImAToken {
+                id: dev.id(),
+                tx: dev.sender.clone().unwrap(),
+                holds_credential,
+            })
             .unwrap();
+    }
+
+    fn send_i_am_token(dev: &Device, selector: &DeviceSelector) {
+        send_token(dev, selector, false);
+    }
+
+    fn send_i_hold_a_credential(dev: &Device, selector: &DeviceSelector) {
+        send_token(dev, selector, true);
     }
 
     fn send_no_token(dev: &Device, selector: &DeviceSelector) {
@@ -508,6 +566,230 @@ pub mod tests {
             devices[4].receiver.as_ref().unwrap().recv().unwrap(),
             DeviceCommand::Continue
         );
+    }
+
+    #[test]
+    fn test_device_selector_continues_with_only_credential_holder() {
+        let mut devices = vec![
+            Device::new("device selector 1").unwrap(),
+            Device::new("device selector 2").unwrap(),
+        ];
+        make_device_with_pin(&mut devices[0]);
+        make_device_with_pin(&mut devices[1]);
+
+        let (tx, rx) = channel();
+        let selector = DeviceSelector::run(tx);
+        add_devices(devices.iter(), &selector);
+
+        send_i_am_token(&devices[0], &selector);
+        send_i_hold_a_credential(&devices[1], &selector);
+
+        // Only one token can answer the request: no need to ask the user to choose.
+        assert_eq!(
+            devices[1].receiver.as_ref().unwrap().recv().unwrap(),
+            DeviceCommand::Continue
+        );
+        assert_eq!(
+            devices[0].receiver.as_ref().unwrap().recv().unwrap(),
+            DeviceCommand::Cancel
+        );
+        // No status update, and the selector may already have exited, closing the channel.
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn test_device_selector_blinks_only_credential_holders() {
+        let mut devices = vec![
+            Device::new("device selector 1").unwrap(),
+            Device::new("device selector 2").unwrap(),
+            Device::new("device selector 3").unwrap(),
+            Device::new("device selector 4").unwrap(),
+            Device::new("device selector 5").unwrap(),
+        ];
+        for device in devices.iter_mut() {
+            make_device_with_pin(device);
+        }
+
+        let (tx, rx) = channel();
+        let selector = DeviceSelector::run(tx);
+        // The last two are plugged in once the user is already choosing.
+        add_devices(devices.iter().take(3), &selector);
+
+        send_i_hold_a_credential(&devices[0], &selector);
+        send_i_am_token(&devices[1], &selector);
+        send_i_hold_a_credential(&devices[2], &selector);
+
+        assert_eq!(
+            devices[1].receiver.as_ref().unwrap().recv().unwrap(),
+            DeviceCommand::Cancel
+        );
+        for idx in [0, 2] {
+            assert_eq!(
+                devices[idx].receiver.as_ref().unwrap().recv().unwrap(),
+                DeviceCommand::Blink
+            );
+        }
+
+        send_i_am_token(&devices[3], &selector);
+        assert_eq!(
+            devices[3].receiver.as_ref().unwrap().recv().unwrap(),
+            DeviceCommand::Cancel
+        );
+        send_i_hold_a_credential(&devices[4], &selector);
+        assert_eq!(
+            devices[4].receiver.as_ref().unwrap().recv().unwrap(),
+            DeviceCommand::Blink
+        );
+        assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
+    }
+
+    #[test]
+    fn test_device_selector_late_credential_holder_cancels_the_others() {
+        let mut devices = vec![
+            Device::new("device selector 1").unwrap(),
+            Device::new("device selector 2").unwrap(),
+            Device::new("device selector 3").unwrap(),
+        ];
+        for device in devices.iter_mut() {
+            make_device_with_pin(device);
+        }
+
+        let (tx, rx) = channel();
+        let selector = DeviceSelector::run(tx);
+        add_devices(devices.iter().take(2), &selector);
+
+        send_i_am_token(&devices[0], &selector);
+        send_i_am_token(&devices[1], &selector);
+        for idx in [0, 1] {
+            assert_eq!(
+                devices[idx].receiver.as_ref().unwrap().recv().unwrap(),
+                DeviceCommand::Blink
+            );
+        }
+
+        // The token holding the credential is plugged in while the user is choosing.
+        send_i_hold_a_credential(&devices[2], &selector);
+        assert_eq!(
+            devices[2].receiver.as_ref().unwrap().recv().unwrap(),
+            DeviceCommand::Blink
+        );
+        for idx in [0, 1] {
+            assert_eq!(
+                devices[idx]
+                    .receiver
+                    .as_ref()
+                    .unwrap()
+                    .recv_timeout(Duration::from_millis(500)),
+                Ok(DeviceCommand::Cancel)
+            );
+        }
+        assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
+    }
+
+    #[test]
+    fn test_device_selector_forgets_removed_credential_holders() {
+        let mut devices = vec![
+            Device::new("device selector 1").unwrap(),
+            Device::new("device selector 2").unwrap(),
+            Device::new("device selector 3").unwrap(),
+            Device::new("device selector 4").unwrap(),
+            Device::new("device selector 5").unwrap(),
+        ];
+        for device in devices.iter_mut() {
+            make_device_with_pin(device);
+        }
+
+        let (tx, rx) = channel();
+        let selector = DeviceSelector::run(tx);
+        add_devices(devices.iter().take(2), &selector);
+
+        send_i_hold_a_credential(&devices[0], &selector);
+        send_i_hold_a_credential(&devices[1], &selector);
+        for idx in [0, 1] {
+            assert_eq!(
+                devices[idx].receiver.as_ref().unwrap().recv().unwrap(),
+                DeviceCommand::Blink
+            );
+        }
+        remove_device(&devices[0], &selector);
+        remove_device(&devices[1], &selector);
+        assert!(matches!(
+            rx.recv_timeout(Duration::from_millis(500)),
+            Ok(StatusUpdate::NoDevicesFound)
+        ));
+
+        // No credential holder left: all new tokens are candidates again.
+        add_devices(devices[2..4].iter(), &selector);
+        send_i_am_token(&devices[2], &selector);
+        send_i_am_token(&devices[3], &selector);
+        for idx in [2, 3] {
+            assert_eq!(
+                devices[idx].receiver.as_ref().unwrap().recv().unwrap(),
+                DeviceCommand::Blink
+            );
+        }
+        send_i_am_token(&devices[4], &selector);
+        assert_eq!(
+            devices[4].receiver.as_ref().unwrap().recv().unwrap(),
+            DeviceCommand::Blink
+        );
+    }
+
+    #[test]
+    fn test_device_selector_keeps_blinking_after_late_non_token() {
+        let mut devices = vec![
+            Device::new("device selector 1").unwrap(),
+            Device::new("device selector 2").unwrap(),
+            Device::new("device selector 3").unwrap(),
+            Device::new("device selector 4").unwrap(),
+            Device::new("device selector 5").unwrap(),
+        ];
+        for device in devices.iter_mut().take(3) {
+            make_device_with_pin(device);
+        }
+
+        let (tx, _rx) = channel();
+        let selector = DeviceSelector::run(tx);
+        add_devices(devices.iter().take(2), &selector);
+        send_i_am_token(&devices[0], &selector);
+        send_i_am_token(&devices[1], &selector);
+        for idx in [0, 1] {
+            assert_eq!(
+                devices[idx].receiver.as_ref().unwrap().recv().unwrap(),
+                DeviceCommand::Blink
+            );
+        }
+        send_i_hold_a_credential(&devices[2], &selector);
+        assert_eq!(
+            devices[2].receiver.as_ref().unwrap().recv().unwrap(),
+            DeviceCommand::Blink
+        );
+
+        // A device that turns out not to be a token must not end the selection: the blinking
+        // token only listens for `Cancel`, a `Continue` sent now would be lost.
+        add_devices(devices[3..4].iter(), &selector);
+        send_no_token(&devices[3], &selector);
+
+        // The selector is still choosing: a late credential holder blinks too.
+        make_device_with_pin(&mut devices[4]);
+        let _ = selector.sender.send(DeviceSelectorEvent::ImAToken {
+            id: devices[4].id(),
+            tx: devices[4].sender.clone().unwrap(),
+            holds_credential: true,
+        });
+        // Bounded wait: a selector that already exited would never answer.
+        assert_eq!(
+            devices[4]
+                .receiver
+                .as_ref()
+                .unwrap()
+                .recv_timeout(Duration::from_millis(500)),
+            Ok(DeviceCommand::Blink)
+        );
+        assert!(matches!(
+            devices[2].receiver.as_ref().unwrap().try_recv(),
+            Err(TryRecvError::Empty)
+        ));
     }
 
     #[test]

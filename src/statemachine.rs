@@ -4,7 +4,12 @@
 
 use crate::authenticatorservice::{RegisterArgs, SignArgs};
 use crate::ctap2;
+use crate::ctap2::client_data::ClientDataHash;
 use crate::ctap2::commands::client_pin::Pin;
+use crate::ctap2::preflight::{
+    silently_discover_app_id_credentials, silently_discover_credentials,
+};
+use crate::ctap2::server::{RelyingParty, UserVerificationRequirement};
 use crate::errors::AuthenticatorError;
 use crate::statecallback::StateCallback;
 use crate::status_update::{send_status, InteractiveUpdate};
@@ -51,15 +56,55 @@ impl StateMachine {
         Some(dev)
     }
 
+    /// Asks the token, without user interaction, whether it holds one of the credentials allowed
+    /// by the request, so that the user is only asked to choose among tokens that can answer it.
+    fn holds_allowed_credential(
+        dev: &mut Device,
+        args: &SignArgs,
+        status: &Sender<crate::StatusUpdate>,
+    ) -> bool {
+        // Holding the credential doesn't help a token that `ctap2::sign` rejects anyway.
+        if dev.get_protocol() == FidoProtocol::CTAP1
+            && args.user_verification_req == UserVerificationRequirement::Required
+        {
+            return false;
+        }
+        let client_data_hash = ClientDataHash(args.client_data_hash);
+        let holds_app_id_credential = args.extensions.app_id.as_ref().is_some_and(|app_id| {
+            silently_discover_app_id_credentials(
+                dev,
+                &args.allow_list,
+                app_id,
+                &client_data_hash,
+                status,
+            )
+            .is_some()
+        });
+        holds_app_id_credential
+            || !silently_discover_credentials(
+                dev,
+                &args.allow_list,
+                &RelyingParty::from(args.relying_party_id.as_str()),
+                &client_data_hash,
+                status,
+            )
+            .is_empty()
+    }
+
     fn wait_for_device_selector(
         dev: &mut Device,
+        holds_credential: bool,
         selector: &Sender<DeviceSelectorEvent>,
         status: &Sender<crate::StatusUpdate>,
         keep_alive: &dyn Fn() -> bool,
     ) -> bool {
         let (tx, rx) = channel();
         if selector
-            .send(DeviceSelectorEvent::ImAToken((dev.id(), tx)))
+            .send(DeviceSelectorEvent::ImAToken {
+                id: dev.id(),
+                tx,
+                holds_credential,
+            })
             .is_err()
         {
             // If we fail to register with the device selector, then we're not going
@@ -130,7 +175,7 @@ impl StateMachine {
                     Some(dev) => dev,
                     None => return,
                 };
-                if !Self::wait_for_device_selector(&mut dev, &selector, &status, alive) {
+                if !Self::wait_for_device_selector(&mut dev, false, &selector, &status, alive) {
                     return;
                 };
 
@@ -171,13 +216,26 @@ impl StateMachine {
                     Some(dev) => dev,
                     None => return,
                 };
-                if !Self::wait_for_device_selector(&mut dev, &selector, &status, alive) {
-                    return;
-                };
-
+                // Before the selection, so that the silent discovery speaks the protocol of the
+                // actual request.
                 if args.use_ctap1_fallback {
                     dev.downgrade_to_ctap1();
                 }
+                let holds_credential = Self::holds_allowed_credential(&mut dev, &args, &status);
+                // The token may have been removed during the silent discovery, whose errors
+                // read as "no credential": it must not become a candidate.
+                if !alive() {
+                    return;
+                }
+                if !Self::wait_for_device_selector(
+                    &mut dev,
+                    holds_credential,
+                    &selector,
+                    &status,
+                    alive,
+                ) {
+                    return;
+                };
 
                 info!("Device {:?} continues with the signing process", dev.id());
                 if ctap2::sign(&mut dev, args.clone(), status, callback.clone(), alive) {
@@ -226,7 +284,7 @@ impl StateMachine {
                     return;
                 }
 
-                if !Self::wait_for_device_selector(&mut dev, &selector, &status, alive) {
+                if !Self::wait_for_device_selector(&mut dev, false, &selector, &status, alive) {
                     return;
                 };
                 ctap2::reset_helper(&mut dev, selector, status, callback.clone(), alive);
@@ -264,7 +322,7 @@ impl StateMachine {
                     return;
                 }
 
-                if !Self::wait_for_device_selector(&mut dev, &selector, &status, alive) {
+                if !Self::wait_for_device_selector(&mut dev, false, &selector, &status, alive) {
                     return;
                 };
 
@@ -315,7 +373,7 @@ impl StateMachine {
                     return;
                 }
 
-                if !Self::wait_for_device_selector(&mut dev, &selector, &status, alive) {
+                if !Self::wait_for_device_selector(&mut dev, false, &selector, &status, alive) {
                     return;
                 };
 
@@ -419,5 +477,115 @@ impl StateMachine {
         );
 
         self.transaction = Some(try_or!(transaction, move |e| cbc.call(Err(e))));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ctap2::commands::{CommandError, StatusCode};
+    use crate::ctap2::preflight::tests::{
+        new_assertion_response, new_check_key_handle, new_credential, new_silent_assert,
+    };
+    use crate::ctap2::server::{
+        AuthenticationExtensionsClientInputs, PublicKeyCredentialDescriptor,
+        UserVerificationRequirement,
+    };
+    use crate::transport::device_selector::tests::{make_device_simple_u2f, make_device_with_pin};
+    use crate::transport::errors::HIDError;
+
+    fn sign_args(allow_list: &[PublicKeyCredentialDescriptor], app_id: Option<&str>) -> SignArgs {
+        SignArgs {
+            client_data_hash: [0; 32],
+            origin: "https://example.com".to_string(),
+            relying_party_id: "example.com".to_string(),
+            allow_list: allow_list.to_vec(),
+            user_verification_req: UserVerificationRequirement::Preferred,
+            user_presence_req: true,
+            extensions: AuthenticationExtensionsClientInputs {
+                app_id: app_id.map(str::to_string),
+                ..Default::default()
+            },
+            pin: None,
+            use_ctap1_fallback: false,
+        }
+    }
+
+    fn no_credentials() -> HIDError {
+        HIDError::Command(CommandError::StatusCode(StatusCode::NoCredentials, None))
+    }
+
+    #[test]
+    fn test_holds_credential_registered_under_app_id() {
+        let mut dev = Device::new_skipping_serialization("statemachine").unwrap();
+        make_device_with_pin(&mut dev);
+        let allow_list = vec![new_credential(1, 4)];
+        let app_id_rp = RelyingParty::from("https://example.com/appid");
+        dev.add_upcoming_ctap2_request(&new_silent_assert(&app_id_rp, &allow_list));
+        dev.add_upcoming_ctap_response(vec![new_assertion_response(
+            &app_id_rp,
+            Some(&allow_list[0]),
+        )]);
+
+        let (tx, _rx) = channel();
+        let args = sign_args(&allow_list, Some("https://example.com/appid"));
+        assert!(StateMachine::holds_allowed_credential(&mut dev, &args, &tx));
+    }
+
+    #[test]
+    fn test_holds_credential_registered_under_rp_id_despite_app_id() {
+        let mut dev = Device::new_skipping_serialization("statemachine").unwrap();
+        make_device_with_pin(&mut dev);
+        let allow_list = vec![new_credential(1, 4)];
+        let app_id_rp = RelyingParty::from("https://example.com/appid");
+        let rp = RelyingParty::from("example.com");
+        dev.add_upcoming_ctap2_request(&new_silent_assert(&app_id_rp, &allow_list));
+        dev.add_upcoming_ctap2_request(&new_silent_assert(&rp, &allow_list));
+        dev.add_upcoming_ctap_error(no_credentials());
+        dev.add_upcoming_ctap_response(vec![new_assertion_response(&rp, Some(&allow_list[0]))]);
+
+        let (tx, _rx) = channel();
+        let args = sign_args(&allow_list, Some("https://example.com/appid"));
+        assert!(StateMachine::holds_allowed_credential(&mut dev, &args, &tx));
+    }
+
+    #[test]
+    fn test_ctap1_token_cannot_answer_when_user_verification_is_required() {
+        let mut dev = Device::new_skipping_serialization("statemachine").unwrap();
+        make_device_simple_u2f(&mut dev);
+        let allow_list = vec![new_credential(1, 4)];
+        let rp = RelyingParty::from("example.com");
+        let client_data_hash = ClientDataHash([0; 32]);
+        // The token holds the key handle, but `ctap2::sign` rejects a CTAP1 token when user
+        // verification is required.
+        dev.add_upcoming_ctap1_request(&new_check_key_handle(
+            &rp,
+            &client_data_hash,
+            &allow_list[0],
+        ));
+        dev.add_upcoming_ctap_response(());
+
+        let (tx, _rx) = channel();
+        let mut args = sign_args(&allow_list, None);
+        args.user_verification_req = UserVerificationRequirement::Required;
+        assert!(!StateMachine::holds_allowed_credential(
+            &mut dev, &args, &tx
+        ));
+    }
+
+    #[test]
+    fn test_does_not_hold_credential() {
+        let mut dev = Device::new_skipping_serialization("statemachine").unwrap();
+        make_device_with_pin(&mut dev);
+        let allow_list = vec![new_credential(1, 4)];
+        let rp = RelyingParty::from("example.com");
+        dev.add_upcoming_ctap2_request(&new_silent_assert(&rp, &allow_list));
+        dev.add_upcoming_ctap_error(no_credentials());
+
+        let (tx, _rx) = channel();
+        let args = sign_args(&allow_list, None);
+        assert!(!StateMachine::holds_allowed_credential(
+            &mut dev, &args, &tx
+        ));
     }
 }
